@@ -24,7 +24,7 @@ from fastapi import FastAPI, Query, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from . import __version__, build, coverage, stac, swd
+from . import __version__, build, coverage, names, stac, swd
 from .config import Config
 from .fetch import STATS
 from .manifest import Pins
@@ -242,8 +242,10 @@ def _dir_bytes(path: Path) -> int:
     return total
 
 
-def create_app(cfg: Config | None = None, builders=None, grid: np.ndarray | None = None) -> FastAPI:
+def create_app(cfg: Config | None = None, builders=None, grid: np.ndarray | None = None,
+               gazetteer: names.Gazetteer | None = None) -> FastAPI:
     cfg = cfg or Config.from_env()
+    gaz = gazetteer or names.Gazetteer(cfg)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -253,6 +255,8 @@ def create_app(cfg: Config | None = None, builders=None, grid: np.ndarray | None
         q.start()
         app.state.cfg, app.state.store, app.state.queue = cfg, store, q
         app.state.scratch = (0.0, 0)
+        if names.index_path(cfg).exists():  # load now; a missing index is fetched and built on the first /place
+            gaz.ensure()
         log.info("swissdata %s: store %s (%d cells), %d workers", __version__, cfg.store, store.count, cfg.max_downloads)
         yield
         q.stop()
@@ -302,12 +306,22 @@ def create_app(cfg: Config | None = None, builders=None, grid: np.ndarray | None
             "scratch": {"bytes": scratch, "capBytes": cfg.scratch_cap_bytes},
             "upstream": {"requests": STATS.requests, "errors": STATS.errors, "lastError": STATS.last_error,
                          "downloads": STATS.downloads, "downloadBytes": STATS.download_bytes},
-            "versions": {"tlm": pins.get("tlm", "ch")[1], "boundaries": pins.get("boundaries", "ch")[1]},
+            "versions": {"tlm": pins.get("tlm", "ch")[1], "boundaries": pins.get("boundaries", "ch")[1],
+                         "names": gaz.item},
         }
 
     @app.get("/place")
-    def place(q: str = "", limit: int = 10):
-        return JSONResponse({"error": "gazetteer not implemented yet"}, status_code=501)
+    def place(q: str = Query("", max_length=200), limit: int = Query(10, ge=1, le=names.MAX_LIMIT),
+              mode: str = "prefix"):
+        if mode not in ("prefix", "exact"):
+            return JSONResponse({"error": "mode must be prefix or exact"}, status_code=400)
+        idx = gaz.index
+        if idx is None:
+            gaz.ensure()
+            state = gaz.state()
+            return JSONResponse({"error": gaz.error if state == "error" else "the place index is being built",
+                                 "state": state, "retryAfterS": 30 if state == "error" else 10}, status_code=503)
+        return {"results": idx.search(q, limit, exact=mode == "exact")}
 
     return app
 

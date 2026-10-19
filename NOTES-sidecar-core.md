@@ -83,7 +83,18 @@ tolerance is ±0.1 m (`tests/test_network.py`).
     the mod must send it this way.
   - Corridor: `max(500, 60·speed)` m long and ±500 m wide, only when `speedMps > 0`.
   - Cells are queued nearest-first; `queued` counts newly queued cells only.
-- `/place` returns 501 (gazetteer not in M1).
+- `/place` (gazetteer, `swissdata/names.py`):
+  - Source: swissNAMES3D CSV zip (`swissnames3d_<year>_2056.csv.zip`, 33 MB, newest STAC item, pinned as
+    `names/ch`). Only `swissNAMES3D_PKT.csv` and `_PLY.csv` are read; `_LIN` (roads, rivers) is skipped.
+  - Built in a child `python -I -m swissdata.names build` (untrusted CSV: capped member size, field size limit,
+    rows with bad coordinates or names skipped, refuses to write if a large zip yields < 1000 places).
+    Index `<store>/names/places.v1.tsv.gz`: 91,424 places, 1.4 MB; parse ~2 s, load 0.35 s, query < 3 ms.
+  - Settlements are the `TLM_SIEDLUNGSNAME_ZENTRUM` points (Ort, Ortsteil, Quartier, Quartierteil) sized by
+    EINWOHNERKATEGORIE. Bus stops, exits, field names (Flurname), land-use areas and border stones are left out.
+  - One entry per object UUID; exonyms (`informell`) become aliases; `Namenspaar` names are split on "/".
+    Near-duplicates (same name and tier within 1.5 km, lakes 5 km) collapse.
+  - Started at startup when the index exists, else on the first `/place` (503 until ready; retries after 5 min
+    on error). CLI: `python -I -m swissdata.names search Zofingen`.
 - `/status.versions.tlm` stays null until sidecar-tlm pins it.
 
 ## Dev bbox guard

@@ -1,0 +1,23 @@
+﻿UUID;NAME;STATUS;SPRACHCODE;NAMEN_TYP;NAME_UUID;NAMENGRUPPE_UUID;OBJEKTART;OBJEKTKLASSE_TLM;GEBAEUDENUTZUNG;HOEHE;EINWOHNERKATEGORIE;E;N;Z
+{ZH};Zürich;offiziell;Hochdeutsch inkl. Lokalsprachen;Endonym;{n1};{g1};Ort;TLM_SIEDLUNGSNAME_ZENTRUM;k_W;;> 100'000;2683500;1247184;418
+{GE};Genève;offiziell;Franzoesisch inkl. Lokalsprachen;Endonym;{n2};{g2};Ort;TLM_SIEDLUNGSNAME_ZENTRUM;k_W;;> 100'000;2500226;1118241;376
+{GE};Genf;informell;Hochdeutsch inkl. Lokalsprachen;Exonym;{n3};{g2};Ort;TLM_SIEDLUNGSNAME_ZENTRUM;k_W;;> 100'000;2500226;1118241;376
+{GE};Ginevra;informell;Italienisch inkl. Lokalsprachen;Exonym;{n4};{g2};Ort;TLM_SIEDLUNGSNAME_ZENTRUM;k_W;;> 100'000;2500226;1118241;376
+{BI};Biel/Bienne;offiziell;mehrsprachig;Namenspaar;{n5};{g3};Ort;TLM_SIEDLUNGSNAME_ZENTRUM;k_W;;50'000 bis 100'000;2585470;1220617;434
+{BH};Biel;offiziell;Hochdeutsch inkl. Lokalsprachen;einfacher Name;{n6};;Ort;TLM_SIEDLUNGSNAME_ZENTRUM;k_W;;< 20;2620588;1250485;687
+{ZO};Zofingen;offiziell;Hochdeutsch inkl. Lokalsprachen;einfacher Name;{n7};;Ort;TLM_SIEDLUNGSNAME_ZENTRUM;k_W;;10'000 bis 49'999;2638356;1237642;439
+{ZOS};Zofingen;offiziell;Hochdeutsch inkl. Lokalsprachen;einfacher Name;{n7};;Haltestelle Bahn;TLM_HALTESTELLE;k_W;;k_W;2638153;1237579;431
+{ZOB};Zofingen;offiziell;Hochdeutsch inkl. Lokalsprachen;einfacher Name;{n7};;Haltestelle Bus;TLM_HALTESTELLE;k_W;;k_W;2638200;1237600;431
+{IL};Interlaken;offiziell;Hochdeutsch inkl. Lokalsprachen;einfacher Name;{n8};;Ort;TLM_SIEDLUNGSNAME_ZENTRUM;k_W;;2'000 bis 9'999;2631796;1170489;564
+{ILO};Interlaken Ost;offiziell;Hochdeutsch inkl. Lokalsprachen;einfacher Name;{n9};;Haltestelle Bahn;TLM_HALTESTELLE;k_W;;k_W;2633020;1170800;567
+{GP1};Grimselpass;offiziell;Hochdeutsch inkl. Lokalsprachen;einfacher Name;{n10};;Pass;TLM_NAME_PKT;k_W;2163;k_W;2668880;1157032;2163
+{GP2};Grimselpass;offiziell;Hochdeutsch inkl. Lokalsprachen;einfacher Name;{n10};;Strassenpass;TLM_NAME_PKT;k_W;2164;k_W;2668937;1157087;2164
+{GS};Grimselstrasse;offiziell;Hochdeutsch inkl. Lokalsprachen;einfacher Name;{n11};;Quartierteil;TLM_SIEDLUNGSNAME_ZENTRUM;k_W;;2'000 bis 9'999;2679434;1248691;407
+{SM};St. Moritz;offiziell;Hochdeutsch inkl. Lokalsprachen;einfacher Name;{n12};;Ort;TLM_SIEDLUNGSNAME_ZENTRUM;k_W;;2'000 bis 9'999;2784500;1152600;1822
+{AX};Biel/Bienne;offiziell;Hochdeutsch inkl. Lokalsprachen;einfacher Name;{n13};;Ausfahrt;TLM_AUS_EINFAHRT;k_W;;k_W;2586548;1223212;535
+{FL};Biel;offiziell;Hochdeutsch inkl. Lokalsprachen;einfacher Name;{n6};;Flurname swisstopo;TLM_FLURNAME;k_W;;k_W;2620000;1250000;600
+{BAD1};Nowhere;offiziell;Hochdeutsch inkl. Lokalsprachen;einfacher Name;{x};;Ort;TLM_SIEDLUNGSNAME_ZENTRUM;k_W;;< 20;9999999;1200000;500
+{BAD2};Garbage;offiziell;Hochdeutsch inkl. Lokalsprachen;einfacher Name;{x};;Ort;TLM_SIEDLUNGSNAME_ZENTRUM;k_W;;< 20;not-a-number;1200000;500
+{BAD3};;offiziell;Hochdeutsch inkl. Lokalsprachen;einfacher Name;{x};;Ort;TLM_SIEDLUNGSNAME_ZENTRUM;k_W;;< 20;2600000;1200000;500
+{BAD4};short;row
+{HI};Höhenweg;offiziell;Hochdeutsch inkl. Lokalsprachen;einfacher Name;{n14};;Ort;TLM_SIEDLUNGSNAME_ZENTRUM;k_W;;< 20;2600000;1200000;99999

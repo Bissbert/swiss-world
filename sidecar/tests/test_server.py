@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
-from swissdata import build, coverage, server, swd
+from swissdata import build, coverage, names, server, swd
 from swissdata.config import Config
 
 E, N = 2631, 1170
@@ -38,13 +38,21 @@ def grid_inside():
     return g
 
 
+class NoGazetteer(names.Gazetteer):
+    """Never builds (that would download swissNAMES3D); /place stays 503. See test_names.py."""
+
+    def ensure(self):
+        pass
+
+
 @pytest.fixture
 def setup(tmp_path):
     def make(dev_bbox=False):
         cfg = Config(raw=tmp_path / "raw", store=tmp_path / "store", scratch=tmp_path / "scratch",
                      max_downloads=1, dev_bbox=dev_bbox)
         terr = GatedTerrain()
-        app = server.create_app(cfg, builders=[terr, build.DefaultSurface()], grid=grid_inside())
+        app = server.create_app(cfg, builders=[terr, build.DefaultSurface()], grid=grid_inside(),
+                                gazetteer=NoGazetteer(cfg))
         return cfg, terr, app
     return make
 
@@ -128,7 +136,7 @@ def test_prefetch_generated_status_place(setup):
         st = client.get("/status").json()
         assert set(st) == {"queue", "store", "scratch", "upstream", "versions"}
         assert st["store"]["capBytes"] == 12_000_000_000
-        assert client.get("/place", params={"q": "Bern"}).status_code == 501
+        assert client.get("/place", params={"q": "Bern"}).status_code == 503
         assert client.get("/wait", params={"cell": "nope"}).status_code == 400
         assert client.post("/request", json={"cells": [[E, N]], "priority": "later"}).status_code == 400
 

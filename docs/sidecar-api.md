@@ -70,13 +70,25 @@ The mod reports cells whose chunks are all generated. These are evicted first wh
  "store": {"cells": 431, "bytes": 182000000, "capBytes": 12000000000},
  "scratch": {"bytes": 0, "capBytes": 2000000000},
  "upstream": {"requests": 5021, "errors": 3, "lastError": null, "downloads": 1345, "downloadBytes": 1460000000},
- "versions": {"tlm": "swisstlm3d_2026-02", "boundaries": "swissboundaries3d_2026-01"}}
+ "versions": {"tlm": "swisstlm3d_2026-02", "boundaries": "swissboundaries3d_2026-01", "names": "swissnames3d_2026"}}
 ```
 
-### `GET /place?q=Grimsel&limit=10`
+### `GET /place?q=Grimsel&limit=10[&mode=prefix|exact]`
 Gazetteer lookup (swissNAMES3D), used for `/swiss goto` and its tab completion.
 
-`{"results":[{"name":"Grimselpass","kind":"Pass","e":2668880,"n":1157032,"h":2164}]}`
+`{"results":[{"name":"Grimselpass","kind":"pass","e":2668880,"n":1157032,"h":2163}]}`
+
+- Case- and accent-insensitive (`zurich` finds Zürich). `mode=prefix` (default) matches the start of the name or of
+  any word in it; `mode=exact` the whole name. `limit` is 1..25 (default 10).
+- Order: exact before prefix; then settlements (`city` ≥ 50k inhabitants, `town` ≥ 2k, `village`, `hamlet`,
+  `district`) before peaks/passes, lakes/glaciers/valleys, `quarter`s, stations, other named places; then size.
+- `kind` is lowercase English: city, town, village, hamlet, district, quarter, peak, pass, hill, lake, glacier,
+  valley, massif, island, station, … `h` (metres) may be null.
+- Other languages: exonyms and the halves of bilingual names match too (`Genf` → Genève, `Biel` → Biel/Bienne); the
+  result then carries `"matched": "Genf"`.
+- **503** `{"error": …, "state": "building", "retryAfterS": 10}` while the index is not ready. The first query on a
+  store without `names/places.v1.tsv.gz` downloads swissNAMES3D once (33 MB) and builds it (~1.4 MB, seconds).
+  The item is pinned (`pins.json` `names/ch`) and shown in `/status.versions.names`.
 
 ## Behaviour rules
 

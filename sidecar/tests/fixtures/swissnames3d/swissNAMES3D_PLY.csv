@@ -1,0 +1,6 @@
+﻿UUID;NAME;STATUS;SPRACHCODE;NAMEN_TYP;NAME_UUID;NAMENGRUPPE_UUID;ISCED_STUFE;OBJEKTART;OBJEKTKLASSE_TLM;EINWOHNERKATEGORIE;E;N;Z
+{GL1};Grimselsee;offiziell;Hochdeutsch inkl. Lokalsprachen;einfacher Name;{n20};;k_W;See;TLM_STEHENDES_GEWAESSER;k_W;2666256;1157547;1908
+{GL2};Grimselsee;offiziell;Hochdeutsch inkl. Lokalsprachen;einfacher Name;{n20};;k_W;See;TLM_STEHENDES_GEWAESSER;k_W;2668312;1158314;1843
+{ZHP};Zürich;offiziell;Hochdeutsch inkl. Lokalsprachen;Endonym;{n1};{g1};k_W;Ort;TLM_SIEDLUNGSNAME;> 100'000;2682880;1249774;461
+{ZHF};Zürich;offiziell;Hochdeutsch inkl. Lokalsprachen;einfacher Name;{n21};;k_W;Flughafenareal;TLM_VERKEHRSAREAL;k_W;2683927;1257022;423
+{ZS};Zürichsee;offiziell;Hochdeutsch inkl. Lokalsprachen;einfacher Name;{n22};;k_W;See;TLM_STEHENDES_GEWAESSER;k_W;2690000;1235000;406
