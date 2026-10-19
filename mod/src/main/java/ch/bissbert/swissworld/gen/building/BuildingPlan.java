@@ -513,7 +513,7 @@ public record BuildingPlan(long gid, Style style, Columns cols, int storey, List
                 for (int j = 0; j < nz; j++) {
                     if ((i == 0 && j == 0) != first) continue;
                     int cx = r.x0 + (2 * i + 1) * lx / (2 * nx), cz = r.z0 + (2 * j + 1) * lz / (2 * nz);
-                    int[] p = nearestFree(r, cx, cz);
+                    int[] p = nearestFree(r, cx, cz, first);
                     if (p == null) continue;
                     int x = p[0], z = p[1], y = floors.get(k);
                     if (k + 1 < floors.size() && view.floorAt(k + 1, x, z) && !view.cut(k + 1, x, z)) {
@@ -528,11 +528,15 @@ public record BuildingPlan(long gid, Style style, Columns cols, int storey, List
             }
         }
 
-        /** The usable, unused cell nearest (cx, cz): first within 4 blocks, else anywhere in the room. */
-        int[] nearestFree(Room r, int cx, int cz) {
+        /**
+         * The usable, unused cell nearest (cx, cz) within 4 blocks. Only the room's first light may fall back to one
+         * scan of the whole room (so every room keeps a light); the other grid points are skipped, which bounds the
+         * work per room to its area instead of grid points times area.
+         */
+        int[] nearestFree(Room r, int cx, int cz, boolean first) {
             int[] p = nearestFree(r, cx, cz, Math.max(r.x0, cx - 4), Math.max(r.z0, cz - 4),
                     Math.min(r.x1, cx + 4), Math.min(r.z1, cz + 4));
-            return p != null ? p : nearestFree(r, cx, cz, r.x0, r.z0, r.x1, r.z1);
+            return p != null || !first ? p : nearestFree(r, cx, cz, r.x0, r.z0, r.x1, r.z1);
         }
 
         int[] nearestFree(Room r, int cx, int cz, int x0, int z0, int x1, int z1) {
