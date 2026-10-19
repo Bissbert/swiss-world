@@ -15,6 +15,7 @@ out/
 .DS_Store
 mod/run/
 mod/runs/
+mod/run-client/
 mod/repo/
 mod/src/generated/**/.cache/
 
@@ -23,3 +24,4 @@ __pycache__/
 *.pyc
 .venv/
 .pytest_cache/
+mod/run-client-sidecar.log

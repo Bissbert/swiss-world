@@ -54,6 +54,9 @@ neoForge {
     runs {
         client {
             client()
+            // own game dir so a playtest never touches the dev server's run/
+            gameDirectory = project.file('run-client')
+            systemProperty 'swissworld.store', System.getenv('SWISSWORLD_STORE') ?: rootProject.file('../store').absolutePath
             // Comma-separated list of namespaces to load gametests from. Empty = all namespaces.
             systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
         }
