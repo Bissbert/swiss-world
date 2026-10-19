@@ -13,7 +13,8 @@ Milestone 1: WaterStage, OverlayStage, VegetationStage in `mod/src/main/java/ch/
 
 ### Water
 - Sources fill from ground + 1 up to `floor(toY(WLVL))`. Lakes are flat. Rivers step wherever the sidecar steps WLVL.
-- **Drop rule.** A column whose cardinal neighbour has a higher source level U gets falling water (level 8) up to U − 1 and one flowing block (level 1) at U. For a straight step this is vanilla's own steady state, so an update leaves it alone. Only the unit tests cover this; the fixture has no river steps. See "What's left" for diagonal steps.
+- **Drop rule.** A column whose cardinal neighbour has a higher source level U gets falling water (level 8) up to U − 1 and one flowing block (level 1) at U. For a straight step this is vanilla's own steady state, so an update leaves it alone.
+- **Diagonal or cornered steps (rock rule).** Vanilla turns flowing water with ≥ 2 source neighbours at its level, standing on a source or solid, into a source (`FlowingFluid.getNewLiquid`). The real cells have many such corners in steep 1–2-wide streams, and each one flooded the lower river on its first update. Where a drop would put such a block, the lower column is stone from its source level up to the upper level instead (`WaterPlan.Fill.rock`). Raising the column instead would cascade, because the raised column becomes a new upper neighbour.
 - **WKND 6 (waterfall).** My reading: a waterfall column is a 1-block source pool on its ground, with falling water above it only up to a higher neighbour's source level. Its own WLVL never raises it, because falling water with no source beside its top drains on the first update.
 - **Banks.** A dry column next to a higher source is filled from its ground up to that source level: stone, with gravel on top. This includes ocean columns, which is how border lakes keep their level behind a solid rim (PLAN §13).
 - No fluid ticks are scheduled. Blocks go in with `ProtoChunk.setBlockState(.., false)`, which (checked in the 1.21.1 source) only updates light and heightmaps, and nothing is marked for post-processing.
@@ -44,7 +45,7 @@ Milestone 1: WaterStage, OverlayStage, VegetationStage in `mod/src/main/java/ch/
 - Dams: bit4 fills the body with light grey concrete from the bed up to the deck.
 - **Bridges (bit0):**
   - A stone brick beam under the deck.
-  - Railings: a stone brick wall on bridge columns that have a neighbour with no overlay. The wall sides are set explicitly, so they look right without block updates. The bridge ends stay open.
+  - Railings: a stone brick wall on a bridge column that has a neighbour with no overlay, but only where the deck goes on behind it (2 columns, or 1 on the east/south side) and alongside it. So decks 3+ wide get railings on both sides, 2-wide decks on the east/south side only, 1-wide decks and the stepped edges of diagonal decks none: in the real cells, narrow and diagonal footbridges were otherwise walled shut. The wall sides are set explicitly, so they look right without block updates. The bridge ends stay open.
   - Piers: stone bricks every 12 m of LV95 along the bridge, across its full width. The bridge's direction is taken from the axis with more bridge columns within 4.
 - **Tunnels (bit1):**
   - 6 blocks of clear height above the floor.
@@ -95,17 +96,17 @@ Milestone 1: WaterStage, OverlayStage, VegetationStage in `mod/src/main/java/ch/
 - `mod/src/main/java/ch/bissbert/swissworld/gen/SwissChunkGenerator.java` (mod-core): added `CELL_MARGIN = 8`, and `fillFromNoise` now loads the cells under the chunk's corners widened by that margin. Without this, a chunk next to an aligned cell edge (z = −400 + 2000k) cannot see its neighbour columns, and banks and trees across the edge would depend on load order. `ColumnGrid.MARGIN` refers to this constant.
 
 ## For other workstreams
-- **mod-core:** `SwissChunkGenerator` does not override `applyBiomeDecoration`, and the dimension uses `minecraft:plains`. Plains features therefore run on top of our blocks: oak trees, flowers, and `spring_water`, which schedules fluid ticks. I did not check for them in-game. They break the "no flowing water" and "deterministic vegetation" guarantees. Proposal: a featureless biome, or an empty `applyBiomeDecoration` override.
+- **mod-core:** `SwissChunkGenerator` does not override `applyBiomeDecoration`, and the dimension uses `minecraft:plains`. Plains features therefore run on top of our blocks: oak trees, flowers, `spring_water` (which schedules fluid ticks), and freeze_top_layer (ice and snow at altitude, seen in-game on real cells). They break the "no flowing water" and "deterministic vegetation" guarantees. Proposal: a featureless biome, or an empty `applyBiomeDecoration` override.
 - **sidecar-tlm:**
   - Rail centre lines (OFLG bit2) must be 4-connected, with no diagonal-only steps, or the derived shapes break.
   - Ramps up to a bridge (OELV) should rise ≤ 1 m per column; the fixture's bridge ends have a 5–7-block step, which I left as it is (it is data).
   - Roads crossing water need bit0 or OELV; otherwise they are skipped.
 
 ## What's left
-- **Diagonal or cornered river steps.** Vanilla turns flowing water with ≥ 2 source neighbours, on solid ground or a source, into a source (`FlowingFluid.getNewLiquid`). On a 1-block step whose lower column touches two upper sources (a step running diagonally in plan view, or turning a corner), the level-1 block becomes a source on its first update and spreads over the lower river and its banks. Possible fix: raise such lower columns to the upper level, or bank them. This needs real river data to tune.
-- **Untested in-game, because the fixture has none of them:** river steps, waterfalls, tunnels, kerbs (bit3), dams, rack beds, platforms, steps, orchards, vineyards, glacier, bushes.
-- **Real cells,** once sidecar-tlm data exist.
-- **Vanilla decoration** (mod-core, see above).
+- **Still untested in-game:** kerbs (bit3), rack beds, platforms, orchards, vineyards, bushes (none sampled in the real-cell run).
+- **Shallow tunnels** (deck only a few blocks below the ground, e.g. in 2647_1177) come out as open trenches, because the 6-block clearance reaches the surface. A real cut-and-cover would need a roof; left as it is.
+- **Bridge ramps:** near the end of the diagonal footbridge at (14567, −6918), where the deck changes height, a pair of railing columns still blocks the path.
+- **Vanilla decoration** (mod-core, see above). Confirmed in the real-cell run: at high altitude (e.g. Gauli, y ≈ 670–745) the plains biome's freeze_top_layer turns river source tops into ice and adds snow layers. Level-1 blocks fed by a frozen source then drain (12 of 54 and 8 of 24 water blocks at two glacier steps). This is not a WaterStage bug.
 
 ## Contract proposals
 None. No contract file was changed.
@@ -118,3 +119,25 @@ None. No contract file was changed.
 - **Forest:** 430 spruce logs and 3,452 leaves in x −380…−360, z 200…240; no oak or birch logs there.
 - **Stability:** setblocks next to the rim and lake edge, then a 10 s wait: the rim stayed dry and the lake source unchanged.
 - **Unit tests:** `WaterPlanTest`, `OverlayPlanTest`, `TreePlanTest` (`./gradlew build` passes). The waterfall and tunnel-cover changes came after the in-game run. They are covered by unit tests, and the fixture has neither feature.
+
+## Verification (real cells, private store, ports 25660/25661)
+- **Cells** were built from main (acccce9) with `build.assemble` + `Store.write`, using the cached raw data and TLM extract (no downloads), into the private store `<scratch>`:
+  - 2656_1173: Reichenbach waterfall, weir, steps
+  - 2647_1177: rail under a road bridge, tunnel
+  - 2668_1158: Grimsel dam, reservoir, tunnels
+  - 2652_1170: conifer forest
+  - 2660_1163: rock and scree
+  - 2656_1163: Gauli glacier
+- **Rail under a road bridge** (14584, −6471): polished andesite deck at −1423 on a stone brick beam at −1424; rail at −1430 on gravel at −1431; railings on both sides of the 4-wide deck.
+- **Rail** (14108, −6727): rail on gravel.
+- **Deep tunnel, Grimsel** (35533, 12364): andesite floor at −89, clear up to −83, rock roof.
+- **Grimsel dam** (36091, 12175): smooth stone crest at −86 over a light grey concrete body down to the ground at −109. Weir at (23771, −3106): 1 block of concrete.
+- **Waterfalls and steps:** source / falling / level-1 layout as planned; bridge piers reach the riverbed; steps are stone bricks.
+- **Water stability:** at 14 sample points (river steps, waterfalls, reservoirs) I updated every column top within 3 blocks, waited 20 s, and counted water by level in a 25×40×25 box before and after.
+  - 12 of 14 unchanged, including reservoirs of 730 and 663 blocks.
+  - 2 glacier points lost a few level-1 blocks to vanilla ice (see "What's left").
+  - Before the rock rule, the same points grew by 2–4×.
+  - Measuring note: counting with `fill … replace water` and back restores *sources* and floods the world, so a count must swap each `water[level=N]` to barrier and back to the same N.
+- **Bridges:** the 2-wide deck at (23971, −3227) has a railing on its south side only; the diagonal footbridge at (14567, −6918) is open along its stepped edge.
+- **Conifer forest:** 178 spruce logs and no oak or birch in a 29×36×29 box at (20080–20108, 580–608).
+- **Glacier:** snow_block over packed_ice over blue_ice (153 / 306 / 344 in a sample box).
