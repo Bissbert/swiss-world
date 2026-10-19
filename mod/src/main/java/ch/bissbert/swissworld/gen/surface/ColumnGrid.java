@@ -15,8 +15,12 @@ import java.util.Map;
  * so two chunks that share a border agree on it. No Minecraft classes: unit-testable without a bootstrap.
  */
 public final class ColumnGrid {
-    /** Must not exceed {@link SwissChunkGenerator#CELL_MARGIN}: columns further out may lie in cells that are not loaded. */
-    public static final int MARGIN = SwissChunkGenerator.CELL_MARGIN;
+    /**
+     * Columns around the chunk whose {@link #top} a default grid answers. It samples {@link WaterPlan#BANK_REACH} - 1
+     * more, because a bank's top looks that far beyond its neighbours. A grid's margin must not exceed {@link SwissChunkGenerator#CELL_MARGIN}: columns further out may lie
+     * in cells that are not loaded.
+     */
+    public static final int MARGIN = 8;
     public static final int NONE = Integer.MIN_VALUE;
     /** Same as {@link SwissChunkGenerator#SEA_LEVEL_Y}, without loading that class (tests have no Minecraft bootstrap). */
     static final int SEA_Y = (int) SwissCoords.toY(193);
@@ -29,7 +33,7 @@ public final class ColumnGrid {
 
     private final SwissCoords coords;
     private final Cells cells;
-    private final int minX, minZ, size;
+    private final int minX, minZ, size, margin;
     /** A home view: only this cell's data, see {@link #home}. Null for the chunk grid. */
     private final SwdCell homeCell;
     /** Columns sampled so far in a lazy view; null when all are sampled up front. */
@@ -37,7 +41,7 @@ public final class ColumnGrid {
     private Map<Long, ColumnGrid> homes;
     private final boolean[] present, spans;
     private final int[] ground, source, kind, surf, ocls, oflg, oelv;
-    private final double[] metres;
+    private final double[] metres, waterMetres, overlayMetres;
     private int[] top;
 
     /** The cell containing block column (x, z), or null; {@link GenContext#cellAt} in the game. */
@@ -47,7 +51,12 @@ public final class ColumnGrid {
     }
 
     public ColumnGrid(SwissCoords coords, Cells cells, int chunkMinX, int chunkMinZ) {
-        this(coords, cells, chunkMinX - MARGIN, chunkMinZ - MARGIN, 16 + 2 * MARGIN, null);
+        this(coords, cells, chunkMinX, chunkMinZ, MARGIN + WaterPlan.BANK_REACH - 1);
+    }
+
+    public ColumnGrid(SwissCoords coords, Cells cells, int chunkMinX, int chunkMinZ, int margin) {
+        this(coords, cells, chunkMinX - margin, chunkMinZ - margin, margin, null);
+        if (margin > SwissChunkGenerator.CELL_MARGIN) throw new IllegalArgumentException("margin " + margin);
         for (int i = 0; i < size; i++) {
             for (int j = 0; j < size; j++) {
                 sample(cells, minX + i, minZ + j, j * size + i);
@@ -55,12 +64,13 @@ public final class ColumnGrid {
         }
     }
 
-    private ColumnGrid(SwissCoords coords, Cells cells, int minX, int minZ, int size, SwdCell homeCell) {
+    private ColumnGrid(SwissCoords coords, Cells cells, int minX, int minZ, int margin, SwdCell homeCell) {
         this.coords = coords;
         this.cells = cells;
         this.minX = minX;
         this.minZ = minZ;
-        this.size = size;
+        this.margin = margin;
+        this.size = 16 + 2 * margin;
         this.homeCell = homeCell;
         int n = size * size;
         sampled = homeCell == null ? null : new boolean[n];
@@ -74,6 +84,8 @@ public final class ColumnGrid {
         oflg = new int[n];
         oelv = new int[n];
         metres = new double[n];
+        waterMetres = new double[n];
+        overlayMetres = new double[n];
     }
 
     /**
@@ -87,9 +99,9 @@ public final class ColumnGrid {
         SwdCell cell = cells.at(x, z);
         if (cell == null) return null;
         if (homes == null) homes = new HashMap<>();
-        int d = HOME_MARGIN - MARGIN;
+        int d = HOME_MARGIN - margin;
         return homes.computeIfAbsent(((long) cell.eKm() << 32) ^ (cell.nKm() & 0xFFFFFFFFL),
-                k -> new ColumnGrid(coords, (bx, bz) -> cell, minX - d, minZ - d, size + 2 * d, cell));
+                k -> new ColumnGrid(coords, (bx, bz) -> cell, minX - d, minZ - d, HOME_MARGIN, cell));
     }
 
     /** The cell km of column x as this grid's data sees it: its home cell in a {@link #home} view. */
@@ -102,7 +114,15 @@ public final class ColumnGrid {
     }
 
     public static ColumnGrid of(GenContext ctx) {
-        return new ColumnGrid(ctx.coords, ctx::cellAt, ctx.chunk.getPos().getMinBlockX(), ctx.chunk.getPos().getMinBlockZ());
+        return of(ctx, MARGIN + WaterPlan.BANK_REACH - 1);
+    }
+
+    public static ColumnGrid of(GenContext ctx, int margin) {
+        return new ColumnGrid(ctx.coords, ctx::cellAt, ctx.chunk.getPos().getMinBlockX(), ctx.chunk.getPos().getMinBlockZ(), margin);
+    }
+
+    public int margin() {
+        return margin;
     }
 
     private void sample(Cells cells, int x, int z, int k) {
@@ -118,6 +138,8 @@ public final class ColumnGrid {
         int dx = SwissCoords.dx(e), dz = SwissCoords.dz(nn);
         source[k] = NONE;
         oelv[k] = NONE;
+        waterMetres[k] = Double.NaN;
+        overlayMetres[k] = Double.NaN;
         if (cell == null || !cell.inside(dx, dz)) {
             ground[k] = OCEAN_FLOOR_Y;
             metres[k] = 193;
@@ -130,12 +152,18 @@ public final class ColumnGrid {
         surf[k] = cell.surf(dx, dz);
         if (away) return;
         double w = cell.water(dx, dz);
-        if (!Double.isNaN(w) && y(w) > ground[k]) source[k] = y(w);
+        if (!Double.isNaN(w) && y(w) > ground[k]) {
+            source[k] = y(w);
+            waterMetres[k] = w;
+        }
         kind[k] = cell.waterKind(dx, dz);
         ocls[k] = cell.overlay(dx, dz);
         oflg[k] = cell.overlayFlags(dx, dz);
         double o = cell.overlayElevation(dx, dz);
-        if (!Double.isNaN(o)) oelv[k] = y(o);
+        if (!Double.isNaN(o)) {
+            oelv[k] = y(o);
+            overlayMetres[k] = o;
+        }
         spans[k] = cell.spansAt(dx, dz) != null;
     }
 
@@ -155,6 +183,15 @@ public final class ColumnGrid {
             sample(cells, x, z, k);
         }
         return k;
+    }
+
+    /** Index of a column in per-column caches of {@link #cells()} entries. */
+    int index(int x, int z) {
+        return k(x, z);
+    }
+
+    int cells() {
+        return size * size;
     }
 
     public long east(int x) {
@@ -215,13 +252,29 @@ public final class ColumnGrid {
         return metres[k(x, z)];
     }
 
+    /** Water surface in real metres where {@link #source} is set, else NaN. */
+    public double waterMetres(int x, int z) {
+        return waterMetres[k(x, z)];
+    }
+
+    /** OELV in real metres where {@link #elevated}, else NaN. */
+    public double overlayMetres(int x, int z) {
+        return overlayMetres[k(x, z)];
+    }
+
+    /** The column lies in the sampled area (the chunk plus {@link #margin()}). */
+    public boolean contains(int x, int z) {
+        int i = x - minX, j = z - minZ;
+        return i >= 0 && j >= 0 && i < size && j < size;
+    }
+
     public boolean hasBuilding(int x, int z) {
         return spans[k(x, z)];
     }
 
     /**
      * Top solid block after {@link WaterStage} has raised banks: {@code max(ground, bank)}.
-     * Valid one column less far out than the other accessors, because banks look at neighbours.
+     * Valid {@link WaterPlan#BANK_REACH} columns less far out than the other accessors, because banks look at water nearby.
      */
     public int top(int x, int z) {
         if (top == null) {

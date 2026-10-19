@@ -5,6 +5,7 @@ import ch.bissbert.swissworld.gen.GenStage;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.LanternBlock;
 import net.minecraft.world.level.block.RailBlock;
 import net.minecraft.world.level.block.SlabBlock;
 import net.minecraft.world.level.block.StairBlock;
@@ -17,43 +18,68 @@ import net.minecraft.world.level.chunk.ChunkAccess;
 
 /**
  * Roads, paths, rail beds + vanilla rails, bridges, tunnels, dams from OCLS/OELV/OFLG (swd-format §5). Owner: mod-surface.
- * The deck is the overlay's surface block: OELV, else the terrain top (after banks). Below a raised deck that is not a
- * bridge goes an embankment; above a sunken deck that is not a tunnel, a cutting. Rails, kerbs, railings sit one above.
+ * Roads and rails follow the smoothed profile of {@link TransportPlan}: below a raised deck goes an embankment, above a
+ * sunken one a cut, and the terrain beside them is graded to the deck ({@link TransportPlan#earthwork}). A way across
+ * a stream gets a culvert; a tunnel is bored and lined. Steps, dams and grass keep the deck of {@link ColumnGrid#deck}.
  */
 public final class OverlayStage implements GenStage {
     private static final BlockState AIR = Blocks.AIR.defaultBlockState();
     private static final BlockState FILL = Blocks.STONE.defaultBlockState();
+    private static final BlockState SOIL = Blocks.DIRT.defaultBlockState();
     private static final BlockState BEAM = Blocks.STONE_BRICKS.defaultBlockState();
+    private static final BlockState LINING = Blocks.STONE_BRICKS.defaultBlockState();
+    private static final BlockState COVER = Blocks.GRASS_BLOCK.defaultBlockState();
     private static final BlockState BALLAST = Blocks.GRAVEL.defaultBlockState();
     private static final BlockState BALLAST_EDGE = Blocks.ANDESITE.defaultBlockState();
     private static final BlockState DAM_BODY = Blocks.LIGHT_GRAY_CONCRETE.defaultBlockState();
     private static final BlockState SMOOTH = Blocks.SMOOTH_STONE.defaultBlockState();
-    private static final BlockState KERB = Blocks.SMOOTH_STONE_SLAB.defaultBlockState().setValue(SlabBlock.TYPE, SlabType.BOTTOM);
-    private static final BlockState TUNNEL_LIGHT = Blocks.GLOWSTONE.defaultBlockState();
-    /** Clear height of a tunnel above its floor. */
-    private static final int TUNNEL_HEIGHT = 6;
-    private static final int LIGHT_SPACING = 37;
+    private static final BlockState LANTERN = Blocks.LANTERN.defaultBlockState().setValue(LanternBlock.HANGING, true);
+    private static final int NONE = ColumnGrid.NONE;
 
     @Override
     public void apply(GenContext ctx) {
         ChunkAccess chunk = ctx.chunk;
-        ColumnGrid g = ColumnGrid.of(ctx);
+        ColumnGrid g = ColumnGrid.of(ctx, TransportPlan.MARGIN);
+        TransportPlan t = new TransportPlan(g);
         int x0 = chunk.getPos().getMinBlockX(), z0 = chunk.getPos().getMinBlockZ();
         BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
         for (int lx = 0; lx < 16; lx++) {
             for (int lz = 0; lz < 16; lz++) {
                 int x = x0 + lx, z = z0 + lz;
-                if (g.present(x, z) && (g.overlay(x, z) != 0 || g.flag(x, z, ColumnGrid.DAM_BODY))) column(chunk, g, x, z, pos);
+                BlockState top = chunk.getBlockState(pos.set(x, g.present(x, z) ? g.top(x, z) : 0, z));
+                boolean done = t.build(x, z, (y, part) -> set(chunk, pos, x, y, z, block(t, x, z, part, y, top)));
+                if (!done) column(chunk, g, x, z, pos);
             }
         }
     }
 
+    private static BlockState block(TransportPlan t, int x, int z, TransportPlan.Part part, int y, BlockState top) {
+        ColumnGrid g = t.grid();
+        int cls = g.overlay(x, z);
+        return switch (part) {
+            case AIR -> AIR;
+            case FILL -> FILL;
+            case SOIL -> SOIL;
+            case BEAM -> BEAM;
+            case LINING -> LINING;
+            case COVER -> COVER;
+            case BALLAST -> g.flag(x, z, ColumnGrid.EDGE) ? BALLAST_EDGE : BALLAST;
+            case SURFACE -> surface(g, x, z, cls, y);
+            case SLAB -> slab(cls);
+            case RAIL -> rail(t, x, z);
+            case RAILING -> railing(g, x, z);
+            case LANTERN -> LANTERN;
+            case TOP -> top.isAir() ? COVER : top;
+        };
+    }
+
+    /** Steps, dams, grass and other overlay that keeps its {@link ColumnGrid#deck}. */
     private static void column(ChunkAccess chunk, ColumnGrid g, int x, int z, BlockPos.MutableBlockPos pos) {
         int cls = g.overlay(x, z);
-        boolean bridge = g.flag(x, z, ColumnGrid.BRIDGE), tunnel = g.flag(x, z, ColumnGrid.TUNNEL);
+        boolean bridge = g.flag(x, z, ColumnGrid.BRIDGE);
         boolean wet = g.source(x, z) != ColumnGrid.NONE;
         boolean dam = cls == OverlayPlan.DAM_CREST || g.flag(x, z, ColumnGrid.DAM_BODY);
-        // a road drawn across a lake without its own height would drown or float: the bridge or dam flag is missing
+        // a path drawn across a lake without its own height would drown or float: the bridge or dam flag is missing
         if (wet && !bridge && !dam && !g.elevated(x, z)) return;
         int top = g.top(x, z), deck = g.deck(x, z);
 
@@ -67,43 +93,19 @@ public final class OverlayStage implements GenStage {
         } else if (deck > top) {
             for (int y = top + 1; y < deck; y++) set(chunk, pos, x, y, z, FILL);
         }
-
-        if (tunnel) {
-            int roof = deck + TUNNEL_HEIGHT;
-            // under a lake the bed stays closed
-            int clear = wet ? Math.min(roof, g.ground(x, z) - 1) : roof;
-            for (int y = deck + 1; y <= clear; y++) set(chunk, pos, x, y, z, AIR);
-            if (!wet && top > roof + 1 && Math.floorMod(3 * x + 5 * z, LIGHT_SPACING) == 0) {
-                set(chunk, pos, x, roof + 1, z, TUNNEL_LIGHT);
-            }
-        } else if (deck < top && !wet) {
+        if (deck < top && !wet) {
             // never cut below a neighbour's water: that wall holds it
             int keep = Math.max(deck, WaterPlan.neighbourSource(g, x, z));
             for (int y = keep + 1; y <= top; y++) set(chunk, pos, x, y, z, AIR);
         }
-
         if (cls == 0) return;
         set(chunk, pos, x, deck, z, surface(g, x, z, cls, deck));
-        boolean underBridge = OverlayPlan.railUnderBridge(g, x, z);
-        if (underBridge && top + 1 < deck - 1) {
-            // swd-format §5: a rail on a ballast bed on the terrain, under the road deck and its beam
-            set(chunk, pos, x, top, z, BALLAST);
-            set(chunk, pos, x, top + 1, z, rail(g, x, z));
-        }
-        if (OverlayPlan.railing(g, x, z)) {
-            set(chunk, pos, x, deck + 1, z, railing(g, x, z));
-        } else if (OverlayPlan.railCentre(g, x, z) && !underBridge) {
-            set(chunk, pos, x, deck + 1, z, rail(g, x, z));
-        } else if (cls == 10) {
-            set(chunk, pos, x, deck + 1, z, KERB);
-        } else if (cls <= 4 && g.flag(x, z, ColumnGrid.EDGE)) {
-            set(chunk, pos, x, deck + 1, z, KERB);
-        }
+        if (OverlayPlan.railing(g, x, z)) set(chunk, pos, x, deck + 1, z, railing(g, x, z));
     }
 
     private static BlockState surface(ColumnGrid g, int x, int z, int cls, int deck) {
         return switch (cls) {
-            case 1, 2 -> Blocks.GRAY_CONCRETE.defaultBlockState();
+            case 1, 2 -> Blocks.STONE.defaultBlockState();
             case 3 -> Blocks.POLISHED_ANDESITE.defaultBlockState();
             case 4 -> Blocks.ANDESITE.defaultBlockState();
             case 5 -> ColumnHash.below(g.east(x), g.north(z), 5, 3) == 0
@@ -111,14 +113,24 @@ public final class OverlayStage implements GenStage {
                     : Blocks.COARSE_DIRT.defaultBlockState();
             case 6 -> Blocks.DIRT_PATH.defaultBlockState();
             case 7 -> steps(g, x, z, deck);
-            case OverlayPlan.RAIL_BED, OverlayPlan.RACK_BED -> g.flag(x, z, ColumnGrid.EDGE) ? BALLAST_EDGE : BALLAST;
             case 13 -> Blocks.GRASS_BLOCK.defaultBlockState();
             default -> SMOOTH; // 10 platform, 11 dam crest, 12 runway, 14 parking
         };
     }
 
-    private static BlockState rail(ColumnGrid g, int x, int z) {
-        return Blocks.RAIL.defaultBlockState().setValue(RailBlock.SHAPE, RailShape.valueOf(OverlayPlan.railShape(g, x, z).name()));
+    /** The bottom slab of a road's material, for a half step. */
+    private static BlockState slab(int cls) {
+        BlockState s = switch (cls) {
+            case 1, 2 -> Blocks.STONE_SLAB.defaultBlockState();
+            case 3 -> Blocks.POLISHED_ANDESITE_SLAB.defaultBlockState();
+            case 4 -> Blocks.ANDESITE_SLAB.defaultBlockState();
+            default -> Blocks.SMOOTH_STONE_SLAB.defaultBlockState();
+        };
+        return s.setValue(SlabBlock.TYPE, SlabType.BOTTOM);
+    }
+
+    private static BlockState rail(TransportPlan t, int x, int z) {
+        return Blocks.RAIL.defaultBlockState().setValue(RailBlock.SHAPE, RailShape.valueOf(t.railShape(x, z).name()));
     }
 
     /** Stairs climbing towards the highest step neighbour; a landing (no higher neighbour) is a full block. */

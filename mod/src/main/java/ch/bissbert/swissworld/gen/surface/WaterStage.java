@@ -17,6 +17,10 @@ public final class WaterStage implements GenStage {
     private static final BlockState WATER = Blocks.WATER.defaultBlockState();
     private static final BlockState FALLING = WATER.setValue(LiquidBlock.LEVEL, 8);
     private static final BlockState FLOWING = WATER.setValue(LiquidBlock.LEVEL, 1);
+    private static final BlockState LIP = WATER.setValue(LiquidBlock.LEVEL, 2);
+    private static final BlockState REED = Blocks.SUGAR_CANE.defaultBlockState();
+    private static final BlockState REED_BED = Blocks.SAND.defaultBlockState();
+    private static final BlockState FILL = Blocks.DIRT.defaultBlockState();
     private static final BlockState BANK = Blocks.STONE.defaultBlockState();
     private static final BlockState BANK_TOP = Blocks.GRAVEL.defaultBlockState();
 
@@ -31,8 +35,17 @@ public final class WaterStage implements GenStage {
                 int x = x0 + lx, z = z0 + lz;
                 int bottom = g.ground(x, z) + 1;
                 WaterPlan.Fill f = WaterPlan.fill(g, x, z);
+                if (f != null && f.reed()) {
+                    int s = f.sourceTop();
+                    for (int y = bottom; y < s - 1; y++) chunk.setBlockState(pos.set(x, y, z), FILL, false);
+                    chunk.setBlockState(pos.set(x, s - 1, z), REED_BED, false);
+                    chunk.setBlockState(pos.set(x, s, z), REED, false);
+                    chunk.setBlockState(pos.set(x, f.fallTop(), z), FLOWING, false);
+                    continue;
+                }
                 if (f != null) {
                     for (int y = bottom; y <= f.sourceTop(); y++) chunk.setBlockState(pos.set(x, y, z), WATER, false);
+                    if (f.lip()) chunk.setBlockState(pos.set(x, f.sourceTop() + 1, z), LIP, false);
                     if (f.rock()) {
                         for (int y = f.sourceTop() + 1; y <= f.fallTop(); y++) chunk.setBlockState(pos.set(x, y, z), BANK, false);
                         continue;
