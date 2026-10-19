@@ -7,7 +7,9 @@ import net.minecraft.world.level.EmptyBlockGetter;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.LevelHeightAccessor;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.LevelChunkSection;
+import net.minecraft.world.level.chunk.LightChunkGetter;
 import net.minecraft.world.level.lighting.LevelLightEngine;
 
 /**
@@ -20,9 +22,22 @@ import net.minecraft.world.level.lighting.LevelLightEngine;
  * enter it, so not storing it reads the same 0. The "lid" (the section above must be opaque too) keeps the topmost
  * rock section of every column stored, so the sky engine's walk up a column always meets a stored 0 before it could
  * reach "above the data" (15). Sections next to a stored one keep their storage through vanilla's neighbour count.
+ *
+ * <p>Vanilla fills a new sky entry below stored data with a copy of the bottom layer above (light falling through an
+ * empty section). Without the buried rock below it, a reloaded chunk's lid is often created after the section above,
+ * and a reloaded chunk is not relit, so the lid would keep the surface's 15 inside the stone. A fully opaque section
+ * therefore starts dark ({@link #dark}), which is what lighting ends with anyway.
  */
 public final class SwissLight {
     private SwissLight() {}
+
+    /** The chunk whose sections the light thread is setting up ({@code initializeLight}), which the server's
+     *  {@code getChunkForLighting} may not return yet. */
+    private static final ThreadLocal<ChunkAccess> INITIALIZING = new ThreadLocal<>();
+
+    public static void initializing(ChunkAccess chunk) {
+        if (chunk == null) INITIALIZING.remove(); else INITIALIZING.set(chunk);
+    }
 
     /** True if this level (a ServerLevel or ClientLevel, possibly as a height accessor) is Switzerland. */
     public static boolean applies(LevelHeightAccessor level) {
@@ -33,6 +48,19 @@ public final class SwissLight {
     public static boolean lightEmpty(LevelChunkSection[] sections, int index) {
         LevelChunkSection s = sections[index];
         return s.hasOnlyAir() || opaque(s) && index + 1 < sections.length && opaque(sections[index + 1]);
+    }
+
+    /** True if sky light for this section of Switzerland should start at 0: every block in it is opaque. */
+    public static boolean dark(LightChunkGetter source, long sectionPos) {
+        if (!(source.getLevel() instanceof Level level) || !applies(level)) return false;
+        int x = SectionPos.x(sectionPos), z = SectionPos.z(sectionPos);
+        ChunkAccess chunk = INITIALIZING.get();
+        if (chunk == null || chunk.getPos().x != x || chunk.getPos().z != z) {
+            if (!(source.getChunkForLighting(x, z) instanceof ChunkAccess c)) return false;
+            chunk = c;
+        }
+        int i = chunk.getSectionIndexFromSectionY(SectionPos.y(sectionPos));
+        return i >= 0 && i < chunk.getSectionsCount() && opaque(chunk.getSections()[i]);
     }
 
     /** Index of {@code section} in {@code sections} by identity, or -1. */

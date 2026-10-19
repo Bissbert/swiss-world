@@ -9,10 +9,22 @@ import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.LevelChunkSection;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
-/** A new chunk's light storage skips buried rock in Switzerland; see {@link SwissLight}. Owner: mod-core. */
+/** A new chunk's light storage skips buried rock in Switzerland, and its rock starts dark; see {@link SwissLight}. Owner: mod-core. */
 @Mixin(ThreadedLevelLightEngine.class)
 abstract class ThreadedLevelLightEngineMixin {
+    @Inject(method = "lambda$initializeLight$19", at = @At("HEAD"))
+    private void swissworld$begin(ChunkAccess chunk, ChunkPos pos, CallbackInfo ci) {
+        SwissLight.initializing(chunk);
+    }
+
+    @Inject(method = "lambda$initializeLight$19", at = @At("RETURN"))
+    private void swissworld$end(ChunkAccess chunk, ChunkPos pos, CallbackInfo ci) {
+        SwissLight.initializing(null);
+    }
+
     /** The PRE_UPDATE task of {@code initializeLight}: one {@code hasOnlyAir} per section. */
     @WrapOperation(method = "lambda$initializeLight$19", at = @At(value = "INVOKE",
             target = "Lnet/minecraft/world/level/chunk/LevelChunkSection;hasOnlyAir()Z"))
