@@ -58,6 +58,9 @@ public final class SwissChunkGenerator extends ChunkGenerator {
     /** Real sea level 193 m (lowest point of Switzerland) -> y = -1807. Ocean outside the border. */
     public static final int SEA_LEVEL_Y = (int) SwissCoords.toY(193);
 
+    /** Cells are loaded for the chunk plus this many columns around it, so stages can look at neighbour columns. */
+    public static final int CELL_MARGIN = 8;
+
     public SwissChunkGenerator(BiomeSource biomeSource) {
         super(biomeSource);
     }
@@ -73,8 +76,8 @@ public final class SwissChunkGenerator extends ChunkGenerator {
         CellCache cache = SwissRuntime.cells();
         int x0 = chunk.getPos().getMinBlockX(), z0 = chunk.getPos().getMinBlockZ();
         Map<Long, CompletableFuture<Optional<SwdCell>>> needed = new HashMap<>();
-        for (int x : new int[] {x0, x0 + 15}) {
-            for (int z : new int[] {z0, z0 + 15}) {
+        for (int x : new int[] {x0 - CELL_MARGIN, x0 + 15 + CELL_MARGIN}) {
+            for (int z : new int[] {z0 - CELL_MARGIN, z0 + 15 + CELL_MARGIN}) {
                 int e = SwissCoords.cellKm(coords.east(x)), n = SwissCoords.cellKm(coords.north(z));
                 needed.computeIfAbsent(CellCache.key(e, n), k -> cache.get(e, n));
             }
