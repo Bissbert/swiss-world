@@ -623,28 +623,73 @@ public final class TransportPlan {
     }
 
     private static final int[] OPP = {1, 0, 3, 2};
-    /** How far a switch looks back along its branch for the side the branch comes from. */
+    /** How far a switch looks along each of its arms (see {@link #arm}). */
     static final int SWITCH_WALK = 6;
 
     /**
      * The two neighbours a rail joins (bit mask as {@link #links}): its track neighbours, or at a switch (three) the
-     * branch and the side of the through track it runs on to, away from where the branch comes from. Vanilla rails
-     * have no switch block; a curve with a straight rail meeting its outside is what a player builds instead.
+     * two arms that run on most nearly in a straight line (a line steps sideways at a switch where it jogs between
+     * parallel tracks), so a line runs on unbroken past every branch; the branch ends beside it. Vanilla rails have no
+     * switch block (a powered T junction turns, an unpowered one keeps its shape), so the branch is the side that
+     * gives way. Two exceptions: an arm that ends within {@link #SWITCH_WALK} rails is a stub and gives way instead,
+     * and of two arms that meet again at the same switch (a short loop, where two tracks drawn side by side were
+     * thinned apart) the longer one gives way, so both switches of the loop route the line the same way.
      */
     private int track(int x, int z) {
         int m = links(x, z);
         if (Integer.bitCount(m) != 3) return m;
-        int stem = 0;
-        for (int d = 0; d < 4; d++) if ((m & 1 << d) != 0 && (m & 1 << OPP[d]) == 0) stem = d;
-        // a switch beside a switch: the two join each other
-        int a = stem <= 1 ? 2 : 0, b = OPP[a];
-        boolean sa = Integer.bitCount(links(x + DIRS[a][0], z + DIRS[a][1])) == 3;
-        boolean sb = Integer.bitCount(links(x + DIRS[b][0], z + DIRS[b][1])) == 3;
-        if (sa != sb) return 1 << stem | 1 << (sa ? a : b);
-        int px = x, pz = z, cx = x + DIRS[stem][0], cz = z + DIRS[stem][1];
-        for (int step = 1; step < SWITCH_WALK; step++) {
+        int[][] arm = new int[4][];
+        for (int d = 0; d < 4; d++) if ((m & 1 << d) != 0) arm[d] = arm(x, z, d);
+        int stubs = 0, stub = -1;
+        for (int d = 0; d < 4; d++) {
+            if (arm[d] != null && arm[d][0] == ARM_END) {
+                stubs++;
+                stub = d;
+            }
+        }
+        if (stubs == 1) return m & ~(1 << stub);
+        for (int d = 0; d < 4; d++) {
+            for (int e = d + 1; e < 4; e++) {
+                if (arm[d] == null || arm[e] == null || arm[d][0] != ARM_SWITCH || arm[e][0] != ARM_SWITCH) continue;
+                if (arm[d][2] != arm[e][2] || arm[d][3] != arm[e][3] || arm[d][1] == arm[e][1]) continue;
+                return m & ~(1 << (arm[d][1] > arm[e][1] ? d : e));
+            }
+        }
+        // the two arms that run on most nearly in a straight line, seen from where their walks end
+        int drop = -1;
+        double best = Double.MAX_VALUE;
+        for (int d = 0; d < 4; d++) {
+            if (arm[d] == null) continue;
+            int a = -1, b = -1;
+            for (int e = 0; e < 4; e++) {
+                if (e == d || arm[e] == null) continue;
+                if (a < 0) a = e;
+                else b = e;
+            }
+            double ax = arm[a][2] - x, az = arm[a][3] - z, bx = arm[b][2] - x, bz = arm[b][3] - z;
+            double cos = (ax * bx + az * bz) / Math.sqrt((ax * ax + az * az) * (bx * bx + bz * bz));
+            boolean through = OPP[a] == b;
+            if (cos < best - 1e-9 || Math.abs(cos - best) <= 1e-9 && through) {
+                best = cos;
+                drop = d;
+            }
+        }
+        return m & ~(1 << drop);
+    }
+
+    private static final int ARM_OPEN = 0, ARM_END = 1, ARM_SWITCH = 2;
+
+    /**
+     * Walks a switch's arm in direction d for up to {@link #SWITCH_WALK} rails: {kind, steps, x, z} where kind is
+     * {@link #ARM_END} (the track ends), {@link #ARM_SWITCH} (another switch, at x, z) or {@link #ARM_OPEN}.
+     */
+    private int[] arm(int x, int z, int d) {
+        int px = x, pz = z, cx = x + DIRS[d][0], cz = z + DIRS[d][1];
+        for (int step = 1; step <= SWITCH_WALK; step++) {
             int cm = links(cx, cz);
-            if (Integer.bitCount(cm) != 2) break;
+            int n = Integer.bitCount(cm);
+            if (n <= 1) return new int[] {ARM_END, step, cx, cz};
+            if (n >= 3) return new int[] {ARM_SWITCH, step, cx, cz};
             int nx = NONE, nz = NONE;
             for (int e = 0; e < 4; e++) {
                 int qx = cx + DIRS[e][0], qz = cz + DIRS[e][1];
@@ -658,10 +703,7 @@ public final class TransportPlan {
             cx = nx;
             cz = nz;
         }
-        boolean ns = stem <= 1; // the through track runs east-west
-        int delta = ns ? cx - x : cz - z;
-        int side = ns ? (delta > 0 ? 3 : 2) : (delta > 0 ? 0 : 1);
-        return 1 << stem | 1 << side;
+        return new int[] {ARM_OPEN, SWITCH_WALK, cx, cz};
     }
 
     private static boolean curve(int m) {

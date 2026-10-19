@@ -198,17 +198,15 @@ class TransportPlanTest {
     }
 
     /**
-     * The open end towards d meets the outside of a switch (vanilla's T junction): a curve with three rails beside it,
-     * at the same level or, if this rail ascends towards it, one up.
+     * The open end towards d meets the side of a switch (vanilla's T junction): a rail with three rails beside it, at
+     * the same level or, if this rail ascends towards it, one up. The through track keeps its shape; the branch ends.
      */
     private static boolean switchAt(Voxels v, int x, int y, int z, Rail s, int[] d) {
         int[] up = dirUp(s);
         int ty = up != null && up[0] == d[0] && up[1] == d[1] ? y + 1 : y;
         int tx = x + d[0], tz = z + d[1];
         if (v.at(tx, ty, tz) != B.RAIL) return false;
-        Rail o = v.shape(tx, ty, tz);
-        boolean curve = o == Rail.NORTH_EAST || o == Rail.NORTH_WEST || o == Rail.SOUTH_EAST || o == Rail.SOUTH_WEST;
-        return curve && railsBeside(v, tx, ty, tz) == 3;
+        return railsBeside(v, tx, ty, tz) == 3;
     }
 
     private static List<int[]> ends(Rail s) {
@@ -417,10 +415,12 @@ class TransportPlanTest {
             }
         }
         assertEquals(2, switches, "one switch per branch");
-        // the main tracks run through
+        // the main tracks run through, the switches included: a cart passes every branch in both directions
         for (int x = -45; x <= 39; x++) {
             assertEquals(B.RAIL, v.at(x, v.deck[v.col(x, -12)] + 1, -12), "northern track at " + x);
             assertEquals(B.RAIL, v.at(x, v.deck[v.col(x, 12)] + 1, 12), "southern track at " + x);
+            assertEquals(Rail.EAST_WEST, v.shape(x, v.deck[v.col(x, -12)] + 1, -12), "northern track at " + x);
+            assertEquals(Rail.EAST_WEST, v.shape(x, v.deck[v.col(x, 12)] + 1, 12), "southern track at " + x);
         }
     }
 
