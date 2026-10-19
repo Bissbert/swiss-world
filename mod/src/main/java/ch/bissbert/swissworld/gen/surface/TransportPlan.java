@@ -1019,7 +1019,9 @@ public final class TransportPlan {
         /** The floor of a bore under a way it absorbed or cut: the tunnel's own surface ({@link #boreClass}). */
         FLOOR,
         /** The surface block that was on the column's old top (earthworks move it). */
-        TOP
+        TOP,
+        /** A stream's bed right over a tunnel's air: its old bed block if that cannot fall, else one like it that cannot. */
+        BED
     }
 
     @FunctionalInterface
@@ -1124,6 +1126,12 @@ public final class TransportPlan {
                 out.set(floor, Part.FLOOR);
                 if (rail(x, z) && railLevel(x, z) == floor) out.set(floor + 1, Part.RAIL);
             }
+        }
+        // a stream over a shallow bore keeps its bed: the lining's top block under the water is bed material
+        int bed = g.ground(x, z);
+        if (wetTop(x, z) != NONE && bed > (floor == NONE ? lo : floor) && bed <= hi) {
+            boolean lined = floor == NONE || bed - 1 >= tunnelCeiling(x, z); // lining under it, not the bore's air
+            out.set(bed, lined ? Part.TOP : Part.BED);
         }
         if (wetTop(x, z) == NONE && top < hi + 2 && !over(x, z)) {
             for (int y = Math.max(top, hi) + 1; y <= hi + 1; y++) out.set(y, y == hi + 1 ? Part.COVER : Part.SOIL);

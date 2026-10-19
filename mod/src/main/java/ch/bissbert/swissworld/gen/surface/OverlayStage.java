@@ -5,6 +5,7 @@ import ch.bissbert.swissworld.gen.GenStage;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.FallingBlock;
 import net.minecraft.world.level.block.LanternBlock;
 import net.minecraft.world.level.block.RailBlock;
 import net.minecraft.world.level.block.SlabBlock;
@@ -28,6 +29,8 @@ public final class OverlayStage implements GenStage {
     private static final BlockState SOIL = Blocks.DIRT.defaultBlockState();
     private static final BlockState BEAM = Blocks.STONE_BRICKS.defaultBlockState();
     private static final BlockState LINING = Blocks.STONE_BRICKS.defaultBlockState();
+    /** A stream bed that cannot fall into the tunnel under it. */
+    private static final BlockState BED = Blocks.CLAY.defaultBlockState();
     private static final BlockState COVER = Blocks.GRASS_BLOCK.defaultBlockState();
     private static final BlockState BALLAST = Blocks.GRAVEL.defaultBlockState();
     private static final BlockState BALLAST_EDGE = Blocks.ANDESITE.defaultBlockState();
@@ -71,6 +74,7 @@ public final class OverlayStage implements GenStage {
             case RAILING -> railing(g, x, z);
             case LANTERN -> LANTERN;
             case TOP -> top.isAir() ? COVER : top;
+            case BED -> top.isAir() || top.getBlock() instanceof FallingBlock ? BED : top;
         };
     }
 

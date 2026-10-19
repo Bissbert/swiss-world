@@ -1,6 +1,7 @@
 package ch.bissbert.swissworld.gen.surface;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -499,6 +500,11 @@ class TransportPlanTest {
             int bed = v.originalTop[v.col(x, 14)];
             for (int y = bed + 1; y <= -1395; y++) assertTrue(Voxels.water(v.at(x, y, 14)), "saddle stream at " + x + "," + y);
             assertEquals(B.SOLID, v.at(x, bed, 14), "bed under the saddle stream at " + x);
+            // the bed is bed material, not the tunnel's lining (playtest: stone bricks in the stream bed); right over
+            // the bore's air it is one that cannot fall
+            TransportPlan.Part p = v.part(x, bed, 14);
+            assertNotEquals(TransportPlan.Part.LINING, p, "lining in the stream bed at " + x);
+            if (v.at(x, bed - 1, 14) == B.AIR) assertEquals(TransportPlan.Part.BED, p, "bed over the bore at " + x);
         }
     }
 
