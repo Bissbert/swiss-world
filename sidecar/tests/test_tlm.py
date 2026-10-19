@@ -169,8 +169,10 @@ def test_preview_builders_add_terrain_only_once(monkeypatch):
     class Terrain:
         name, tags = "terrain", ("TERR",)
 
+    others = [b for b in build.BUILDERS if "TERR" not in b.tags]
+    monkeypatch.setattr(build, "BUILDERS", others)
     assert sum("TERR" in b.tags for b in tlm_preview.builders()) == 1
-    monkeypatch.setattr(build, "BUILDERS", [Terrain(), *build.BUILDERS])
+    monkeypatch.setattr(build, "BUILDERS", [Terrain(), *others])
     assert sum("TERR" in b.tags for b in tlm_preview.builders()) == 1
 
 

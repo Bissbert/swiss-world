@@ -206,4 +206,9 @@ The mod derives walls, floors, stairs and roof shapes from spans and neighbours.
 }
 ```
 
+Extra keys the sidecar writes:
+
+- `sources.altiNeighbours`: `{"E-N": itemId | null}`, the neighbouring ALTI tiles used for edge nodes. A rebuild needs them to reproduce identical edges.
+- `cells.<key>.evicted`: an ISO timestamp, set when the file was evicted. The entry and its `sources` stay. A cell is **ready** only when the file exists **and** it has a manifest entry without `evicted`.
+
 **`sources` is never removed**, even when a cell file is evicted. A rebuild uses exactly these upstream item ids, so seams can't appear between rebuilt and saved areas.

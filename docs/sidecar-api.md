@@ -54,6 +54,7 @@ The mod may use this, or simply watch the store directory.
 ```
 
 - Enqueues cells in the radius at prefetch priority.
+- `headingDeg` is a **compass bearing**: 0 = north (+N, Minecraft −z), 90 = east (+E, Minecraft +x).
 - If `speedMps > 0`, it also enqueues a corridor of length `max(500, 60·speed)` m along the heading.
 
 `202 {"queued": 12}`
@@ -68,7 +69,7 @@ The mod reports cells whose chunks are all generated. These are evicted first wh
 {"queue": {"now": 0, "prefetch": 12, "building": 2},
  "store": {"cells": 431, "bytes": 182000000, "capBytes": 12000000000},
  "scratch": {"bytes": 0, "capBytes": 2000000000},
- "upstream": {"requests": 5021, "errors": 3, "lastError": null},
+ "upstream": {"requests": 5021, "errors": 3, "lastError": null, "downloads": 1345, "downloadBytes": 1460000000},
  "versions": {"tlm": "swisstlm3d_2026-02", "boundaries": "swissboundaries3d_2026-01"}}
 ```
 

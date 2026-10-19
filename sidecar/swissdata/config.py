@@ -18,6 +18,7 @@ class Config:
     store_cap_bytes: int = 12_000_000_000
     scratch_cap_bytes: int = 2_000_000_000
     keep_raw: bool = True  # dev default; production sets SWISSDATA_KEEP_RAW=0
+    dev_bbox: bool = True  # dev default: never touch tiles outside the test bbox; production sets SWISSDATA_DEV_BBOX=0
 
     @staticmethod
     def from_env() -> "Config":
@@ -30,4 +31,6 @@ class Config:
             scratch=p("SWISSDATA_SCRATCH", _REPO / ".data-cache" / "scratch"),
             max_downloads=min(4, int(os.environ.get("SWISSDATA_MAX_DOWNLOADS", "2"))),
             keep_raw=os.environ.get("SWISSDATA_KEEP_RAW", "1") != "0",
+            dev_bbox=os.environ.get("SWISSDATA_DEV_BBOX", "1") != "0",
+            store_cap_bytes=int(os.environ.get("SWISSDATA_STORE_CAP_BYTES", "12000000000")),
         )

@@ -25,3 +25,8 @@ packages = ["swissdata"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "network: talks to swisstopo (downloads into $SWISSDATA_RAW); run with -m network",
+    "slow: takes more than a few seconds",
+]
+addopts = "-m 'not network'"
