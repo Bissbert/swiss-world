@@ -33,6 +33,7 @@ import java.util.UUID;
 import net.minecraft.ChatFormatting;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
+import net.minecraft.commands.arguments.coordinates.BlockPosArgument;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
@@ -130,6 +131,9 @@ public final class SwissCommands {
                                 .executes(c -> goToPlace(c.getSource().getPlayerOrException(), StringArgumentType.getString(c, "place")))))
                 .then(Commands.literal("admin").requires(s -> s.hasPermission(2))
                         .then(Commands.literal("status").executes(c -> status(c.getSource())))
+                        .then(Commands.literal("light").executes(c -> light(c.getSource()))
+                                .then(Commands.argument("pos", BlockPosArgument.blockPos())
+                                        .executes(c -> lightAt(c.getSource(), BlockPosArgument.getBlockPos(c, "pos")))))
                         .then(Commands.literal("origin")
                                 .executes(c -> showOrigin(c.getSource()))
                                 .then(Commands.argument("e", LongArgumentType.longArg(2_480_000, 2_840_000))
@@ -498,6 +502,20 @@ public final class SwissCommands {
         MinecraftServer server = s.getServer();
         SwissRuntime.sidecar().status().whenComplete((JsonObject o, Throwable err) -> server.execute(() ->
                 s.sendSystemMessage(Component.literal(err == null ? "sidecar: " + o : "sidecar: not reachable (" + rootMessage(err) + ")"))));
+        return 1;
+    }
+
+    private static int light(CommandSourceStack s) {
+        ServerLevel swiss = s.getServer().getLevel(SwissRegistries.SWITZERLAND);
+        if (swiss == null) return 0;
+        s.sendSystemMessage(Component.literal(LightStats.of(swiss)));
+        return 1;
+    }
+
+    private static int lightAt(CommandSourceStack s, BlockPos pos) {
+        ServerLevel swiss = s.getServer().getLevel(SwissRegistries.SWITZERLAND);
+        if (swiss == null) return 0;
+        s.sendSystemMessage(Component.literal(LightStats.at(swiss, pos)));
         return 1;
     }
 
