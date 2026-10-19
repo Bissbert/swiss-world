@@ -154,30 +154,40 @@ None. The real cells copied from the shared store (layers TERR/SURF/WLVL/WKND/OC
 
 - Bug (playtest): a vanilla `/tp` into cells the sidecar refused or was slow on froze the server for 20 s (StallGuard), the chunks completed as empty placeholders, and the player fell below min y and died ("fell out of the world"). The same happens with the sidecar down: tp, ender pearl, elytra, login.
 - **Shorter stall for players.** `StallGuard` now checks every 250 ms and classifies the stack. If the frame that called `ServerChunkCache.getChunk` is in `net.minecraft.world.entity.*`, `ServerPlayer`, `ServerGamePacketListenerImpl` or `PlayerList`, it gives up after `playerStallAbortSeconds` (default 2, 0 = use `stallAbortSeconds`). Otherwise it keeps waiting `stallAbortSeconds` (20). jstack showed the cross-dimension tp stall in `ServerPlayer.doTick → baseTick → updateFluidHeight → getChunk`, not only in `setPosRaw`, so this matches by caller class. `/swiss` and `/swiss goto` stay non-blocking (ticket wait).
+  - It aborts only if cells are actually outstanding. A tick that is merely slow (generation CPU, e.g. at login) is left alone.
   - Trade-off: an abort gives up **all** pending cells of that tick, so other chunks generating then also become placeholders. They are filled in while loaded (below) or regenerate when reloaded. Elytra flight into pending terrain can still freeze up to 2 s per chunk.
 - **`world/TerrainHold`.** Every 4 ticks, for survival and adventure players in Switzerland. If the player's chunk is not loaded, is a placeholder or is still being filled in, or has not reached the client yet, the player is held:
   - a transient gravity modifier ×0 (synced, so the client stops falling and the floating kick stays off);
   - fall distance and the floating counter are reset, and the position is pinned (absolute teleport if the player drifts > 0.5);
   - the action bar shows "Terrain still loading…".
   - A move of more than 8 blocks (a /tp) re-holds the player there.
-  - On release, a player below the ground (`MOTION_BLOCKING_NO_LEAVES`) is put on it, then lifted out of blocks (max 48). A player above the ground is left there and falls normally, so a /tp high into the air can still mean fall damage, as in vanilla.
+  - On release, a player below the ground (`MOTION_BLOCKING_NO_LEAVES`) is put on it, then lifted out of blocks (max 48).
+  - A player above the ground is left there and falls, with a **grace**: no fall damage and no floating kick until they land (on ground at the top of their column, or in water), at most 30 s.
+    - Without it, an elytra flight stopped by the hold, or a /tp into the air over a placeholder, ends in a deadly fall.
+    - Vanilla counts any fall as "floating": with allow-flight=false, a fall longer than 4 s kicks the player.
+    - The damage check looks only at the mark, because vanilla sets onGround before it applies landing damage.
   - `EntityInvulnerabilityCheckEvent`: in Switzerland, no `fell_out_of_world` damage at all; no `in_wall` or `fall` damage while held.
   - Creative and spectator players are left alone.
   - Death, logout, dimension change and game-mode change drop the hold and the modifier.
 - **`world/PlaceholderRepair`.** Each loaded placeholder with all 8 neighbours loaded asks for its cells again (scan every second, max 256 jobs, retry 2 s). Once they are there, it generates off-thread into a `ProtoChunk` with the same `fill` as `fillFromNoise`. On the server thread, max 2 per tick, it swaps in:
   - sections, block entities and post-processing;
   - heightmaps (the worldgen ones too, plus the neighbours' worldgen ones, so decoration does not log "Unprimed heightmap"), then biome decoration (ores, snow) and the POI check.
-  - It then relights the chunk like a new one and, once light is done, resends `ClientboundLevelChunkWithLightPacket` to players that already have it. The hold releases only after that (`settled`).
+  - It then relights the chunk like a new one. First it queues empty sky and block layers for the whole column: propagation only raises light, so without them the placeholder's sky 15 stayed in the stone (found on disk: 204k lit stone nibbles). Once light is done, it resends `ClientboundLevelChunkWithLightPacket` to players that already have it. The hold releases only after that (`settled`).
   - Not saved while empty: `AbortedChunks` downgrades placeholders on save (checked on disk: status `minecraft:biomes`, no sections or heightmaps). Repaired chunks are saved full.
   - Simplifications:
     - Light that crossed into neighbours from the empty chunk is not recomputed there.
     - A placeholder at the edge of the loaded area waits until its neighbours load.
-    - Ore scatter differs from a normally generated chunk, because neighbours decorate in a different order. Compared on disk: blocks other than ores are identical, as are all 4 heightmaps.
+    - Compared on disk with a normally generated region (720 chunks):
+      - All 4 heightmaps are identical.
+      - Blocks differ only in ore scatter (neighbours decorate in a different order) and in grass/dirt from random ticks.
+      - Sky light differs in ~8k nibbles across 68 chunks. They sit in air near the surface and in leaves, half of them at chunk borders. There is none in stone.
 - Evidence: `StallGuardTest` (tp stack, player-tick stack, forceload, no stall, limits) and `TerrainHoldTest` (ground y). Headless, private sidecar on 8095 with the dev bbox:
   - Old code: two 20 s stalls, then "Bot fell out of the world".
   - New code, each tp stalled ~2.1 s and the bot was held with the action bar; no kick, no damage. Covered: login into a placeholder, overworld → Switzerland tp, same-dimension tp, out-of-bbox tp, tp below the world (held at −2031), allow-flight on and off.
-  - Sidecar killed mid-session: held. Cell copied in, or sidecar restarted: chunks filled in within ~1 s, chunk resent, bot put on the ground at −1148.
-- Bot harness (`tools/bot.py`): no collision, ignores the gravity attribute, doesn't swim. So it drifts a few blocks between pins, and it drowned after a release 325 blocks above Lake Geneva; a real client would swim.
+  - Sidecar killed mid-session: held. Cell copied in, or sidecar restarted: chunks filled in within ~1 s, chunks resent (`chunk resent` in bot.py), bot put on the ground at −1148.
+  - Released 148 blocks above land: no damage (the broken first grace version: "fell from a high place"). Control fall of 12 blocks right after: −10 HP. Released 448 blocks up with allow-flight=false: no kick, no damage.
+  - Not exercised live: ender pearl and elytra (both go through the same hold), real client visuals.
+- Bot harness (`tools/bot.py`): no collision (a server correction counts as landing, so fall damage applies), ignores the gravity attribute, doesn't swim. So it drifts a few blocks between pins, and it drowned after a release 325 blocks above Lake Geneva; a real client would swim.
 
 ## M2 notes
 

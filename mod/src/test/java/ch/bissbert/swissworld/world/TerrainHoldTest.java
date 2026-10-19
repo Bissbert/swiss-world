@@ -22,4 +22,13 @@ class TerrainHoldTest {
         // empty column: the heightmap is min y
         assertEquals(MIN_Y + 1, TerrainHold.groundedY(-2100, MIN_Y, MIN_Y));
     }
+
+    @Test
+    void landedOnlyOnTheGroundOrInWater() {
+        org.junit.jupiter.api.Assertions.assertTrue(TerrainHold.landed(true, false, -1148, -1148));
+        org.junit.jupiter.api.Assertions.assertTrue(TerrainHold.landed(false, true, -1300, -1148));
+        // on ground reported in mid-air (held player), or still falling
+        org.junit.jupiter.api.Assertions.assertFalse(TerrainHold.landed(true, false, -1000, -1148));
+        org.junit.jupiter.api.Assertions.assertFalse(TerrainHold.landed(false, false, -1148, -1148));
+    }
 }

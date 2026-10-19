@@ -28,7 +28,9 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.level.ThreadedLevelLightEngine;
 import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.LightLayer;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.chunk.DataLayer;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.LevelChunkSection;
 import net.minecraft.world.level.chunk.ProtoChunk;
@@ -198,10 +200,16 @@ public final class PlaceholderRepair {
         SwissRuntime.clearAborted(pos);
         SETTLING.add(pos.toLong());
 
-        // relight like a new chunk: drop the old (all sky) light, then initialize and propagate again
+        // relight like a new chunk: replace the old light (sky 15 everywhere, the chunk was empty) by empty layers,
+        // since propagation only raises light (queueing null would drop only queued data, not the stored layers)
         ThreadedLevelLightEngine light = source.getLightEngine();
         chunk.initializeLightSources();
         light.updateChunkStatus(pos);
+        for (int y = light.getMinLightSection(); y < light.getMaxLightSection(); y++) {
+            SectionPos section = SectionPos.of(pos, y);
+            light.queueSectionData(LightLayer.SKY, section, new DataLayer());
+            light.queueSectionData(LightLayer.BLOCK, section, new DataLayer());
+        }
         light.initializeLight(chunk, false)
                 .thenCompose(c -> light.lightChunk(c, false))
                 .whenCompleteAsync((c, err) -> {

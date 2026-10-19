@@ -34,7 +34,9 @@ import net.neoforged.neoforge.event.entity.EntityInvulnerabilityCheckEvent;
  * server's floating kick stays off), fall distance is reset and an action bar says "Terrain still loading…". Once
  * the chunk is real and sent, the modifier is removed and the player is put on the ground if they are below it
  * (highest motion-blocking block that is not leaves), lifted further only if they would be inside blocks. A player
- * who is above the ground is left there and falls normally. Creative and spectator players are left alone.
+ * who is above the ground is left there and falls, without fall damage (an elytra flight stopped by the hold must not
+ * end in a deadly fall) and without the floating kick, until they land, at most {@link #GRACE_TICKS}. Creative and
+ * spectator players are left alone.
  *
  * <p>Damage from falling out of the world is cancelled for every player in Switzerland (and suffocation and fall
  * damage while held): below min y there is only
@@ -50,12 +52,16 @@ public final class TerrainHold {
     static final double TELEPORTED = 8;
     /** On release, lift at most this many blocks out of blocks the player would be stuck in. */
     static final int MAX_LIFT = 48;
+    /** After a release, fall damage stays off until the player lands, at most this long. */
+    static final int GRACE_TICKS = 30 * 20;
     static final ResourceLocation MODIFIER_ID = ResourceLocation.fromNamespaceAndPath(SwissWorld.MOD_ID, "terrain_hold");
     private static final AttributeModifier NO_GRAVITY =
             new AttributeModifier(MODIFIER_ID, -1.0, AttributeModifier.Operation.ADD_MULTIPLIED_TOTAL);
     private static final Component MESSAGE = Component.literal("Terrain still loading…");
 
     private static final Map<UUID, Held> HELD = new HashMap<>();
+    /** Released players still in the air (e.g. an elytra flight that was stopped): tick until which they take no fall damage. */
+    private static final Map<UUID, Integer> FALLING = new HashMap<>();
 
     private record Held(ServerPlayer player, Vec3 pos) {}
 
@@ -68,6 +74,24 @@ public final class TerrainHold {
 
     public static void clear() {
         HELD.clear();
+        FALLING.clear();
+    }
+
+    /**
+     * Whether a released player has come down: in water, or on the ground at the top of their column ({@code ground}
+     * is the first free y). Not just on ground: a held player's client may have reported on ground in mid-air.
+     */
+    static boolean landed(boolean onGround, boolean inWater, double y, int ground) {
+        return inWater || onGround && y <= ground + 1;
+    }
+
+    /**
+     * No fall damage for a released player until the grace is dropped, which happens after they landed (the landing
+     * itself, where vanilla already sees them on the ground, still counts) or when it runs out.
+     */
+    private static boolean inGrace(ServerPlayer p) {
+        Integer until = FALLING.get(p.getUUID());
+        return until != null && p.getServer().getTickCount() < until;
     }
 
     /** Server tick end. */
@@ -79,6 +103,17 @@ public final class TerrainHold {
             if (h.player.isRemoved() || h.player.hasDisconnected() || !applies(h.player)) {
                 removeModifier(h.player); // died, logged out, changed dimension or game mode
                 it.remove();
+            }
+        }
+        for (Iterator<Map.Entry<UUID, Integer>> it = FALLING.entrySet().iterator(); it.hasNext(); ) {
+            Map.Entry<UUID, Integer> e = it.next();
+            ServerPlayer p = server.getPlayerList().getPlayer(e.getKey());
+            if (p == null || !applies(p) || HELD.containsKey(e.getKey()) || now >= e.getValue()
+                    || landed(p.onGround(), p.isInWater(), p.getY(), p.serverLevel().getHeight(
+                            Heightmap.Types.MOTION_BLOCKING, p.getBlockX(), p.getBlockZ()))) {
+                it.remove();
+            } else {
+                resetFloating(p); // vanilla counts any fall as floating: a long one would get them kicked
             }
         }
         for (ServerPlayer p : server.getPlayerList().getPlayers()) {
@@ -158,6 +193,8 @@ public final class TerrainHold {
         HELD.remove(p.getUUID());
         removeModifier(p);
         putOnGround(level, p);
+        // left in the air (above the ground, or their flight was stopped): no fall damage until they land
+        FALLING.put(p.getUUID(), level.getServer().getTickCount() + GRACE_TICKS);
         p.displayClientMessage(Component.empty(), true);
     }
 
@@ -206,6 +243,7 @@ public final class TerrainHold {
     public static void loggedOut(ServerPlayer p) {
         Held h = HELD.remove(p.getUUID());
         if (h != null) removeModifier(h.player);
+        FALLING.remove(p.getUUID());
     }
 
     /**
@@ -216,7 +254,8 @@ public final class TerrainHold {
         if (!(e.getEntity() instanceof ServerPlayer p) || p.level().dimension() != SwissRegistries.SWITZERLAND) return;
         var source = e.getSource();
         if (source.is(DamageTypes.FELL_OUT_OF_WORLD)
-                || isHeld(p) && (source.is(DamageTypes.IN_WALL) || source.is(DamageTypes.FALL))) {
+                || isHeld(p) && (source.is(DamageTypes.IN_WALL) || source.is(DamageTypes.FALL))
+                || source.is(DamageTypes.FALL) && inGrace(p)) {
             e.setInvulnerable(true);
         }
     }

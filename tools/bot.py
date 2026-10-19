@@ -10,7 +10,7 @@ Needs an offline-mode server with network-compression-threshold=-1. Op the bot w
     walk:<dx>,<dz>,<v>   fly in a straight line at v m/s (spectator mode recommended), one move packet per tick
     fall:<seconds>       survival physics without collision: vanilla gravity while the bot's chunk is loaded (like the
                          real client, which freezes in unloaded chunks); the server's "moved wrongly" correction acts as
-                         the ground. Prints the y once a second, health changes, the action bar and death
+                         the ground (the next packet then says on ground, so fall damage applies). Prints the y once a second, health changes, the action bar and death
     respawn              request a respawn after death
 
 Chat is printed as "chat: ..."; URLs in click events are printed as "link: ...". Login and respawn packets print
@@ -188,6 +188,8 @@ class Bot:
             elif pid == 0x40:
                 x, y, z, yaw, pitch, flags = b.unpack("dddffB")
                 tid = b.varint()
+                # pushed up by the server: we hit something (or were pinned), which the fall reports as landing
+                self.landed = self.pos is not None and not flags & 2 and y > self.pos[1]
                 if self.pos is not None and flags:
                     px, py, pz = self.pos
                     x, y, z = (px + x if flags & 1 else x), (py + y if flags & 2 else y), (pz + z if flags & 4 else z)
@@ -247,7 +249,10 @@ class Bot:
         for t in range(1, int(seconds * 20) + 1):
             if self.pos is not None and not self.dead:
                 x, y, z = self.pos
-                if (math.floor(x) >> 4, math.floor(z) >> 4) in self.chunks:
+                if getattr(self, "landed", False):  # collision is the server's: land where it put us
+                    self.landed = False
+                    self.send(0x1A, struct.pack(">ddd?", x, y, z, True))
+                elif (math.floor(x) >> 4, math.floor(z) >> 4) in self.chunks:
                     y += self.vy
                     self.vy = (self.vy - 0.08) * 0.98
                     self.pos = (x, y, z)

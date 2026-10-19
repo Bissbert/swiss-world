@@ -65,6 +65,9 @@ public final class StallGuard {
         Wait wait = classify(server.getRunningThread().getStackTrace());
         long limit = limitMs(wait, limitMs, entityLimitMs);
         if (limit <= 0 || stalledMs < limit) return;
+        // a slow tick with every cell there (generation itself is slow): nothing to give up, and holding would turn
+        // the rest of the tick's chunks into placeholders for nothing
+        if (SwissRuntime.cells().pendingCount() == 0) return;
         holding = true;
         int cells = SwissRuntime.cells().abortWaiting();
         SwissWorld.LOGGER.warn("Server thread waited {} s for a {} whose cells are missing (sidecar {}); gave up {} "
