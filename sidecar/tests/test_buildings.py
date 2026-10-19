@@ -102,3 +102,14 @@ def test_disjoint_spans():
     S = swd.Span
     col = [S(100, 200, 0), S(150, 180, 1), S(190, 260, 2, 1, 1), S(260, 270, 3)]
     assert buildings.disjoint(col) == [S(100, 200, 0), S(200, 260, 2, 1, 1), S(260, 270, 3)]
+
+
+def test_sheet_of_2020_schema_links_roofs_by_uuid():
+    # the 2020 schema has no GEBAEUDEEINHEIT column; a roof skin carries the UUID of its body
+    old = lambda uuid: {"UUID": uuid, "EGID": None, "OBJEKTART": "Gebaeude Einzelhaus"}  # noqa: E731
+    body = box(E0 + 10.0, N0 + 10.0, 4.0, 4.0, 600.0, 606.0)
+    skin = box(E0 + 10.0, N0 + 10.0, 4.0, 4.0, 606.0, 606.2)
+    orphan = box(E0 + 40.0, N0 + 40.0, 2.0, 2.0, 600.0, 600.2)
+    sh = buildings.sheet_from_solids("swissbuildings3d_3_0_2020_1250-13", [(old("{A}"), body)],
+                                     [(old("{A}"), skin), (old("{X}"), orphan)])
+    assert sh.orphan_roofs == 1 and abs(sh.top_m[0] - 606.2) < 1e-9

@@ -1,4 +1,4 @@
-# NOTES — sidecar-core (Milestone 1)
+# NOTES — sidecar-core (Milestone 1, rebuild)
 
 Decisions made autonomously, deviations from the brief, and contract proposals. Nothing in a contract file
 was changed.
@@ -127,6 +127,18 @@ Production stores start empty, so this is dev-only. The fix is the reset describ
   `SWISSDATA_STORE_CAP_BYTES`.
 - `sidecar/pyproject.toml`: pytest markers `network`/`slow`, with `-m 'not network'` by default.
 - `sidecar/.dockerignore`: new.
+- `sidecar/swissdata/buildings.py`, `gwr.py` (sidecar-buildings): the cache temp file name carries pid and
+  thread id, since parallel rebuild workers may write the same sheet/GWR cache at once. No logic change.
+- `sidecar/swissdata/buildings.py` `sheet_from_solids` (sidecar-buildings): sheets of the **2020 schema**
+  (e.g. `…_2020_1249-24`, `…_2020_1250-13`, `…_2020_1251-11`, south-east of the test range) have no
+  `GEBAEUDEEINHEIT` column, which raised `KeyError` and failed 49 cells. When the column is absent, a roof
+  skin is linked by UUID, which in that schema usually equals its body's UUID. Sheets with the column behave
+  exactly as before. Test: `test_sheet_of_2020_schema_links_roofs_by_uuid`.
+  - Measured on the 7 cached 2020 sheets: 44 orphan (dropped) roof skins of ≈ 810, i.e. ≈ 5 %.
+    1250-24 accounts for 40 of 718.
+  - The 2021 Interlaken sheet 1208-43 has 37 of 5,918 (0.6 %).
+  - So some 2020 roofs do not share their body's UUID. Those bodies keep their flat body top; the cells are valid.
+  - A better link (e.g. spatial or EGID) is sidecar-buildings' call.
 
 ## Shared store
 
@@ -153,3 +165,95 @@ Production stores start empty, so this is dev-only. The fix is the reset describ
   556.5–4,273.5 m, with no NaN.
 - **No border cells** in the test bbox, so no INSD was emitted there. The INSD path is covered by the
   network test on 2610_1269 (Basel/Allschwil).
+
+## Rebuild (`python -m swissdata.rebuild`)
+
+`python -m swissdata.rebuild (--bbox E0 N0 E1 N1 | --all) [--workers N] [--dry-run]`, run from `sidecar/`.
+
+- **Selection:** live manifest entries only. Evicted cells are rebuilt on demand by the server from their
+  kept sources. The bbox is inclusive in km. With the dev guard on, a cell outside the dev area is logged and
+  skipped, never written. Order: mod-core's origin area (2626–2640 × 1164–1176) first, then the rest by key.
+- **Pins:** each cell is assembled with its manifest `sources` as `pinned`. `build.merge_sources(old, new)`
+  keeps every old key, adds new ones (`tlm`, `bathy`, `buildings`, `gwr`), which pins them, and raises
+  `PinChanged` if a builder returns a different value for an existing key. Such a cell fails and is left
+  untouched. The server's `build_cell` uses the same merge, so a rebuild of an evicted cell cannot drop keys.
+- **Atomicity:** worker *processes* assemble and encode (voxelising and GDAL are CPU-bound; threads mostly
+  serialised on the GIL). Only the main process writes:
+  - each file goes to a unique temp name in `cells/`, is fsynced and then renamed over the old one, so the mod
+    sees the old or the new cell, never a partial one;
+  - the manifest entry is replaced in batches (25 cells or 5 s). Until its batch lands, a cell is still ready
+    with its old entry; `bytes` in that entry may briefly be stale.
+  - The first cell is built in the main process, so on-disk caches (GWR table, sheets) are warm before the
+    pool starts. The temp names of those caches (buildings, gwr) now carry pid and thread id, because
+    workers may race to write the same cache (files outside owned paths, see below).
+- **LRU:** a rebuild writes with `touch=False`, so access times and the `/generated` marks stay as they were
+  (otherwise origin-first order would make the origin area the first eviction victims).
+- **Do not run it next to a server that builds the same cells.** Nothing breaks (the last manifest write
+  wins per cell, both entries are valid), but work is wasted, and the server's in-memory LRU state would
+  overwrite lru.json on its next flush.
+
+### Batched writes (task 3)
+
+- `Manifest.record_many` / `Store.write_many`: one locked rewrite of `manifest.json` per batch instead of one
+  per cell. The server still records per cell, because readiness needs the entry.
+- `lru.json` is advisory and is now written at most every `LRU_FLUSH_S` = 10 s, plus on eviction,
+  `/generated`, server shutdown and `Store.flush()`. A crash loses at most 10 s of access times.
+
+### GWR pin
+
+The pinned `gwr` snapshot (`gwr_be_<date>`) stays reproducible only while the parsed table in
+`scratch/gwr/be.v1.npz` or `raw/public.madd.bfs.admin.ch/be.zip` is kept: upstream publishes a new snapshot
+daily and old ones cannot be re-downloaded. `BuildingsBuilder` does not check a pinned `gwr` against the table
+it loaded (sidecar-buildings' code; flagged, not changed).
+
+**Consequence since `merge_sources`:**
+- If that table changes (be.zip re-fetched after scratch and raw were wiped, or the cache version bumps), the
+  builder emits a new `gwr` id for every cell.
+- `build.merge_sources` then raises `PinChanged`. Both the rebuild and the server's `build_cell` (including
+  rebuilds of evicted cells) would fail such cells permanently with `error`/`retryAfterS` 30.
+- That is consistent with `tlm.check_pinned`, which already fails hard, but the mod would see permanent errors.
+- **Fix needed (sidecar-buildings, via coordinator):** honour a pinned `gwr` by keeping each snapshot's table
+  under its id, or decide that `gwr` is advisory and exempt it from the pin check.
+
+### TLM extract margin
+
+The TLM extract (`tlm.EXTRACT_BBOX` = 2626–2674 × 1152–1183 km) covers every store cell, but there is no
+margin west of E2626. Features lying entirely west of 2626 000 are missing for a builder that looks beyond
+the cell edge of column E2626. Features that cross into the cell are complete (bbox filter keeps whole
+features).
+
+### Rebuild run (2026-10-19, shared store, 8 worker processes, no server running)
+
+- Baseline copy of the store (cells, manifest, lru) in the session scratchpad before the run.
+- `--all`: 1,286 cells selected. **Origin area (195 cells) done after 211 s**, everything after 865 s.
+  - 1,237 cells rebuilt.
+  - 49 failed on the 2020-schema sheets (see above), all at N1154–1155 E2650–2672 and E2672 N1156–1158.
+    They kept their old file and entry.
+  - After the fix, `--bbox 2650 1154 2672 1155` and `--bbox 2672 1156 2672 1158` rebuilt exactly those 49
+    in 51 s. **Total ≈ 916 s.**
+- **Store:**
+  - 1,286 cells, 478,777,695 bytes, i.e. **≈ 372 KB per cell**; it was 304 KB terrain-only.
+  - Median 372 KB, min 67 KB, max 1.41 MB (Interlaken, 959 buildings).
+  - manifest.json is 1.0 MB.
+- **Sources:**
+  - Every entry now has `alti, altiNeighbours, bathy, buildings, gwr, tlm`.
+  - `tlm` = `swisstlm3d_2026-02`; `gwr` = `gwr_be_2026-10-19`.
+  - `buildings` is non-empty in 1,220 cells; `bathy` is non-empty in 70.
+  - All old pins are unchanged against the baseline.
+- **TERR vs baseline:**
+  - identical in 184 cells;
+  - changed only in the 1,102 cells that contain water (WKND), which is the water builder's carving and
+    bathymetry;
+  - **0 dry cells changed**, so the ALTI pins held.
+- **Seams:** all 2,497 shared TERR edges are byte-identical after the water carving too.
+- **Other checks:**
+  - `lru.json` is identical to the baseline (touch=False);
+  - the manifest `bytes` matches each file;
+  - no temp files are left in `cells/`;
+  - 38,839 buildings in total.
+- **New downloads:** ≈ 100 MB (raw went from 5,044,504 KB to 5,142,192 KB), all swissBUILDINGS3D per-sheet
+  gdb.zip.
+  - The whole range needs 120 sheets (≈ 174 MB); 4 were there before, and sidecar-buildings had fetched more.
+  - Some sheets lie outside the WGS84 box, in the brief's LV95 range (same precedent as ALTI).
+  - No country-wide item.
+- Memory: 8 workers peaked at ≈ 4 GB RSS in total (trial run).
