@@ -143,6 +143,8 @@ public final class BuildingStage implements GenStage {
         if (roofSide) return pal.roof().defaultBlockState();
         int k = p.floors().indexOf(y);
         if (y == c.lo(x, z) || (k >= 0 && p.floorAt(k, x, z))) return pal.floor().defaultBlockState();
+        // the ground floor is lifted above a sunken footprint: solid below it, not a dark crawl space
+        if (y < p.floorY(0) && p.style() != Style.BRIDGE) return pal.foundation().defaultBlockState();
         return AIR;
     }
 

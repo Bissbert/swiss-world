@@ -189,16 +189,25 @@ class BuildingSweepTest {
         net.minecraft.server.Bootstrap.bootStrap();
         List<String> bad = new ArrayList<>();
         Map<String, Integer> causes = new java.util.TreeMap<>();
-        int total = 0, checked = 0, skipped = 0, withRooms = 0, leaking = 0, doorless = 0, badDoor = 0, openPanes = 0, gapUnder = 0, roofHoles = 0, hemmed = 0, thin = 0;
+        long slowMs = 0;
+        String slowest = "";
+        int total = 0, checked = 0, skipped = 0, withRooms = 0, leaking = 0, doorless = 0, badDoor = 0, openPanes = 0, gapUnder = 0, roofHoles = 0, rooms = 0, darkRooms = 0, darkBuildings = 0, noStairs = 0, noCore = 0, pockets = 0, hemmed = 0, thin = 0;
         String near = System.getenv("WT_NEAR");
         for (SwdCell cell : cells) {
             for (SwdCell.Building b : cell.buildings()) {
                 total++;
+                long t0 = System.nanoTime();
                 BuildingPlan p = BuildingPlan.of(v, cell, b);
+                long planMs = (System.nanoTime() - t0) / 1_000_000;
+                if (planMs > slowMs) {
+                    slowMs = planMs;
+                    slowest = b.gid() + " " + p.style() + " " + (p.cols().maxX - p.cols().minX + 1) + "x" + (p.cols().maxZ - p.cols().minZ + 1);
+                }
                 BuildingRender r = new BuildingRender(p, v);
                 if (r.incomplete) skipped++; // a neighbour cell is missing: flat ground and unknown columns, still checked
                 checked++;
                 if (!p.rooms().isEmpty()) withRooms++;
+                rooms += p.rooms().size();
                 List<String> why = BuildingRender.check(r);
                 if (near != null) bad.addAll(inspect(near, p, r, v, why));
                 if (why.isEmpty()) continue;
@@ -208,6 +217,11 @@ class BuildingSweepTest {
                 if (why.stream().anyMatch(w -> w.startsWith("leak"))) leaking++;
                 if (why.stream().anyMatch(w -> w.startsWith("pane-open"))) openPanes++;
                 if (why.stream().anyMatch(w -> w.startsWith("gap-under"))) gapUnder++;
+                darkRooms += why.stream().filter(w -> w.startsWith("dark-room")).count();
+                if (why.stream().anyMatch(w -> w.startsWith("dark-room"))) darkBuildings++;
+                if (why.stream().anyMatch(w -> w.startsWith("nostairs"))) noStairs++;
+                if (why.stream().anyMatch(w -> w.startsWith("nocore"))) noCore++;
+                if (why.stream().anyMatch(w -> w.startsWith("dark-pocket"))) pockets++;
                 if (why.stream().anyMatch(w -> w.startsWith("roof-hole"))) roofHoles++;
                 if (why.stream().anyMatch(w -> w.startsWith("nodoor"))) doorless++;
                 else if (why.stream().anyMatch(w -> w.startsWith("door"))) badDoor++;
@@ -218,14 +232,18 @@ class BuildingSweepTest {
             }
         }
         System.out.printf("watertight[%s]: %d buildings, %d checked, %d at a missing cell edge, %d with rooms, %d leaking, "
-                + "%d without door, %d bad door, %d with open panes, %d with gaps under roof stairs, %d with roof holes, %d hemmed in by neighbours, %d thin; %s%n", label, total,
-                checked, skipped, withRooms, leaking, doorless, badDoor, openPanes, gapUnder, roofHoles, hemmed, thin, causes);
+                + "%d without door, %d bad door, %d with open panes, %d with gaps under roof stairs, %d with roof holes, %d rooms of which %d dark in %d buildings, %d multi-floor without stairs, %d 8+ blocks tall without a stairs or ladder block, %d with a closed dark air pocket, %d hemmed in by neighbours, %d thin; %s%n", label, total,
+                checked, skipped, withRooms, leaking, doorless, badDoor, openPanes, gapUnder, roofHoles, rooms, darkRooms, darkBuildings, noStairs, noCore, pockets, hemmed, thin, causes);
+        System.out.printf("watertight[%s]: slowest plan %d ms (%s)%n", label, slowMs, slowest);
+        org.junit.jupiter.api.Assertions.assertTrue(slowMs < 1000, "plan took " + slowMs + " ms: " + slowest);
         // acceptance: nothing leaks or lacks a door; a door may only fail where neighbouring buildings or a thin shell
         // leave no room (a handful per thousand)
         org.junit.jupiter.api.Assertions.assertTrue(hemmed + thin <= Math.max(2, withRooms / 100),
                 "hemmed in " + hemmed + ", thin " + thin);
+        // closed dark pockets are roof/ridge voids of odd gables; tolerate a handful, they are listed in the output file
+        org.junit.jupiter.api.Assertions.assertTrue(pockets <= Math.max(3, withRooms / 500), "closed dark pockets in " + pockets + " buildings");
         java.nio.file.Files.write(Path.of(System.getenv().getOrDefault("WATERTIGHT_OUT", "/tmp/watertight.txt")), bad);
-        return bad.stream().filter(l -> !l.startsWith("NEAR") && !l.contains("[hemmed ") && !l.contains("[thin ")).toList();
+        return bad.stream().filter(l -> !l.startsWith("NEAR") && !l.contains("[hemmed ") && !l.contains("[thin ") && !l.contains("dark-pocket")).toList();
     }
 
     private static List<String> inspect(String near, BuildingPlan p, BuildingRender r, CellView v, List<String> why) {
@@ -243,7 +261,7 @@ class BuildingSweepTest {
             }
             sb.append('\n');
         }
-        sb.append("props: ").append(p.props()).append("\nrooms: ").append(p.rooms()).append("\nwalls: ").append(p.walls()).append('\n');
+        sb.append("lights: ").append(p.lights()).append("\nstairs: ").append(p.stairs()).append("\nprops: ").append(p.props()).append("\nrooms: ").append(p.rooms()).append("\nwalls: ").append(p.walls()).append('\n');
         sb.append("\nmap (B body, e eave, F other building, D door, o outside cell, . free):\n");
         for (int z = c.minZ - 8; z <= c.maxZ + 8; z++) {
             for (int x = c.minX - 8; x <= c.maxX + 8; x++) {
@@ -259,6 +277,12 @@ class BuildingSweepTest {
         if (sl != null) {
             String[] a = sl.split(",");
             return List.of(sb.toString(), r.dump(), r.top(), r.slice(Integer.parseInt(a[0]), Integer.parseInt(a[1]), Integer.parseInt(a[2]),
+                    Integer.parseInt(a[3]), Integer.parseInt(a[4])));
+        }
+        String lvl = System.getenv("WT_LEVEL");
+        if (lvl != null) {
+            String[] a = lvl.split(",");
+            return List.of(sb.toString(), r.level(Integer.parseInt(a[0]), Integer.parseInt(a[1]), Integer.parseInt(a[2]),
                     Integer.parseInt(a[3]), Integer.parseInt(a[4])));
         }
         return List.of(sb.toString(), r.dump(), r.top());

@@ -133,3 +133,19 @@ None. No contract file was changed.
 - Columns.fillPits raises a single column lower than its four body neighbours; Columns.uphill returns null on the ridge (no higher within two columns either way), so the ridge is full blocks.
 - Sweep checks (BuildingRender.gaps): "gap-under" (air directly below a roof stair/slab of a body column) and "roof-hole" (topmost block of a body column is not roof/wall material). Eaves outside the walls are exempt. WT_SLICE=z,xa,xb,ya,yb adds an XY slice to WT_NEAR output.
 - Probe: probeTargets also writes T lines (roof stairs); tools in scratch probe.py check stairs plus non-air below.
+
+## Building round 2: dark rooms, stairs, doors, planning cost
+
+- **Root cause of dark 2-high ground floors**: a ground floor lifted above the terrain (`lift`) left a hollow cavity
+  under floor 0; `BuildingStage.block` now fills `y < floorY(0)` with the palette foundation (non-bridges).
+- **Lights**: `BuildingPlan.lightGaps(k)` runs a 2D light-spread model (standing 14, glow/hanging 15 minus drop,
+  blocked by partitions, raised walls, pillars, props) and puts standing lanterns on every usable cell with level < 9.
+  Door cell gets glowstone in the ceiling where the ceiling is low. Skipped for footprints > 6000 columns
+  (the light grid covers them; the model would dominate plan time). Nearest-free search is bounded (4 blocks;
+  only the first light scans the room): see `BuildingPerfTest`.
+- **Ladders**: single-floor, non-empty buildings 8+ tall get a ladder (`findLadder`); `wanted` (floors wanted before
+  stair failure) is a new trailing `BuildingPlan` component.
+- **Sweep** (`BuildingSweepTest`/`BuildingRender`): counts dark rooms (block-light BFS), multi-floor without stairs,
+  8+ tall without stairs/ladder (footprint at least 5x5), closed dark air pockets (tolerated: a handful of roof voids),
+  slowest plan time (< 1000 ms asserted). Results: 6 origin cells (3511 buildings) 0 dark of 27020 rooms, 0 without
+  door, 0 without core; next store 0 dark of 101 rooms.

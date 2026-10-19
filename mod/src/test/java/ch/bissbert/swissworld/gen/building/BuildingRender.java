@@ -133,6 +133,9 @@ final class BuildingRender {
         Columns c = r.c;
         boolean[] out = r.outside();
         res.addAll(r.gaps());
+        res.addAll(r.darkRooms());
+        if (p.floors().size() > 1 && p.stairs() == null) res.add("nostairs floors=" + p.floors().size());
+        res.addAll(r.coreAndCavities());
         int open = 0;
         String firstPane = "";
         for (int z = c.minZ; z <= c.maxZ; z++) {
@@ -215,7 +218,7 @@ final class BuildingRender {
                 while (y >= y0 && at(x, y, z).isAir()) y--;
                 net.minecraft.world.level.block.Block b = at(x, y, z).getBlock();
                 boolean shaped = b == pal.roofStairs() || b == pal.roofSlab();
-                if (!shaped && b != pal.roof() && b != pal.wall() && b != pal.base() && b != Blocks.STONE) {
+                if (!shaped && b != Blocks.GLOWSTONE && b != pal.roof() && b != pal.wall() && b != pal.base() && b != Blocks.STONE) {
                     holes++;
                     if (fh.isEmpty()) fh = x + "," + y + "," + z + " " + b.getDescriptionId();
                 }
@@ -227,6 +230,130 @@ final class BuildingRender {
         }
         if (under > 0) res.add("gap-under n=" + under + " first=" + fu);
         if (holes > 0) res.add("roof-hole n=" + holes + " first=" + fh);
+        return res;
+    }
+
+    /** Block light levels (0..15) of the padded box: lanterns, glowstone and the like, spreading through non-solid cells. */
+    byte[] light() {
+        byte[] lv = new byte[blocks.length];
+        ArrayDeque<Integer> q = new ArrayDeque<>();
+        for (int i = 0; i < blocks.length; i++) {
+            int e = blocks[i].getLightEmission();
+            if (e > 0) {
+                lv[i] = (byte) e;
+                q.add(i);
+            }
+        }
+        while (!q.isEmpty()) {
+            int i = q.poll();
+            int x = i % w, z = (i / w) % d, y = i / (w * d);
+            int l = lv[i] - 1;
+            if (l <= 0) continue;
+            int[][] n = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
+            for (int[] o : n) {
+                int nx = x + o[0], ny = y + o[1], nz = z + o[2];
+                if (nx < 0 || nz < 0 || ny < 0 || nx >= w || nz >= d || ny >= h) continue;
+                int j = idx(nx, ny, nz);
+                BlockState b = blocks[j];
+                if (lv[j] >= l || b.canOcclude() && b.isSolidRender(net.minecraft.world.level.EmptyBlockGetter.INSTANCE, net.minecraft.core.BlockPos.ZERO)) continue;
+                lv[j] = (byte) l;
+                q.add(j);
+            }
+        }
+        return lv;
+    }
+
+    /**
+     * What the acceptance script checks: a building 8 or more blocks tall has a stairs or ladder block inside its
+     * footprint between base+1 and top-3, and no closed pocket of air of 8 or more blocks lies under or inside it.
+     */
+    java.util.List<String> coreAndCavities() {
+        java.util.List<String> res = new java.util.ArrayList<>();
+        int base = Integer.MAX_VALUE, top = Integer.MIN_VALUE, ax = Integer.MAX_VALUE, bx = Integer.MIN_VALUE, az = Integer.MAX_VALUE, bz = Integer.MIN_VALUE;
+        for (int z = c.minZ; z <= c.maxZ; z++) {
+            for (int x = c.minX; x <= c.maxX; x++) {
+                if (!c.body(x, z)) continue;
+                base = Math.min(base, c.lo(x, z));
+                top = Math.max(top, c.topFull(x, z));
+                ax = Math.min(ax, x); bx = Math.max(bx, x); az = Math.min(az, z); bz = Math.max(bz, z);
+            }
+        }
+        if (base == Integer.MAX_VALUE || p.style() == Style.TANK) return res; // a tank is a sealed cylinder, not a building to enter
+        if (top - base >= 8 && bx - ax >= 4 && bz - az >= 4) { // 3-wide towers have no cell strictly inside to hold a core
+            boolean has = false;
+            for (int y = base + 1; y <= top - 3 && !has; y++) {
+                for (int z = az; z <= bz && !has; z++) {
+                    for (int x = ax; x <= bx && !has; x++) {
+                        String n = net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(at(x, y, z).getBlock()).getPath();
+                        has = n.endsWith("_stairs") || n.equals("ladder");
+                    }
+                }
+            }
+            if (!has) res.add("nocore height=" + (top - base) + " floors=" + p.floors().size() + " wanted=" + p.wanted() + " style=" + p.style());
+        }
+        // closed air pockets (6-connected, no air path to the outside of the box or above the footprint) of >= 8 cells
+        java.util.Set<Integer> air = new java.util.HashSet<>();
+        for (int y = base; y < top - 4; y++) { // roof voids under the ridge are shell, not rooms
+            for (int z = az; z <= bz; z++) {
+                for (int x = ax; x <= bx; x++) if (c.body(x, z) && air(x, y, z)) air.add(idx(x - x0, y - y0, z - z0));
+            }
+        }
+        java.util.Set<Integer> seen = new java.util.HashSet<>();
+        for (int start : air) {
+            if (!seen.add(start)) continue;
+            java.util.ArrayDeque<Integer> q = new java.util.ArrayDeque<>();
+            q.add(start);
+            int n = 0;
+            boolean out = false, lit = false;
+            byte[] lv = light();
+            while (!q.isEmpty()) {
+                int i = q.poll();
+                n++;
+                if (lv[i] > 0) lit = true;
+                int x = i % w + x0, z = (i / w) % d + z0, y = i / (w * d) + y0;
+                int[][] nb = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
+                for (int[] o : nb) {
+                    int nx = x + o[0], ny = y + o[1], nz = z + o[2];
+                    if (!in(nx, ny, nz)) continue;
+                    int j = idx(nx - x0, ny - y0, nz - z0);
+                    if (air.contains(j)) {
+                        if (seen.add(j)) q.add(j);
+                    } else if (!c.body(nx, nz) && air(nx, ny, nz)) out = true;
+                }
+            }
+            if (n >= 8 && !out && !lit) res.add("dark-pocket cells=" + n + " at " + (start % w + x0) + "," + (start / (w * d) + y0) + "," + ((start / w) % d + z0));
+        }
+        return res;
+    }
+
+    /** Cells a mob could spawn on in the rooms: air with air above, a solid top face below. */
+    java.util.List<String> darkRooms() {
+        java.util.List<String> res = new java.util.ArrayList<>();
+        byte[] lv = light();
+        java.util.Set<Long> boxes = new java.util.HashSet<>();
+        for (BuildingPlan.Prop pr : p.props()) if (pr.kind().container()) boxes.add(((long) pr.x() << 32) ^ (pr.z() & 0xFFFFFFFFL) ^ ((long) pr.y() << 52));
+        for (BuildingPlan.Room room : p.rooms()) {
+            int y = p.floorY(room.floor()), dark = 0, cells = 0;
+            String first = "";
+            for (int z = room.z0(); z <= room.z1(); z++) {
+                for (int x = room.x0(); x <= room.x1(); x++) {
+                    if (boxes.contains(((long) x << 32) ^ (z & 0xFFFFFFFFL) ^ ((long) (y + 1) << 52)) || !c.interior(x, z) || !p.floorAt(room.floor(), x, z) || c.cover(x, z) - y < 3 || !in(x, y + 1, z) || !air(x, y + 1, z) || !air(x, y + 2, z) || at(x, y, z).isAir()) continue;
+                    cells++;
+                    // a nook sealed on all four sides by walls, furniture or chests cannot be entered: not a room cell
+                    boolean sealed = true;
+                    for (Dir dd : Dir.values()) {
+                        sealed &= !air(x + dd.dx, y + 1, z + dd.dz) || boxes.contains(((long) (x + dd.dx) << 32) ^ ((z + dd.dz) & 0xFFFFFFFFL) ^ ((long) (y + 1) << 52));
+                    }
+                    if (sealed) continue;
+                    if (lv[idx(x - x0, y + 1 - y0, z - z0)] == 0) {
+                        final int xx = x, zz = z, yy = y;
+                        dark++;
+                        if (first.isEmpty()) first = x + "," + (y + 1) + "," + z + " cov=" + (c.cover(x, z) - y) + " res=" + p.reserved(x, z) + " props=" + p.props().stream().filter(q -> Math.abs(q.x() - xx) + Math.abs(q.z() - zz) <= 1 && q.y() == yy + 1).map(q -> q.kind() + "@" + q.x() + "," + q.z()).toList() + " walls=" + p.walls().stream().filter(w -> w.floor() == room.floor()).filter(w -> Math.abs((w.alongX() ? w.line() - zz : w.line() - xx)) <= 1).map(w -> (w.alongX() ? "Z" : "X") + w.line() + "[" + w.from() + ".." + w.to() + "g" + w.gap() + "]").toList() + " lv=" + lv[idx(x - x0, y + 1 - y0, z - z0)] + " nb=" + at(x - 1, y + 1, z).getBlock().getDescriptionId().replace("block.minecraft.", "") + "," + at(x + 1, y + 1, z).getBlock().getDescriptionId().replace("block.minecraft.", "") + "," + at(x, y + 1, z - 1).getBlock().getDescriptionId().replace("block.minecraft.", "") + "," + at(x, y + 1, z + 1).getBlock().getDescriptionId().replace("block.minecraft.", "");
+                    }
+                }
+            }
+            if (dark > 0) res.add("dark-room " + room.type() + " f" + room.floor() + " " + dark + "/" + cells + " first=" + first);
+        }
         return res;
     }
 
@@ -315,13 +442,30 @@ final class BuildingRender {
 
     /** XY slice at z for x in [xa, xb], y from top down. */
     String slice(int z, int xa, int xb, int ya, int yb) {
-        StringBuilder sb = new StringBuilder("slice z=" + z + " x " + xa + ".." + xb + "\n");
+        StringBuilder sb = new StringBuilder("slice z=" + z + " x " + xa + ".." + xb + " (air shows block light hex)\n");
+        byte[] lv = light();
         for (int y = yb; y >= ya; y--) {
             sb.append(String.format("%6d ", y));
             for (int x = xa; x <= xb; x++) {
                 BlockState b = at(x, y, z);
                 String n = net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(b.getBlock()).getPath();
-                sb.append(b.isAir() ? '.' : n.contains("door") ? 'D' : n.contains("stairs") ? 'S' : n.contains("slab") ? '_' : n.contains("pane") || n.contains("glass") ? 'G' : '#');
+                sb.append(b.getLightEmission() > 0 ? 'L' : b.isAir() ? (in(x, y, z) ? Character.forDigit(lv[idx(x - x0, y - y0, z - z0)], 16) : '.') : n.contains("door") ? 'D' : n.contains("stairs") ? 'S' : n.contains("slab") ? '_' : n.contains("pane") || n.contains("glass") ? 'G' : '#');
+            }
+            sb.append('\n');
+        }
+        return sb.toString();
+    }
+
+    /** XZ plan at world y, x and z ranges: air shows light hex, solids their first letter. */
+    String level(int y, int xa, int xb, int za, int zb) {
+        StringBuilder sb = new StringBuilder("level y=" + y + "\n");
+        byte[] lv = light();
+        for (int z = za; z <= zb; z++) {
+            sb.append(String.format("%5d ", z));
+            for (int x = xa; x <= xb; x++) {
+                BlockState b = at(x, y, z);
+                String n = net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(b.getBlock()).getPath();
+                sb.append(b.isAir() ? (in(x, y, z) ? Character.forDigit(lv[idx(x - x0, y - y0, z - z0)], 16) : '.') : Character.toUpperCase(n.charAt(0)));
             }
             sb.append('\n');
         }
