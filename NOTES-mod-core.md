@@ -116,7 +116,8 @@ None. The real cells copied from the shared store (layers TERR/SURF/WLVL/WKND/OC
 - `tools/fake_sidecar.py`: a dev-only fake of the control plane. It writes synthetic cells and a synthetic coverage.bin, and refuses to run on the shared store.
 - `mod/build.gradle`: Minecraft on the unit-test classpath (`addModdingDependenciesTo(sourceSets.test)`) for the vanilla-pack comparison; the `swissworld.vanillaPack` run property.
 - `mod/src/main/templates/META-INF/neoforge.mods.toml`: the `[[mixins]]` entry. `META-INF/accesstransformer.cfg`: `PalettedContainer.data` and `PalettedContainer$Data` public.
-- `tools/bot.py`: a headless 1.21.1 offline client for smoke tests (commands, waits, straight-line flights; prints the isFlat flag of login/respawn packets).
+- `tools/bot.py`: a headless 1.21.1 offline client for smoke tests (commands, waits, straight-line flights; prints the isFlat flag of login/respawn packets). `BOT_VIEW` sets the view distance it requests.
+- `mod/build.gradle`: `SWISSWORLD_SERVER_JVM` passes extra JVM flags to `runServer` (heap limits, GC logs, JFR).
 
 ## Dev pitfalls
 
@@ -149,6 +150,33 @@ None. The real cells copied from the shared store (layers TERR/SURF/WLVL/WKND/OC
 - Unchanged: `ServerLevel.isFlat()` (its only server-side reader is `createCommonSpawnInfo`; `WorldData.isFlatWorld` and the level.dat flag stay vanilla). Client-side, `isFlat` is read only by `ClientLevelData` for these two values. Other dimensions keep the vanilla flag.
 - Evidence: `FlatHorizonTest` (Switzerland gets the flag with every other field kept; overworld/nether/end returned as is). Live check with the fake sidecar: `tools/bot.py` now prints `spawn: <dim> flat=<isFlat>` from the login/respawn packets. Overworld login `flat=False`; `/swiss` → `swissworld:switzerland flat=True`; reconnecting inside Switzerland → `flat=True`; `/swiss back` → `minecraft:overworld flat=False`. The death-respawn path was not exercised live (the bot can't respawn); it builds the same record.
 - **To check visually (real client):** in Switzerland, in the valley (~y −1430) and on a peak, the sky below the horizon is sky-coloured, not black, and the fog matches the overworld at the same time of day; the same after `/swiss` → `/swiss back` → `/swiss` and after dying and respawning there. The overworld sky is unchanged. If the void fog now looks too bright near the bottom, that is the vanilla flat-world behaviour.
+
+## OOM in the light engine: no light storage for buried rock (2026-10-19)
+
+- Incident (brief `oom-light`): the playtest client (16 GB, view 20 / sim 12, x 25000 z 10000, Grimsel) died at `Long2ObjectOpenHashMap.clone` ← `SkyDataLayerStorageMap.copy` ← `LayerLightSectionStorage.swapSectionMap` ← `LightEngine.runLightUpdates`.
+- Root cause: vanilla light storage holds a sky and a block entry for every non-air section and its neighbours. Mountain columns in our 4064-tall dimension are solid from y −2032 to ~y 700, about 170 sections per column, so 430k–630k entries per layer (the hash table grows to 2^20 slots). `swapSectionMap` clones the whole table on every light batch (12 MB of humongous long[]/Object[] per layer and swap). JFR, 20 s at 8 GB: 16.3 GB of humongous allocations, all of them these clones (sky long[] 6.64 GB ×792, block long[] 4.24 GB ×505, plus the Object[] values), i.e. ~40 sky and ~25 block swaps/s, against a live set of ~1.5 GB. G1 can't keep up and falls back to Full GCs. The client keeps its own engine and also swaps every frame; with client and server in one JVM that ended in the OOM. Not new: the 0bba118 control shows the same pattern (9 Full GCs at 8 GB over fewer chunks). The isFlat change is not involved.
+- Fix (`world/SwissLight` + 4 mixins, Switzerland only): a section counts as "empty" for lighting when every state in its palette is opaque (`isSolidRender`, light block 15, emission 0) **and** the section above is opaque too. The second condition keeps the top rock section of every column stored, so sky light never reads 15 from "missing" sections inside rock below a surface that sits exactly on a section boundary. Hooks: `ThreadedLevelLightEngineMixin` (initializeLight), `LevelChunkMixin` and `ProtoChunkMixin` (block changes publish the section-status change for section i and i−1 before vanilla's own update), `ClientPacketListenerMixin` (the client's `enableChunkLight`). Missing block-light sections read 0, missing sky sections read from above (the stored lid gives 0), so values are the same as vanilla's.
+- Generation is not touched (light storage only). Tests: `SwissLightTest` (opaque states, the lid rule, cave openings, glowstone, mixed palettes, indexOf).
+- Numbers (server, 600 s bot flight, view 20 / sim 12; mountain = tp 25000/10000 y 1000 plus a loop, valley = Interlaken; "sky" = max stored sky sections):
+
+| run | peak heap | Full GC | humongous GC | live (histogram) | sky sections | chunks |
+|---|---|---|---|---|---|---|
+| mountain 8 GB, before | 8154 M | 25 | 356 | 1444 M | 630 193 | 20 726 |
+| mountain 8 GB, after | 3919 M | 0 | 3 | 1286 M | 22 665 | 18 788 |
+| mountain 24 GB, before | 12019 M | 0 | 118 | 1603 M | 629 543 | 18 829 |
+| mountain 24 GB, after | 8349 M | 0 | 2 | 1326 M | 22 308 | 20 727 |
+| valley 8 GB, before | 8190 M | 4 | 63 | 1367 M | 159 708 | 18 228 |
+| valley 8 GB, after | 4754 M | 0 | 2 | 1345 M | 23 839 | 18 228 |
+| valley 24 GB, before | 4908 M | 0 | 0 | 1531 M | 159 708 | 18 228 |
+| valley 24 GB, after | 4695 M | 0 | 0 | 1356 M | 23 662 | 18 228 |
+| mountain 8 GB, 0bba118 | 8150 M | 9 | 173 | 1330 M | – | 11 451 |
+
+  Peak heap with a 24 GB limit is mostly G1 letting the young generation grow; the GC counts are the signal.
+- Light probes (`/swiss admin light <pos>`, `level-seed=4242`, the same edits on both builds): a stone plaza filled up to y 703 with air from y 704 (a surface on a section boundary) gives sky 0 at y 703 and 15 at y 704; a 104-block shaft gives sky 15 at the bottom and 0 again after sealing; a cavity at y 300 with glowstone gives block 14 next to it and 0 after removal. The outputs of both builds are identical line for line, except that natural rock at y 560–680 reads "not stored" after the fix (values 0 both times). No mixin errors in any log.
+- Saved worlds (same seed, the same probe run): 2302 full chunks each; 2193 hash-identical; the other 109 differ only by ore↔ore swaps, 217 blocks in all (the decoration-order noise seen in the pack check); biomes identical. Saved block light is identical in all 584 708 sections. Sky light: 584 705 identical; the other 3 are all-air sections at 15 that one build saved and the other didn't (absent = 15 above the terrain), in both directions, so the values are the same.
+- Seed pitfall: `run/server.properties` had an empty `level-seed`, so every fresh `run/dev` is a new world, and a first unseeded A/B showed ore differences in every chunk. A/B checks need a fixed seed.
+- Rejected: capping our caches (they are not the live set); batching or rate-limiting swaps (POST_UPDATE readers need the visible map); a larger G1 region size (`-XX:G1HeapRegionSize=32m` would make the clones non-humongous, but it is a JVM flag for the user, not a fix in our code; worth noting for the server).
+- Not tested live: the client hook (`ClientPacketListenerMixin`) runs only in a real client; it was not tried, since the user's client must not be touched. Worth checking at the next playtest: no dark patches or light seams in Switzerland, and the client heap stays flat at view 20.
 
 ## M2 notes
 

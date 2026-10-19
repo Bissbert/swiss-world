@@ -4,8 +4,15 @@
   "package": "ch.bissbert.swissworld.mixin",
   "compatibilityLevel": "JAVA_21",
   "mixins": [
+    "LevelChunkMixin",
+    "LevelLightEngineAccessor",
     "PalettedContainerMixin",
-    "ServerPlayerMixin"
+    "ProtoChunkMixin",
+    "ServerPlayerMixin",
+    "ThreadedLevelLightEngineMixin"
+  ],
+  "client": [
+    "ClientPacketListenerMixin"
   ],
   "injectors": {
     "defaultRequire": 1
