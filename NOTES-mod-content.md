@@ -12,7 +12,12 @@
 ## Decisions
 - **Plan per building, rendered per chunk.** A plan depends only on the building's own BTBL row and its BSPN
   columns, never on the chunk being generated, so every chunk that touches a building computes the same plan
-  (tested across a synthetic cell border). Plans are recomputed per chunk (no cache yet; cheap for M1 sizes).
+  (tested across a synthetic cell border). Plans are cached per gid (LRU 256) since every stage of every chunk
+  a building touches asks again; without the cache large blocks stalled chunk generation.
+- **Neighbour cells**: `GenContext` only loads the cells under the chunk's corners, so `CellView` falls back to the
+  store for any other cell a building reaches (memoised per chunk). It reads the file on the calling thread: stages
+  can run on CellCache's own IO threads, and joining `CellCache.get` there deadlocked (watchdog kill in the dev
+  run). `Buildings.near` scans the cells under the margin-grown box, not just the chunk corners.
 - **Storey height** from the BTBL height span and GASTW: `round(h / (GASTW + 0.7))`, clamped to 3..4 blocks;
   4 without GASTW. Halls (church, barn, industrial incl. greenhouse, plain = tank/large wall/covered bridge) get one floor.
 - **Roof** from the column tops: a column whose top is above a lower neighbour of the same building gets a stair
@@ -22,9 +27,11 @@
   gid hash. Vanilla blocks only.
 - **Door**: entranceSide if the sidecar sets it, else a gid-hashed side (the sidecar emits 0 for all real
   buildings so far); the door is placed on the first facade column found marching inward on lines near the centre.
-- **Interior**: a straight stair core (ladder if no straight run fits), BSP rooms of at least 3×3, partitions with a
+- **Interior**: a straight stair core (ladder if no straight run fits), BSP rooms of at least 3×3 with at least two
+  usable cells, partitions with a
   door gap, room types by style and floor. Every room gets a light (glowstone in the ceiling for low rooms, lantern
-  hanging otherwise) and a container; props never sit on the stair run/landing. No entities.
+  hanging otherwise; the first light is placed before props so it cannot be crowded out) and a container (on any
+  unused cell if no free wall cell is left); props never sit on the stair run/landing. No entities.
 - **Loot**: containers carry `LootTable = swissworld:chests/<room>` and a seed from hash(gid, x, y, z). Lootr's
   chest/barrel are used when `lootr` is loaded (looked up by registry id, no compile dependency).
 - **Auto-mixed loot**: each room table holds a single `swissworld:auto_mix` entry, so a datapack that replaces
@@ -50,16 +57,27 @@ Fixture store `SWISSWORLD_STORE=/tmp/swissworld-mod-content` (fixture copied to 
   other rooms still mixed.
 
 Real Interlaken cell (terrain from the shared store, read-only; BTBL/BSPN built with main's `BuildingsBuilder`
-from already-cached sheets, no downloads) in a second private store `/tmp/swissworld-mod-content-real`:
+from the swissBUILDINGS3D zips already in `$SWISSDATA_RAW` (all older than the run; no downloads), re-parsed into
+the worktree's gitignored `.data-cache/scratch` because `SWISSDATA_SCRATCH` defaults under the repo) in a second private store `/tmp/swissworld-mod-content-real`:
 959 buildings. Spot checks near the origin: a chalet (stone-brick base, spruce upper storey, dark-oak stair roof
 with a ridge, glowstone, beds, chest with `swissworld:chests/workshop`, barrel with `residential_kitchen`); a
 4-storey stepped block with 4 floors, rooms per floor and a ladder core. No exceptions in the log.
+After the neighbour/cache changes: 147 chunks force-loaded (chalet, the 4-storey block, and the cell's west border
+x -912..-880 where the neighbour cell is missing) in 16 s without errors; fixture acceptance probes unchanged.
+
+Planner sweep (ad-hoc test, not committed) over all 959 real buildings: 959 planned, 0 failures; 10354 rooms,
+41351 eave columns in 926 buildings (part=1 is common), 5200 columns with several spans, 247 single-floor,
+514 with a ladder core, 43 multi-floor buildings with neither stairs nor ladder. Styles: TOWN_HOUSE 405,
+INDUSTRIAL 140, OLD_TOWN 133, MODERN 84, CHALET 80, BARN 55, COMMERCIAL 32, HOTEL 20, CHURCH 7, PLAIN 3.
 
 ## Known limitations / follow-ups
-- **Cross-cell buildings**: `CellView` only sees the cells `GenContext` loaded for the chunk. A building whose bbox
-  crosses into a cell that was not loaded for that chunk plans with those columns unknown (treated as outside
-  facade-wise but not drawn). Proposal for mod-core: let GenContext also load the neighbour cells a building bbox
-  reaches (or pad the chunk lookup by ~64 blocks). No contract file change needed.
+- **Cross-cell buildings**: neighbours are now read from the store (see Decisions). A neighbour cell built
+  *after* some of the building's chunks were generated yields a different plan for the later chunks (seam).
+  Suggestion for mod-core, not required: preload neighbour cells in GenContext so the fallback rarely reads.
+- The plan cache is static and keyed by gid only; switching stores in one JVM (integrated client) could reuse a
+  stale plan. Fine on a dedicated server.
+- 43 of 959 real multi-floor buildings get neither stairs nor ladder (no free 1-wide run); their upper floors are
+  unreachable.
 - Lootr path compiled but untested (Lootr not in the dev run).
 - Real data has no entranceSide yet; door side is hashed. Stair cores in large real buildings often fall back to
   ladders; a U-shaped stair would fit better.
