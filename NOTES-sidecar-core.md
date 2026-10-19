@@ -119,3 +119,19 @@ intersect the WGS84 test bbox **or** lie in the LV95 range E 2628–2672 × N 11
 - The stray 27 KB synthetic `2632_1170.swd` was already gone when the real build started; the real
   cell has a manifest entry now.
 - Tests only use `tmp_path` stores.
+
+## Acceptance run (2026-10-19, shared store, `uv run python -m swissdata.server`, 2 workers)
+
+- `POST /request {"cells":[[2631,1170]],"priority":"now"}` produced `store/cells/2631_1170.swd`
+  (130 KB) in under 1 s; `/wait` returned `ready`. The COGs were already in raw.
+- Bulk run through the queue, scripted as a client in the session scratchpad:
+  - origin area 2626–2640 × 1164–1176 at `now`, then E 2628–2672 × N 1154–1181 at `prefetch`;
+  - **origin area done after 61 s, everything after 301 s**;
+  - **1,273 cells ready.** The 13 errors are exactly the E2626 column (dev guard).
+- **Store:** 388,178,091 bytes, i.e. **≈ 305 KB per cell** (374 MB on disk).
+- **Downloads:** 1,267 COGs, 1.44 GB. Upstream errors: 1, a transient DNS failure that the fetch retry
+  absorbed. Scratch (edge cache): 22.6 MB.
+- **Seams:** all 2,472 shared edges between adjacent cells are byte-identical. Heights run
+  556.5–4,273.5 m, with no NaN.
+- **No border cells** in the test bbox, so no INSD was emitted there. The INSD path is covered by the
+  network test on 2610_1269 (Basel/Allschwil).
