@@ -2,7 +2,7 @@
 
 ## Status
 
-M1 is implemented and committed on `mod-core`, rebased on main `be45cfa`. `./gradlew build` passes with 17 unit tests.
+M1 is merged (main `bb9e79f`). M1.1 (snow, CNPY/TTOP, tick re-measurement) is on `mod-core` on top of it. `./gradlew build` passes with 48 tests.
 Dev evidence comes from `mod/run` on ports 25640/25641, with private stores only:
 
 - `/tmp/swissworld-mod-core` holds the fake sidecar's synthetic cells.
@@ -24,6 +24,7 @@ Dev evidence comes from `mod/run` on ports 25640/25641, with private stores only
 ## Decisions
 
 - **Cell readiness.** The mod treats "file exists in `cells/`" as ready, because the sidecar renames files into place atomically. The coordinator's rule for the sidecar is "file exists AND a manifest entry without `evicted`". The mod doesn't read manifest.json: an evicted cell is deleted, so its file is gone, and a half-written file can't exist. If eviction ever leaves the file in place, CellCache must check the manifest. That is one call in `tryLoad`.
+- **The mod relies on "eviction deletes the file"** (coordinator: fine as is).
 - **Missing cells never become ocean.** Only coverage.bin says OUTSIDE. The sidecar's `outside` is trusted only while there is no coverage.bin. A disagreement is logged and the cell stays pending. An unreadable file stays pending and is retried.
 - **Shutdown.** Vanilla waits for every generating chunk, and a failed step is fatal. So at `ServerStopping` the pending cells are aborted: those chunks complete empty and are marked. On save, `world/AbortedChunks` rewrites them to status `minecraft:biomes` with no blocks, light or heightmaps, so they regenerate on the next start.
 - **StallGuard (new).** Some vanilla code loads a chunk synchronously on the server thread, for example `forceload add`. With the sidecar down, that wait never ended and the watchdog killed the server.
@@ -42,7 +43,7 @@ Dev evidence comes from `mod/run` on ports 25640/25641, with private stores only
   - The dimension uses `swissworld:swiss`. The plains entry on main was the placeholder.
   - `SwissBiomeSource` maps SURF/OCLS to 12 `swissworld:*` biomes (11 + ocean) and fills them in `fillFromNoise`, from the same cells, so biomes are never baked from a guess.
   - Following the coordinator, the biomes carry **no surface features**, only `underground_ores` (step 6). After a scan of 441 full chunks: 0 plants, 0 logs, 0 scheduled ticks; coal, iron, copper, gold, redstone, lapis and diamond present.
-- **No worldgen snow.** The ore-only feature lists also dropped vanilla's `freeze_top_layer` (step 9). So newly generated chunks above the snow line have no snow or ice until weather adds them; the 2,314 m evidence comes from rain. That feature is deterministic per column and schedules no fluid ticks. **Coordinator decision:** add it back to the cold biomes, or leave snow to mod-surface?
+- **Worldgen snow (M1.1).** Following the coordinator, `minecraft:freeze_top_layer` (top_layer_modification, index 10) is back on alpine_meadow, rock, scree, glacier and subalpine_forest. Subalpine is included because real treeline columns reach past 2,320 m, where vanilla freezes at temperature 0.45. Colline, montane, urban, lake and river stay ore-only. Fake-sidecar run (182 forced chunks, valley plus a strip up the 3,300 m peak): snow layers from **2,314 m** up to 3,315 m, no `minecraft:ice` anywhere, and the valley lakes (water 164–624 m) are neither frozen nor covered in snow. Glacier (temperature −0.3) freezes at any altitude by design.
 - **Ore placement.** Vanilla ore heights (y −64..320) mean nothing at y −2032..2032, so `placed_feature/ore_*.json` place ores relative to the surface: heightmap `OCEAN_FLOOR_WG`, then chained `random_offset` steps, because each step is limited to ±16. Depth bands go from 4 to 64 m below ground; emeralds only in rock, scree, alpine_meadow and glacier. Surface-relative ores belong to the ore step, not a new GenStage.
 - **CELL_MARGIN = 8.** This mirrors mod-surface: `fillFromNoise` loads the cells for the chunk plus 8 columns around it, with the same constant and javadoc, so the merge is trivial.
 - **`getBaseHeight`/`getBaseColumn`** never block. They use the cell if it is cached; otherwise they answer ocean.
@@ -66,9 +67,48 @@ M2 options:
 - Fewer stored sections, by not saving all-air sections above the terrain.
 - Measuring on an idle machine first.
 
+## Tick times, M1.1 re-measurement (2026-10-19)
+
+The same bot and server session, spectator, 1 km at 20 m/s, `tick query` every 5 s. Real store, no sidecar. The machine was not idle: the user's Prism client ran at ~136 % CPU, load 6–15 on 10 cores.
+
+| Flight | P50 | P95 | P99 |
+|---|---|---|---|
+| Overworld east (load 10–15) | 2–6 ms | 14–50 ms (mostly 15–28) | 18–55 ms |
+| Overworld south (load 7–9) | 1–4 ms | 15–24 ms | 31–54 ms |
+| Switzerland east (load 8–10) | 0.7 ms | **47–54 ms** | 54–98 ms |
+| Switzerland south (load 6–7) | 0.7 ms | 27–45 ms | 30–107 ms |
+| Switzerland west + JFR (load ~7) | — | 29–51 ms | 30–509 ms (first window) |
+
+P95 is still over 50 ms. The cause is the chunk *saving* on unload, not generation. A low P50 with a steady P95 means a few ticks of ~30–50 ms each second. JFR on the server thread during the third flight (476 samples):
+
+- 76 % `ChunkMap.processUnloads` → `ChunkMap.save` → `ChunkSerializer.write`;
+- 62 % `PalettedContainer.pack`, almost all of it in `swapPalette` and `unpack`;
+- light 4 %, chunk sending 3 %, our own code under 1 % (generation runs off-thread).
+
+Of 1,104,138 saved sections (4,347 full chunks, 254 per chunk), **97.7 % of block containers and 86.7 % of biome containers are single-value**. Vanilla's `pack` still unpacks 4096 ints into a new array, runs `swapPalette` over them and builds a HashMapPalette for each of them. That fixed cost, ~6 µs × 254 sections, explains the ~1.5 ms per chunk measured in M1, against ~0.15 ms for vanilla's 24 sections.
+
+Proposed M2 fixes, in order (none implemented):
+
+1. **A `PalettedContainer.pack` fast path** (mixin, ~20 lines): if `data.palette` is a `SingleValuePalette`, return `new DiscData<>(List.of(value), Optional.empty())` at once. The output is byte-identical to vanilla's, because vanilla also writes a 1-entry palette with no data. It applies to all dimensions, which is harmless since the result is the same. Expected: pack cost per Swiss chunk ~1.5 → ~0.1 ms, roughly a 10× cut of the hot path. Verification: hash the region files before and after (`hash.py`) and run the same flight.
+2. **Skip uniform air sections above the terrain** on save, and recreate them as air on load (ChunkSerializer mixin). Smaller files and less NBT building (`Codec`/`NbtOps` is about another 10 %). It is riskier: it touches load, light and heightmaps. Do it only if 1 is not enough.
+3. **Spread unloads**: cap Switzerland chunk saves per tick, e.g. via `ChunkMap` unload batching, so a burst of unloads after a fast flight is not saved in one tick. This helps the P99 spikes (the 509 ms window), not the average.
+4. Not proposed: a lower dimension height, which the real altitudes rule out, and async serialization, which vanilla's chunk-state threading makes unsafe.
+
 ## Contract proposals
 
 None. The real cells copied from the shared store (layers TERR/SURF/WLVL/WKND/OCLS/OELV/OFLG) read fine with the current SwdReader.
+
+**CNPY/TTOP (done, at the coordinator's request):**
+
+- `SwdReader` decodes the optional `CNPY` (u8) and `TTOP` (§6a) layers. The size is checked against the u32 count; unknown tags are still ignored.
+- New `SwdCell` API:
+  - `canopy(dx,dz)`: 0 when there is no canopy or no CNPY;
+  - `hasCanopy()`;
+  - `trees()`: an immutable `List<SwdCell.Tree(dx, dz, heightM, crownDm, kind)>` in file order (dz, dx), empty without TTOP;
+  - `hasTrees()`: true if TTOP is present, even when empty, so mod-surface can tell "no trees here" from "no data";
+  - `Tree.CONIFER/BROADLEAF/LARCH`.
+- The 12-argument constructor stays, so existing callers and tests compile unchanged.
+- Tests use a synthetic in-memory .swd (both codecs, plus an unknown tag) until sidecar-core extends the golden fixture.
 
 ## Files outside owned paths
 
@@ -87,5 +127,5 @@ None. The real cells copied from the shared store (layers TERR/SURF/WLVL/WKND/OC
 
 - Sea and ocean fish spawns at y −1807.
 - Sky/fog colours at real altitudes, which need a client check.
-- The pack fast path above.
+- The pack fast path and the other save fixes, see "Tick times, M1.1".
 - Ores: ore veins (`ore_veins` noise) are not reproduced.
