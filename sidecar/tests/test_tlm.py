@@ -188,3 +188,30 @@ def test_raeterichsboden_dam(tmp_path):
     assert dam.sum() > 5_000
     assert np.all(L["OCLS"][dam] == overlay.DAM_CREST)
     assert np.allclose(swd.decode_height(L["OELV"][dam]), 1770.3, atol=0.05)
+
+
+def test_rail_centre_continues_under_road_bridge(tmp_path):
+    """2647_1177: a 6 m road bridge crosses the Brünig line east of Brienz."""
+    from swissdata import tlm_preview
+
+    cfg = tlm_preview.private_config(tmp_path)
+    if not tlm.extract_path(cfg).exists():
+        pytest.skip("no TLM extract in $SWISSDATA_RAW (export it as in docs/dev.md)")
+    e_km, n_km = 2647, 1177
+    cell, _ = build.assemble(e_km, n_km, cfg, builders=tlm_preview.builders())
+    L = cell.layers
+    ground_rails = [f.rail_line for f in overlay.collect(cfg, e_km, n_km) if f.rail_line is not None and not f.flags]
+    dz, dx = np.array(sorted({p for line in ground_rails for p in overlay.grid_path(line, e_km, n_km)})).T
+    assert np.all(L["OFLG"][dz, dx] & swd.OFLG_RAIL)  # no gap anywhere along the ground-level track
+
+    crossing = (L["OFLG"] & swd.OFLG_RAIL > 0) & (L["OFLG"] & swd.OFLG_BRIDGE > 0) & (L["OCLS"] != overlay.RAIL)
+    assert crossing.sum() >= 5
+    assert set(np.unique(L["OCLS"][crossing]).tolist()) == {overlay.SECONDARY}  # the road deck stays on top
+    clearance = swd.decode_height(L["OELV"][crossing]) - tlm.terr_columns(L["TERR"])[crossing]
+    assert np.all(clearance > 5)  # deck well above the rail on the terrain
+
+
+def test_rail_bit_under_road_bridge_only_for_road_decks():
+    assert overlay.under_road_bridge(overlay.SECONDARY, swd.OFLG_BRIDGE)
+    assert not overlay.under_road_bridge(overlay.RAIL, swd.OFLG_BRIDGE)  # rail bridge: rail is on the deck
+    assert not overlay.under_road_bridge(overlay.SECONDARY, 0)
