@@ -14,7 +14,7 @@ import java.util.Arrays;
  *   <li>Profile: a weighted mean of the deck heights of the same kind of way within {@link #ROAD_RADIUS} (roads) or
  *       {@link #RAIL_RADIUS} (rails). A mean over a disc keeps a constant grade and removes the cross slope, the
  *       per-column noise of the terrain, and single high or low columns.</li>
- *   <li>Rail track: the rail centre columns, minus one of two touching tracks, minus junction nodes; every rail's
+ *   <li>Rail track: the rail centre columns, minus one of two touching tracks; every rail's
  *       shape joins exactly its track neighbours, and its level is flat through curves (a curve cannot ascend).</li>
  *   <li>Earthworks: dry terrain within {@link #EARTHWORK_REACH} of an open way is cut or filled to the way's level
  *       at the shoulder, one block per column out to {@link #EARTHWORK_STEEP}, then easing back into the terrain,
@@ -535,9 +535,8 @@ public final class TransportPlan {
 
     private boolean c2(int x, int z) {
         if (!c1(x, z)) return false;
-        int deg = degree(x, z);
-        if (deg <= 2) return true;
-        return deg == 3;
+        // every node stays, a crossing (four) included: dropping it broke both lines (2339,-1989); see track()
+        return degree(x, z) <= 4;
     }
 
     /** Shortest track kept: where tracks merge, the thinning leaves short pieces that lead nowhere. */
@@ -698,6 +697,7 @@ public final class TransportPlan {
      */
     private int track(int x, int z) {
         int m = links(x, z);
+        if (Integer.bitCount(m) == 4) return crossing(x, z);
         if (Integer.bitCount(m) != 3) return m;
         int[][] arm = new int[4][];
         for (int d = 0; d < 4; d++) if ((m & 1 << d) != 0) arm[d] = arm(x, z, d);
@@ -736,6 +736,32 @@ public final class TransportPlan {
             }
         }
         return m & ~(1 << drop);
+    }
+
+    /**
+     * At a crossing (four track neighbours) vanilla rails can join only two: the pair of arms that runs on most nearly
+     * in a straight line, seen from where their walks end, carries on; the other two end beside it. Arms that end
+     * within {@link #SWITCH_WALK} rails (stubs) are passed over while a pair of longer ones exists. Bit mask as
+     * {@link #links}.
+     */
+    private int crossing(int x, int z) {
+        int[][] arm = new int[4][];
+        for (int d = 0; d < 4; d++) arm[d] = arm(x, z, d);
+        int pick = 0;
+        double best = Double.MAX_VALUE;
+        for (int d = 0; d < 4; d++) {
+            for (int e = d + 1; e < 4; e++) {
+                double ax = arm[d][2] - x, az = arm[d][3] - z, bx = arm[e][2] - x, bz = arm[e][3] - z;
+                double cos = (ax * bx + az * bz) / Math.sqrt((ax * ax + az * az) * (bx * bx + bz * bz));
+                int stubs = (arm[d][0] == ARM_END ? 1 : 0) + (arm[e][0] == ARM_END ? 1 : 0);
+                double score = stubs * 4 + cos - (OPP[d] == e ? 1e-6 : 0);
+                if (score < best) {
+                    best = score;
+                    pick = 1 << d | 1 << e;
+                }
+            }
+        }
+        return pick;
     }
 
     private static final int ARM_OPEN = 0, ARM_END = 1, ARM_SWITCH = 2;

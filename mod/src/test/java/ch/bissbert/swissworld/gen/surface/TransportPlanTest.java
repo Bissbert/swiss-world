@@ -519,6 +519,35 @@ class TransportPlanTest {
         }
     }
 
+    /**
+     * Two tracks crossing (2339,-1989, where a crossover cut the middle of three parallel tracks): the crossing node
+     * was dropped, which broke both lines. The straighter pair of arms carries on through it; a stub gives way.
+     */
+    @Test
+    void crossingTracksKeepOneLineThrough() {
+        for (boolean stub : new boolean[] {false, true}) {
+            SwdCell c = Cells.flat(600);
+            int north = stub ? -5 : -40; // the north arm: a stub of five rails, or a full track
+            for (int x = -40; x <= 40; x++) {
+                for (int z = -2; z <= 2; z++) Cells.overlay(c, x, z, OverlayPlan.RAIL_BED, 0, Double.NaN);
+            }
+            for (int z = north; z <= 40; z++) {
+                for (int x = -2; x <= 2; x++) Cells.overlay(c, x, z, OverlayPlan.RAIL_BED, 0, Double.NaN);
+            }
+            for (int x = -40; x <= 40; x++) Cells.overlay(c, x, 0, OverlayPlan.RAIL_BED, RAIL, Double.NaN);
+            for (int z = north; z <= 40; z++) Cells.overlay(c, 0, z, OverlayPlan.RAIL_BED, RAIL, Double.NaN);
+            TransportPlan t = new TransportPlan(Cells.grid(c, 0, 0, TransportPlan.MARGIN));
+            assertTrue(t.rail(0, 0), "a rail on the crossing");
+            Rail through = stub ? Rail.EAST_WEST : Rail.NORTH_SOUTH;
+            assertEquals(through, t.railShape(0, 0), "stub " + stub);
+            for (int i = -20; i <= 20; i++) {
+                int x = stub ? i : 0, z = stub ? 0 : i;
+                assertTrue(t.rail(x, z), "through line at " + x + "," + z);
+                assertEquals(through, t.railShape(x, z), "through line at " + x + "," + z);
+            }
+        }
+    }
+
     @Test
     void shortTrackPiecesWhereTracksMergeAreDropped() {
         SwdCell c = Cells.flat(600);
