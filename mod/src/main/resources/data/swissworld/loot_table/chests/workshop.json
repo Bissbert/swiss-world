@@ -1,0 +1,11 @@
+{
+  "type": "minecraft:chest",
+  "pools": [
+    {
+      "rolls": 1,
+      "entries": [
+        {"type": "swissworld:auto_mix", "room": "workshop", "count": {"type": "minecraft:uniform", "min": 4, "max": 8}}
+      ]
+    }
+  ]
+}
