@@ -414,10 +414,14 @@ class TransportPlanTest {
         for (int z = 34; z <= 44; z++) {
             for (int x = 1; x <= 2; x++) Cells.overlay(c, x, z, 6, 0, Double.NaN);
         }
+        // two paths over the hill, across the rail: 2 and 6 rows wide
         for (int x = -12; x <= 12; x++) {
-            for (int z = -31; z <= -30; z++) {
-                if (Math.abs(x) > 2) Cells.overlay(c, x, z, 6, 0, Double.NaN);
-            }
+            for (int z = -31; z <= -30; z++) Cells.overlay(c, x, z, 6, 0, Double.NaN);
+            for (int z = 20; z <= 25; z++) Cells.overlay(c, x, z, 6, 0, Double.NaN);
+        }
+        // a branch leaving the bore at its floor's level, deep under the hill
+        for (int x = -10; x <= -1; x++) {
+            for (int z = -5; z <= -3; z++) Cells.overlay(c, x, z, 6, 0, 600);
         }
         Voxels v = new Voxels(c, -16, -60, 16, 60, -1430, -1370);
         int floor = v.deck[v.col(0, 0)];
@@ -426,23 +430,38 @@ class TransportPlanTest {
             int head = z >= 12 && z <= 16 ? 3 : 6;
             for (int x = -2; x <= 2; x++) {
                 int col = v.col(x, z);
-                // the bore's floor under the path; at the ramped edge by a portal the arch comes one lower
-                int f = v.tunnelWay[col] ? v.deck[col] : v.deck[v.col(0, z)];
-                int h = v.tunnelWay[col] ? head : head - 1;
+                // the bore's floor under a path it took over; at the ramped edge by a portal the arch comes one lower
+                int f = v.bore[col];
+                if (f == ColumnGrid.NONE) {
+                    bad.add(x + "," + z + " no bore");
+                    continue;
+                }
+                int h = v.tunnelWay[col] || z < 34 ? head : head - 1;
                 for (int y = f + 1; y <= f + h; y++) {
                     B b = v.at(x, y, z);
                     if (b != B.AIR && b != B.RAIL && b != B.LANTERN) bad.add(x + "," + y + "," + z + " in the bore: " + b);
                 }
+                boolean roof = false;
+                for (int y = f + h + 1; y < v.y0 + v.ny; y++) roof |= v.at(x, y, z) == B.SOLID;
+                if (!roof) bad.add(x + "," + z + " open to the sky");
             }
-            int f = v.deck[v.col(0, z)];
+            int f = v.bore[v.col(0, z)];
             for (int y = f + 1; y <= f + head; y++) {
-                if (v.at(-3, y, z) == B.AIR || v.at(3, y, z) == B.AIR) {
-                    if (z < 34) bad.add("wall open at " + z + "," + y);
-                }
+                boolean branch = z >= -5 && z <= -3; // the branch leaves through the left wall
+                if (!branch && v.at(-3, y, z) != B.SOLID || v.at(3, y, z) != B.SOLID) bad.add("wall open at " + z + "," + y);
             }
         }
-        // the path over the bore and the branch beside it are still there, on the surface
-        for (int[] p : new int[][] {{-8, -30}, {3, -31}, {8, -31}}) {
+        // the branch leaves through the wall at the bore's floor and walks on: no step up, no plug
+        for (int z = -5; z <= -3; z++) {
+            int f = v.bore[v.col(-2, z)];
+            for (int x = -6; x <= -3; x++) {
+                int d = v.deck[v.col(x, z)];
+                if (Math.abs(d - f) > 1) bad.add("branch " + x + "," + z + " deck " + d + " floor " + f);
+                for (int y = d + 1; y <= d + 2; y++) if (v.at(x, y, z) == B.SOLID) bad.add("branch blocked " + x + "," + y + "," + z);
+            }
+        }
+        // the paths over the bore are still there, on the surface
+        for (int[] p : new int[][] {{-8, -30}, {3, -31}, {8, -31}, {0, -30}, {0, 22}, {-2, 25}}) {
             int d = v.deck[v.col(p[0], p[1])];
             assertTrue(d > floor + 8, "path " + p[0] + "," + p[1] + " deck " + d);
             assertEquals(B.SOLID, v.at(p[0], d, p[1]));

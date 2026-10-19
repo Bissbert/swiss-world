@@ -24,6 +24,8 @@ final class Voxels {
     private final Rail[] shape;
     /** Per column: the deck the plan reported (road/rail), or NONE. */
     final int[] deck;
+    /** Per column: the floor of a bored profile here (whatever way runs above or through it), or NONE. */
+    final int[] bore;
     final boolean[] slab, tunnelWay, openRoad, railWay, wayCol;
     final int[] originalTop;
 
@@ -39,6 +41,7 @@ final class Voxels {
         shape = new Rail[b.length];
         java.util.Arrays.fill(b, B.AIR);
         deck = new int[nx * nz];
+        bore = new int[nx * nz];
         java.util.Arrays.fill(deck, ColumnGrid.NONE);
         slab = new boolean[nx * nz];
         tunnelWay = new boolean[nx * nz];
@@ -95,6 +98,7 @@ final class Voxels {
             put(x, y, z, v, 0);
             if (p == Part.RAIL) shape[idx(x, y, z)] = t.railShape(x, z);
         });
+        bore[c] = t.tunnelFloor(x, z);
         if (t.way(x, z)) {
             wayCol[c] = true;
             deck[c] = t.tunnel(x, z) || t.absorbed(x, z) ? t.tunnelFloor(x, z) : t.deck(x, z);

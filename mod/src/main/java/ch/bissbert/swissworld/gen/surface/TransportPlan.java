@@ -35,7 +35,7 @@ public final class TransportPlan {
     private static final int UNSET = Integer.MAX_VALUE;
 
     private final ColumnGrid g;
-    private final int[] roadHalf, railBase, railNode, railLevel, floor, ceil, wet;
+    private final int[] roadHalf, railBase, railNode, railLevel, floor, ceil, wet, gap;
 
     public TransportPlan(ColumnGrid g) {
         if (g.margin() < MARGIN) throw new IllegalArgumentException("grid margin " + g.margin() + " < " + MARGIN);
@@ -48,6 +48,7 @@ public final class TransportPlan {
         floor = filled(n);
         ceil = filled(n);
         wet = filled(n);
+        gap = filled(n);
     }
 
     private static int[] filled(int n) {
@@ -238,6 +239,7 @@ public final class TransportPlan {
     public int railBase(int x, int z) {
         int k = g.index(x, z);
         if (railBase[k] != UNSET) return railBase[k];
+        if (gapKind(x, z) == GAP_RAIL) return railBase[k] = boreDeck(x, z);
         int b = (int) Math.floor(profile(x, z, true));
         for (int jj = -RAIL_RAMP; jj <= RAIL_RAMP; jj++) {
             for (int ii = -RAIL_RAMP; ii <= RAIL_RAMP; ii++) {
@@ -252,7 +254,7 @@ public final class TransportPlan {
     // ---------------------------------------------------------------- rail track
 
     private boolean c0(int x, int z) {
-        return OverlayPlan.railCentre(g, x, z);
+        return OverlayPlan.railCentre(g, x, z) || gapKind(x, z) == GAP_RAIL;
     }
 
     /** Touching tracks: of two rail centres side by side, the one west or north keeps its rails. */
@@ -452,6 +454,73 @@ public final class TransportPlan {
 
     // ---------------------------------------------------------------- tunnels
 
+    /** Longest stretch of a tunnel that ways burnt over it (crossing above, or along it) can cut out. */
+    static final int BORE_GAP = 8;
+    private static final int GAP_NONE = 0, GAP_RAIL = 1, GAP_ROAD = 2, GAP_OTHER = 3;
+
+    /**
+     * The sidecar burns tunnels first and roads and rails over them (overlay.py: later wins), so a way crossing above a
+     * tunnel cuts its cells out. A column on a straight line between two cells of the same tunnel, at most
+     * {@link #BORE_GAP} apart across overlay cells, is still bored: its floor lies between the two ends. Encoded as
+     * floor * 4 + kind, or NONE.
+     */
+    private int gap(int x, int z) {
+        int k = g.index(x, z);
+        if (gap[k] != UNSET) return gap[k];
+        int best = NONE, span = Integer.MAX_VALUE;
+        if (g.present(x, z) && g.overlay(x, z) != 0 && !g.flag(x, z, ColumnGrid.TUNNEL)) {
+            for (int[] d : DIRS) {
+                if (d[0] < 0 || d[1] < 0) continue; // each axis once
+                int a = reach(x, z, -d[0], -d[1]), b = reach(x, z, d[0], d[1]);
+                if (a == NONE || b == NONE || a + b - 1 > BORE_GAP || a + b >= span) continue;
+                int ax = x - a * d[0], az = z - a * d[1], bx = x + b * d[0], bz = z + b * d[1];
+                if (g.overlay(ax, az) != g.overlay(bx, bz)) continue;
+                // the smoothed bed, not deck(): a rail deck looks at rail centres, which may be gaps themselves
+                int da = road(ax, az) ? roadDeck(ax, az) : railBase(ax, az);
+                int db = road(bx, bz) ? roadDeck(bx, bz) : railBase(bx, bz);
+                int f = da + (int) Math.round((db - da) * (double) a / (a + b));
+                int kind = road(ax, az) && road(bx, bz) ? GAP_ROAD
+                        : tunnelRailNode(ax, az) && tunnelRailNode(bx, bz) ? GAP_RAIL : GAP_OTHER;
+                span = a + b;
+                best = f * 4 + kind;
+            }
+        }
+        return gap[k] = best;
+    }
+
+    /** Steps from (x, z) to the first tunnel cell in direction (dx, dz) across overlay cells, or NONE. */
+    private int reach(int x, int z, int dx, int dz) {
+        for (int s = 1; s <= BORE_GAP + 1; s++) {
+            int cx = x + s * dx, cz = z + s * dz;
+            if (!g.inside(cx, cz, ROAD_RADIUS + ROAD_RAMP + 1) || !g.present(cx, cz)) return NONE;
+            if (tunnel(cx, cz)) return s;
+            if (g.overlay(cx, cz) == 0 || g.flag(cx, cz, ColumnGrid.TUNNEL)) return NONE;
+        }
+        return NONE;
+    }
+
+    private int gapKind(int x, int z) {
+        int v = gap(x, z);
+        return v == NONE ? GAP_NONE : Math.floorMod(v, 4);
+    }
+
+    /** A tunnel way column, or a column a crossing way cut out of the tunnel ({@link #gap}). */
+    public boolean bored(int x, int z) {
+        return tunnel(x, z) || gap(x, z) != NONE;
+    }
+
+    private int boreDeck(int x, int z) {
+        return tunnel(x, z) ? deck(x, z) : Math.floorDiv(gap(x, z), 4);
+    }
+
+    private boolean boreRoad(int x, int z) {
+        return tunnel(x, z) ? road(x, z) : gapKind(x, z) == GAP_ROAD;
+    }
+
+    private boolean boreRailNode(int x, int z) {
+        return tunnel(x, z) ? tunnelRailNode(x, z) : gapKind(x, z) == GAP_RAIL;
+    }
+
     private boolean tunnelRailNode(int x, int z) {
         return c0(x, z) && g.flag(x, z, ColumnGrid.TUNNEL) && railWay(x, z);
     }
@@ -467,9 +536,9 @@ public final class TransportPlan {
         int f = NONE;
         boolean rail = false;
         if (g.present(x, z)) {
-            if (tunnel(x, z)) {
-                f = deck(x, z);
-                rail = railWay(x, z);
+            if (bored(x, z)) {
+                f = boreDeck(x, z);
+                rail = !boreRoad(x, z);
             } else {
                 int lo = Integer.MAX_VALUE;
                 boolean own = false;
@@ -477,17 +546,17 @@ public final class TransportPlan {
                     for (int i = -2; i <= 2; i++) {
                         int nx = x + i, nz = z + j;
                         // one column beside a road, two beside a rail centre: 5 wide
-                        boolean near = Math.abs(i) <= 1 && Math.abs(j) <= 1 && road(nx, nz);
-                        if (tunnel(nx, nz) && (near || tunnelRailNode(nx, nz))) {
-                            lo = Math.min(lo, deck(nx, nz));
-                            rail |= railWay(nx, nz);
-                            own |= way(x, z) && g.overlay(nx, nz) == g.overlay(x, z);
+                        boolean near = Math.abs(i) <= 1 && Math.abs(j) <= 1 && boreRoad(nx, nz);
+                        if (bored(nx, nz) && (near || boreRailNode(nx, nz))) {
+                            lo = Math.min(lo, boreDeck(nx, nz));
+                            rail |= !boreRoad(nx, nz);
+                            own |= way(x, z) && tunnel(nx, nz) && g.overlay(nx, nz) == g.overlay(x, z);
                         }
                     }
                 }
                 if (lo != Integer.MAX_VALUE) f = lo;
-                // the tunnel's own approach, and another way at the floor's level beside it (a branch), stay open
-                if (f != NONE && way(x, z) && (own || Math.abs(deck(x, z) - f) <= 1)) f = NONE;
+                // the tunnel's own approach stays open; any other way here gives way to the bore
+                if (f != NONE && own) f = NONE;
             }
         }
         floor[k] = f == NONE ? NONE : f * 2 + (rail ? 1 : 0);
@@ -643,7 +712,7 @@ public final class TransportPlan {
             out.set(deck + 1, Part.RAILING);
         } else if (road && roadSlab(x, z)) {
             out.set(deck + 1, Part.SLAB);
-        } else if (!underBridge && rail(x, z)) {
+        } else if (!underBridge && rail(x, z) && gap(x, z) == NONE) {
             out.set(deck + 1, Part.RAIL);
         }
     }
@@ -665,8 +734,8 @@ public final class TransportPlan {
             for (int y = lo; y < floor; y++) out.set(y, Part.LINING);
             for (int y = floor + 1; y < ceil; y++) out.set(y, Part.AIR);
             for (int y = ceil; y <= hi; y++) out.set(y, Part.LINING);
-            if (tunnel(x, z)) {
-                boolean road = road(x, z);
+            if (tunnel(x, z) || gapKind(x, z) == GAP_RAIL) {
+                boolean road = road(x, z) && tunnel(x, z);
                 out.set(floor, road ? Part.SURFACE : Part.BALLAST);
                 if (road && roadSlab(x, z)) out.set(floor + 1, Part.SLAB);
                 if (rail(x, z)) out.set(floor + 1, Part.RAIL);
