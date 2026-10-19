@@ -87,7 +87,9 @@ Total is about 3.2 GB, over the ~2 GB guideline only because of the TLM file the
 ### Terrain for tests and previews
 
 - **sidecar-core's `AltiTerrain` is not on main yet**, so tests and previews use `tlm_preview.StandInTerrain`: the cell's own swissALTI3D 2 m tile, with no neighbour edges.
-- `tlm_preview.terrain_builder()` switches to `swissdata.alti.AltiTerrain` automatically once it is importable.
+- `tlm_preview.terrain_builder()` switches to `swissdata.alti.AltiTerrain` automatically once it is importable. `builders()` adds a terrain builder only if `BUILDERS` has none.
+- The acceptance tests and the preview CLI use a **private temporary store** (shared raw cache), so a post-merge `AltiTerrain` never pins into the shared manifest.
+- The acceptance tests need `SWISSDATA_RAW` exported as in docs/dev.md; without it they skip.
 
 ## Files outside the owned list
 
@@ -110,6 +112,7 @@ None needed for Milestone 1.
 | 2668_1158 | Grimsel dams Spitallamm/Seeuferegg; the brief's 2668_1157 has no dam |
 | 2644_1176 | Giessbach |
 | 2660_1173 | Aareschlucht |
+| 2667_1160 | Räterichsboden dam, crest 1770.3 |
 
 Regenerate with `uv run --group dev python -I -m swissdata.tlm_preview 2646 1178 2668 1157 …`.
 

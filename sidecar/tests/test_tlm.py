@@ -5,7 +5,6 @@ import pytest
 import shapely
 
 from swissdata import bathy, build, landcover, overlay, swd, tlm, water
-from swissdata.config import Config
 
 
 def test_burn_rows_are_dz_from_the_north():
@@ -108,12 +107,12 @@ def test_builders_are_registered_before_default_surface():
 # --- acceptance: the real Brienz cell (needs the shared raw cache) ---
 
 @pytest.fixture(scope="module")
-def brienz():
-    cfg = Config.from_env()
-    if not tlm.extract_path(cfg).exists():
-        pytest.skip("no TLM extract in $SWISSDATA_RAW (run python -I -m swissdata.tlm)")
+def brienz(tmp_path_factory):
     from swissdata import tlm_preview
 
+    cfg = tlm_preview.private_config(tmp_path_factory.mktemp("store"))
+    if not tlm.extract_path(cfg).exists():
+        pytest.skip("no TLM extract in $SWISSDATA_RAW (export it as in docs/dev.md)")
     cell, sources = build.assemble(2646, 1178, cfg, builders=tlm_preview.builders())
     return cfg, cell.layers, sources
 
@@ -162,3 +161,28 @@ def test_brienz_roads_and_bridges(brienz):
     assert np.all(L["OELV"][bridge] != swd.NO_HEIGHT)
     plain = (L["OFLG"] & (swd.OFLG_BRIDGE | swd.OFLG_TUNNEL | swd.OFLG_DAM)) == 0
     assert np.all(L["OELV"][plain] == swd.NO_HEIGHT)
+
+
+def test_preview_builders_add_terrain_only_once(monkeypatch):
+    from swissdata import tlm_preview
+
+    class Terrain:
+        name, tags = "terrain", ("TERR",)
+
+    assert sum("TERR" in b.tags for b in tlm_preview.builders()) == 1
+    monkeypatch.setattr(build, "BUILDERS", [Terrain(), *build.BUILDERS])
+    assert sum("TERR" in b.tags for b in tlm_preview.builders()) == 1
+
+
+def test_raeterichsboden_dam(tmp_path):
+    from swissdata import tlm_preview
+
+    cfg = tlm_preview.private_config(tmp_path)
+    if not tlm.extract_path(cfg).exists():
+        pytest.skip("no TLM extract in $SWISSDATA_RAW (export it as in docs/dev.md)")
+    cell, _ = build.assemble(2667, 1160, cfg, builders=tlm_preview.builders())
+    L = cell.layers
+    dam = (L["OFLG"] & swd.OFLG_DAM) > 0
+    assert dam.sum() > 5_000
+    assert np.all(L["OCLS"][dam] == overlay.DAM_CREST)
+    assert np.allclose(swd.decode_height(L["OELV"][dam]), 1770.3, atol=0.05)

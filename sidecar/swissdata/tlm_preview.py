@@ -8,7 +8,9 @@ cell's own swissALTI3D 2 m tile without neighbour edges (edge nodes are the mean
 
 from __future__ import annotations
 
+import dataclasses
 import sys
+import tempfile
 from pathlib import Path
 
 import httpx
@@ -61,7 +63,15 @@ def terrain_builder():
 
 
 def builders() -> list:
+    """The registered builders, with a terrain builder in front unless one is registered already."""
+    if any("TERR" in b.tags for b in build.BUILDERS):
+        return list(build.BUILDERS)
     return [terrain_builder(), *build.BUILDERS]
+
+
+def private_config(store: Path) -> Config:
+    """Shared raw cache, private store: builders may pin sources there, never in the shared manifest."""
+    return dataclasses.replace(Config.from_env(), store=store)
 
 
 SURF_COLOURS = ["#9bd06a", "#3f8f3a", "#1f5e2e", "#2f7a35", "#8a8a8a", "#b5ab9a", "#e8f4ff", "#2a6fd6",
@@ -109,7 +119,7 @@ def preview(e_km: int, n_km: int, cfg: Config, out: Path | None = None) -> list[
 
 
 def main(argv: list[str]) -> None:
-    cfg = Config.from_env()
+    cfg = private_config(Path(tempfile.mkdtemp(prefix="tlm-preview-store-")))
     for e, n in zip(argv[0::2], argv[1::2]):
         for p in preview(int(e), int(n), cfg):
             print(p)
