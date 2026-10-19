@@ -100,6 +100,16 @@ No contract file was edited.
 - `sidecar/swissdata/build.py`: import of `BuildingsBuilder` and its registration in `BUILDERS` (required by the
   brief). `buildings.py` imports `LayerResult` lazily inside `build()` to avoid the circular import.
 
+## Orphan roofs (checked, not fixed)
+
+Roof_solid pieces whose GEBAEUDEEINHEIT matches no Building_solid: 37 on sheet 1208-43, 31 on 1228-21 (all have a
+GE; none of those GEs exists in any of the 4 neighbouring sheets either). Checked whether a cheap footprint match
+would recover them: only 3/37 and 3/31 intersect any body footprint, none overlaps a body by more than 50 %, and
+the median distance to the nearest body is 7.1 m / 3.9 m (max 44.5 m), median roof area 41–56 m².
+So these are **free-standing roofs without a body** (carports, shelters, canopies), not roofs of buildings that
+now get flat tops — no footprint match was added. Today they are dropped; emitting them as their own BTBL row
+(spans from the roof skin, part 0 or 1) is a small follow-up if wanted.
+
 ## Left for later
 
 - part 2 (annex), entranceSide (could come from the GWR entrance table `eingang_entree_entrata.csv`, which has
