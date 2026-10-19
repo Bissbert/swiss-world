@@ -142,6 +142,17 @@ class CellCacheTest {
         assertEquals(0, c.pendingCount());
     }
 
+    @Test
+    void abortWaitingCompletesOnlyCurrentlyPending() {
+        CellCache c = cache();
+        CompletableFuture<CellCache.Result> f = c.get(E, N);
+        assertEquals(1, c.abortWaiting());
+        assertEquals(CellCache.Status.ABORTED, f.join().status());
+        CompletableFuture<CellCache.Result> later = c.get(E, N);
+        assertFalse(later.isDone());
+        assertEquals(1, c.pendingCount());
+    }
+
     static final class FakeSidecar implements SidecarClient {
         final List<Collection<int[]>> requests = new ArrayList<>();
         Function<Collection<int[]>, CompletableFuture<List<CellState>>> answer =

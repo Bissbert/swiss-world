@@ -4,6 +4,7 @@ import ch.bissbert.swissworld.cell.SwissCoords;
 import ch.bissbert.swissworld.command.SwissCommands;
 import ch.bissbert.swissworld.net.PlayerPrefetch;
 import ch.bissbert.swissworld.world.AbortedChunks;
+import ch.bissbert.swissworld.world.StallGuard;
 import ch.bissbert.swissworld.world.SwissOrigin;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -23,7 +24,7 @@ import net.neoforged.neoforge.event.server.ServerStoppedEvent;
 import net.neoforged.neoforge.event.server.ServerStoppingEvent;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
 
-/** Game-bus wiring: runtime lifecycle, origin, shutdown downgrade, commands, ticks. Owner: mod-core. */
+/** Game-bus wiring: runtime lifecycle, origin, stall guard, shutdown downgrade, commands, ticks. Owner: mod-core. */
 final class SwissEvents {
     private SwissEvents() {}
 
@@ -36,7 +37,10 @@ final class SwissEvents {
             SwissCommands.clear();
             SwissRuntime.stopping();
         });
-        bus.addListener((ServerStoppedEvent e) -> SwissRuntime.stopped());
+        bus.addListener((ServerStoppedEvent e) -> {
+            StallGuard.stop();
+            SwissRuntime.stopped();
+        });
         bus.addListener((RegisterCommandsEvent e) -> SwissCommands.register(e.getDispatcher()));
         bus.addListener((ServerTickEvent.Post e) -> {
             SwissCommands.tick(e.getServer());
@@ -60,6 +64,7 @@ final class SwissEvents {
             }
         }
         SwissRuntime.start();
+        StallGuard.start(server);
     }
 
     /** Before any chunk of the dimension can generate (forced chunks generate during prepareLevels). */

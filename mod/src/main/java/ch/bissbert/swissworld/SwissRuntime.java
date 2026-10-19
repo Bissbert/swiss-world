@@ -154,6 +154,11 @@ public final class SwissRuntime {
         ABORTED.add(pos.toLong());
     }
 
+    /** The chunk generated for real (it was unloaded and loaded again), so it may be saved as generated again. */
+    public static void clearAborted(ChunkPos pos) {
+        ABORTED.remove(pos.toLong());
+    }
+
     public static boolean wasAborted(ChunkPos pos) {
         return ABORTED.contains(pos.toLong());
     }

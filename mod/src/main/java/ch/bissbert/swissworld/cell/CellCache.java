@@ -26,7 +26,8 @@ import org.slf4j.LoggerFactory;
  * is known to be outside Switzerland ({@link Status#OUTSIDE}). A missing cell stays pending: it is requested from the
  * sidecar (priority "now"), re-requested every {@link #REREQUEST_MS}, and the store directory is polled until the file
  * appears. A sidecar that is down only delays this (with backoff); it never turns a cell into ocean. Only
- * {@link #abortPending()} (server shutdown) completes pending cells with {@link Status#ABORTED}.
+ * {@link #abortPending()} (server shutdown) and {@link #abortWaiting()} (the server thread is stuck on a chunk)
+ * complete pending cells with {@link Status#ABORTED}.
  *
  * <p>OUTSIDE comes from coverage.bin. The sidecar's "outside" is trusted only while there is no coverage file;
  * if coverage says the cell exists, the disagreement is logged and the cell stays pending.
@@ -161,6 +162,16 @@ public final class CellCache {
     public void abortPending() {
         aborted = true;
         for (Pending p : pending.values()) finish(p, Result.ABORTED);
+    }
+
+    /** Completes the cells pending right now with ABORTED; later requests wait as usual. Returns how many. */
+    public int abortWaiting() {
+        int n = 0;
+        for (Pending p : pending.values()) {
+            finish(p, Result.ABORTED);
+            n++;
+        }
+        return n;
     }
 
     private void tryLoad(Pending p) {

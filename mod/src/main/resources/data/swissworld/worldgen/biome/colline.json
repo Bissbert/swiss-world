@@ -106,5 +106,21 @@
   },
   "spawn_costs": {},
   "carvers": {},
-  "features": []
+  "features": [
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [
+      "swissworld:ore_coal",
+      "swissworld:ore_iron",
+      "swissworld:ore_copper",
+      "swissworld:ore_gold",
+      "swissworld:ore_redstone",
+      "swissworld:ore_lapis",
+      "swissworld:ore_diamond"
+    ]
+  ]
 }

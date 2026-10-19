@@ -41,7 +41,8 @@ import net.minecraft.world.level.levelgen.blending.Blender;
  * to be ocean ({@link CellCache}); a missing cell is requested from the sidecar and the chunk simply stays pending.
  * Nothing blocks a thread meanwhile, and the pipeline then runs on the worldgen background executor, never on the
  * cache's I/O threads. Biomes are filled here too, from the same cells (the BIOMES step is a no-op), so they are
- * never baked from a guess. At shutdown pending chunks complete empty and are downgraded on save
+ * never baked from a guess. At shutdown, or when the server thread is stuck loading a pending chunk
+ * ({@link ch.bissbert.swissworld.world.StallGuard}), pending chunks complete empty and are downgraded on save
  * ({@link ch.bissbert.swissworld.world.AbortedChunks}).
  */
 public final class SwissChunkGenerator extends ChunkGenerator {
@@ -61,6 +62,9 @@ public final class SwissChunkGenerator extends ChunkGenerator {
 
     /** Real sea level 193 m (lowest point of Switzerland) -> y = -1807. Ocean outside the border. */
     public static final int SEA_LEVEL_Y = (int) SwissCoords.toY(193);
+
+    /** Cells are loaded for the chunk plus this many columns around it, so stages can look at neighbour columns. */
+    public static final int CELL_MARGIN = 8;
 
     public SwissChunkGenerator(BiomeSource biomeSource) {
         super(biomeSource);
@@ -84,8 +88,8 @@ public final class SwissChunkGenerator extends ChunkGenerator {
         CellCache cache = SwissRuntime.cells();
         int x0 = chunk.getPos().getMinBlockX(), z0 = chunk.getPos().getMinBlockZ();
         Map<Long, CompletableFuture<CellCache.Result>> needed = new HashMap<>();
-        for (int x : new int[] {x0, x0 + 15}) {
-            for (int z : new int[] {z0, z0 + 15}) {
+        for (int x : new int[] {x0 - CELL_MARGIN, x0 + 15 + CELL_MARGIN}) {
+            for (int z : new int[] {z0 - CELL_MARGIN, z0 + 15 + CELL_MARGIN}) {
                 int e = SwissCoords.cellKm(coords.east(x)), n = SwissCoords.cellKm(coords.north(z));
                 needed.computeIfAbsent(CellCache.key(e, n), k -> cache.get(e, n));
             }
@@ -104,6 +108,7 @@ public final class SwissChunkGenerator extends ChunkGenerator {
                 }
                 if (r.cell() != null) cells.put(f.getKey(), r.cell());
             }
+            SwissRuntime.clearAborted(chunk.getPos());
             long t0 = System.nanoTime();
             GenContext ctx = new GenContext(chunk, coords, (e, n) -> cells.get(CellCache.key(e, n)));
             if (getBiomeSource() instanceof SwissBiomeSource biomes) {

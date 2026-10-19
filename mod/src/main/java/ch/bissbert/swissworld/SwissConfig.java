@@ -34,6 +34,11 @@ public final class SwissConfig {
     public static final ModConfigSpec.IntValue PREFETCH_INTERVAL_S = B
             .comment("Minimum seconds between two prefetch calls for the same player")
             .defineInRange("prefetchIntervalSeconds", 5, 1, 300);
+    public static final ModConfigSpec.IntValue STALL_ABORT_S = B
+            .comment("If the server thread waits this long for a chunk whose cells are still missing (e.g. forceload",
+                    "while the sidecar is down), pending chunks are given up: they stay empty until reloaded and are",
+                    "never saved as generated. Keep it below max-tick-time (60 s). 0 disables")
+            .defineInRange("stallAbortSeconds", 20, 0, 600);
 
     public static final ModConfigSpec SPEC = B.build();
 
