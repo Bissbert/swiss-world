@@ -69,8 +69,15 @@ public final class FurnishStage implements GenStage {
         for (int u = w.from(); u <= w.to(); u++) {
             int x = w.alongX() ? u : w.line(), z = w.alongX() ? w.line() : u;
             if (!c.interior(x, z) || p.reserved(x, z)) continue;
+            boolean doorway = k == 0 && p.door() != null && x == p.door().x() - p.door().out().dx
+                    && z == p.door().z() - p.door().out().dz;
             int ceil = k + 1 < p.floors().size() && p.floorAt(k + 1, x, z) ? p.floorY(k + 1) : c.topFull(x, z);
-            for (int y = yf + 1; y < ceil; y++) put.set(x, y, z, u == w.gap() && y <= yf + 2 ? AIR : b);
+            ceil = Math.min(ceil, c.cover(x, z)); // never carve the roof fill beside a lower part of the building
+            for (int y = yf + 1; y < ceil; y++) {
+                int up = doorway ? p.door().up() : 0;
+                if (doorway && y <= yf + up) continue; // the room floor stays
+                put.set(x, y, z, (u == w.gap() || doorway) && y <= yf + up + 2 ? AIR : b);
+            }
         }
     }
 
