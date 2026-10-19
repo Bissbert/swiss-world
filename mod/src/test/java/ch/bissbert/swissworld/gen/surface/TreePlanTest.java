@@ -3,15 +3,12 @@ package ch.bissbert.swissworld.gen.surface;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ch.bissbert.swissworld.cell.SwdCell;
 import ch.bissbert.swissworld.gen.surface.TreePlan.Part;
 import ch.bissbert.swissworld.gen.surface.TreePlan.Species;
 import ch.bissbert.swissworld.gen.surface.TreePlan.Tree;
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -149,35 +146,35 @@ class TreePlanTest {
     }
 
     @Test
-    void treeTableParsesAndAnswersByArea() {
-        ByteBuffer b = ByteBuffer.allocate(4 + 3 * 8).order(ByteOrder.LITTLE_ENDIAN);
-        b.putInt(3);
-        b.putShort((short) 10).putShort((short) 5).put((byte) 30).put((byte) 0).put((byte) 1).put((byte) 0);
-        b.putShort((short) 999).putShort((short) 5).put((byte) 200).put((byte) 75).put((byte) 2).put((byte) 0);
-        b.putShort((short) 500).putShort((short) 998).put((byte) 12).put((byte) 0).put((byte) 0).put((byte) 0);
-        TreeTops t = TreeTops.parse(b.array());
-        assertEquals(3, t.size());
-        assertEquals(List.of(new TreeTops.Top(10, 5, 30, 0, 1), new TreeTops.Top(999, 5, 200, 75, 2)), t.within(0, 0, 999, 10));
-        assertEquals(List.of(new TreeTops.Top(500, 998, 12, 0, 0)), t.within(400, 900, 600, 1200));
+    void treeTableAnswersByArea() {
+        TreeTops t = TreeTops.sorted(List.of(new SwdCell.Tree(500, 998, 12, 0, 0), new SwdCell.Tree(999, 5, 200, 75, 2),
+                new SwdCell.Tree(10, 5, 30, 0, 1), new SwdCell.Tree(0, 6, 9, 0, 0)));
+        assertEquals(4, t.size());
+        assertEquals(List.of(new SwdCell.Tree(10, 5, 30, 0, 1), new SwdCell.Tree(999, 5, 200, 75, 2)), t.within(1, 0, 999, 5));
+        assertEquals(List.of(new SwdCell.Tree(0, 6, 9, 0, 0), new SwdCell.Tree(500, 998, 12, 0, 0)), t.within(-5, 6, 600, 1200));
         assertTrue(t.within(11, 0, 998, 997).isEmpty());
-        assertThrows(IllegalArgumentException.class, () -> TreeTops.parse(new byte[] {1, 0, 0, 0}));
-        assertThrows(IllegalArgumentException.class, () -> TreeTops.parseCanopy(new byte[10]));
+    }
+
+    @Test
+    void treeDataReadsTheCellsOfTheChunk() {
+        SwdCell flat = forest(), withTrees = withTrees(flat, List.of(new SwdCell.Tree(905, 405, 28, 45, SwdCell.Tree.CONIFER)));
+        ColumnGrid.Cells only = (x, z) -> x >= -900 && x < 100 && z >= -400 && z < 600 ? withTrees : null;
+        TreeData data = TreeData.of(Cells.ORIGIN, only);
+        assertEquals(1, data.tops(2632, 1170).size());
+        assertNull(data.tops(2633, 1170));
+        assertNull(TreeData.of(Cells.ORIGIN, (x, z) -> flat).tops(2632, 1170));
+        assertEquals(0, TreeData.of(Cells.ORIGIN, (x, z) -> withTrees(flat, List.of())).tops(2632, 1170).size());
+    }
+
+    private static SwdCell withTrees(SwdCell c, List<SwdCell.Tree> trees) {
+        return new SwdCell(c.eKm(), c.nKm(), c.terr(), c.surf(), c.wlvl(), c.wknd(), c.ocls(), c.oelv(), c.oflg(), c.insd(),
+                c.buildings(), c.spans(), null, trees);
     }
 
     /** A flat forest cell 2632_1170 whose tree table is {@code tops} (null: no TTOP layer). */
-    private static TreeData table(List<TreeTops.Top> tops) {
-        TreeTops t = tops == null ? null : new TreeTops(tops);
-        return new TreeData() {
-            @Override
-            public TreeTops tops(int eKm, int nKm) {
-                return eKm == 2632 && nKm == 1170 ? t : null;
-            }
-
-            @Override
-            public byte[] canopy(int eKm, int nKm) {
-                return null;
-            }
-        };
+    private static TreeData table(List<SwdCell.Tree> tops) {
+        TreeTops t = tops == null ? null : TreeTops.sorted(tops);
+        return (eKm, nKm) -> eKm == 2632 && nKm == 1170 ? t : null;
     }
 
     private static SwdCell forest() {
@@ -193,7 +190,7 @@ class TreePlanTest {
         assertTrue(TreePlan.trees(g, table(null), 0, 0, 15, 15).size() > 10);
         assertTrue(TreePlan.trees(g, table(List.of()), 0, 0, 15, 15).isEmpty());
         // one real conifer at x 5, z 5: dx 905, dz 405 (x = dx - 900, z = dz - 400)
-        List<Tree> one = TreePlan.trees(g, table(List.of(new TreeTops.Top(905, 405, 28, 45, TreeTops.CONIFER))), 0, 0, 15, 15);
+        List<Tree> one = TreePlan.trees(g, table(List.of(new SwdCell.Tree(905, 405, 28, 45, SwdCell.Tree.CONIFER))), 0, 0, 15, 15);
         assertEquals(1, one.size());
         Tree t = one.get(0);
         assertEquals(List.of(5, 5, 28, 5), List.of(t.x(), t.z(), t.height(), t.radius()));
@@ -204,9 +201,9 @@ class TreePlanTest {
     void neighbouringChunksAgreeOnLargeCrowns() {
         SwdCell c = forest();
         // real trees with the widest crowns (8 m in the data, clamped to REACH) on both sides of the chunk border at x = 0 (dx 900), every 3 columns
-        List<TreeTops.Top> tops = new ArrayList<>();
+        List<SwdCell.Tree> tops = new ArrayList<>();
         for (int x = -10; x <= 10; x++) {
-            for (int z = 0; z < 16; z += 3) tops.add(new TreeTops.Top(900 + x, 400 + z, 25 + (x & 7), 80, x % 2 == 0 ? 1 : 2));
+            for (int z = 0; z < 16; z += 3) tops.add(new SwdCell.Tree(900 + x, 400 + z, 25 + (x & 7), 80, x % 2 == 0 ? 1 : 2));
         }
         TreeData data = table(tops);
         List<Tree> left = TreePlan.trees(Cells.grid(c, -16, 0), data, -16, 0, -1, 15);

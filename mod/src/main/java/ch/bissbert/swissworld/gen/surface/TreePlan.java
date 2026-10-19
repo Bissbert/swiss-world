@@ -1,5 +1,6 @@
 package ch.bissbert.swissworld.gen.surface;
 
+import ch.bissbert.swissworld.cell.SwdCell;
 import ch.bissbert.swissworld.cell.SwissCoords;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -126,7 +127,7 @@ public final class TreePlan {
                 TreeTops tops = data.tops(eKm, nKm);
                 if (tops == null) continue;
                 long e0 = eKm * 1000L, n0 = nKm * 1000L;
-                for (TreeTops.Top t : tops.within((int) (eMin - e0), (int) (999 - (nMax - n0)), (int) (eMax - e0), (int) (999 - (nMin - n0)))) {
+                for (SwdCell.Tree t : tops.within((int) (eMin - e0), (int) (999 - (nMax - n0)), (int) (eMax - e0), (int) (999 - (nMin - n0)))) {
                     long te = e0 + t.dx(), tn = n0 + 999 - t.dz();
                     int x = g.xAt(te), z = g.zAt(tn);
                     if (!standing(g, x, z)) continue;
@@ -146,13 +147,13 @@ public final class TreePlan {
     }
 
     /** Species of a real tree: its {@code kind} where known, else by SURF and altitude. Real trees are never dropped. */
-    static Species species(TreeTops.Top t, int surf, double metres, double r) {
+    static Species species(SwdCell.Tree t, int surf, double metres, double r) {
         if (t.heightM() < 4) return Species.BUSH;
         Species broadleaf = r < 0.7 ? Species.OAK : Species.BIRCH;
         return switch (t.kind()) {
-            case TreeTops.CONIFER -> metres >= SPRUCE_TOP ? Species.LARCH : Species.SPRUCE;
-            case TreeTops.LARCH -> Species.LARCH;
-            case TreeTops.BROADLEAF -> broadleaf;
+            case SwdCell.Tree.CONIFER -> metres >= SPRUCE_TOP ? Species.LARCH : Species.SPRUCE;
+            case SwdCell.Tree.LARCH -> Species.LARCH;
+            case SwdCell.Tree.BROADLEAF -> broadleaf;
             default -> {
                 Species s = species(surf, metres, r);
                 yield s == null ? Species.LARCH : s == Species.BUSH ? broadleaf : s;

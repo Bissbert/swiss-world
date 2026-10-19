@@ -25,16 +25,6 @@ public final class VegetationStage implements GenStage {
     private static final double ALPINE = 1500;
     /** Free height above a road or rail deck under an overhanging crown. */
     private static final int OVERLAY_CLEARANCE = 5;
-    /** {@code TTOP}/{@code CNPY} per cell; {@link TreeData#NONE} until {@code SwdCell} carries them. */
-    private final TreeData treeData;
-
-    public VegetationStage() {
-        this(TreeData.NONE);
-    }
-
-    public VegetationStage(TreeData treeData) {
-        this.treeData = treeData;
-    }
     private static final Block[] FLOWERS = {Blocks.DANDELION, Blocks.POPPY, Blocks.OXEYE_DAISY, Blocks.CORNFLOWER, Blocks.AZURE_BLUET};
     private static final Block[] ALPINE_FLOWERS = {Blocks.CORNFLOWER, Blocks.AZURE_BLUET, Blocks.OXEYE_DAISY, Blocks.ALLIUM};
 
@@ -50,7 +40,7 @@ public final class VegetationStage implements GenStage {
                 if (g.present(x, z)) column(chunk, g, x, z, pos);
             }
         }
-        List<TreePlan.Tree> trees = TreePlan.trees(g, treeData, x0, z0, x0 + 15, z0 + 15);
+        List<TreePlan.Tree> trees = TreePlan.trees(g, TreeData.of(ctx), x0, z0, x0 + 15, z0 + 15);
         List<List<TreePlan.Part>> shapes = trees.stream().map(TreePlan::shape).toList();
         for (boolean logs : new boolean[] {true, false}) {
             for (int i = 0; i < trees.size(); i++) {

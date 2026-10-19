@@ -82,7 +82,7 @@ Milestone 1: WaterStage, OverlayStage, VegetationStage in `mod/src/main/java/ch/
   - nothing above 2,300 m.
   - SURF overrides: conifer forest (2) is always spruce; sparse (14) and urban green (11) are 40 % bushes.
 - **Real trees (TTOP, swd-format §6a):** a cell with a `TTOP` table gets exactly its trees and no statistical placement. The kind maps to a species: conifer → spruce (larch from 2,000 m), larch → larch, broadleaf → oak or birch by hash, unknown → by SURF and altitude (never dropped; under 4 m → bush). Height is `height_m`; the crown radius is `crown_dm` / 10, or derived from the height when 0. A real tree is skipped only where its own column is not dry open land (water, bank, overlay, building).
-- **TTOP/CNPY interface:** `TreeData` (`tops(eKm, nKm)`, `canopy(eKm, nKm)`) with parsers in `TreeTops`. The game passes `TreeData.NONE` until mod-core adds `SwdCell.trees()` / `canopy()`; hooking it up is a one-line `VegetationStage(TreeData)` change. CNPY is parsed but not yet used for placement.
+- **TTOP interface:** `TreeData.of(ctx)` reads `SwdCell.trees()` / `hasTrees()` (mod-core's reader, merged in 0bba118); `TreeTops` wraps the sorted list without copying and looks trees up by binary search per row. My own TTOP/CNPY parser is gone (the reader owns parsing). CNPY is not yet used for placement.
 - **Statistical heights:** forest SURF 1–3 below 2,000 m: 18–35 m; everything else (sparse, urban, meadow, larch band): 8–20 m; fruit trees 4–7 m.
 - **Shapes scale with height and crown radius:** spruce is a tiered cone from 0.3 h; larch a sparse cone from 0.35 h; oak an ellipsoid centred at 0.62 h with a spreading trunk; birch a narrow ellipsoid. Default radius: spruce 1 + 0.12 h, larch/birch 1 + 0.1 h, oak 0.22 h. Wide crowns get horizontal branch logs (axis x/z), so no leaf is more than 6 from a log. Example: a 35 m fixture spruce (radius 5) has 46 logs and 745 leaves.
 - **Cross-chunk trees:** I chose clipping over decoration. Every chunk lists all trees whose crown can reach it, in a fixed order, and places only the blocks inside itself: all logs first, then leaves, and only into air. Crowns skip building columns, and over a road or rail they keep 5 blocks above the deck. Neighbouring chunks therefore complete each other's trees from the same data. Unit tests check that two neighbouring chunks agree, including with the widest crowns.
@@ -98,6 +98,7 @@ Milestone 1: WaterStage, OverlayStage, VegetationStage in `mod/src/main/java/ch/
 - **Glacier (6):** the top 3–8 blocks (by hash) become snow_block on top, then 2 packed_ice, then blue_ice.
 
 ## Touched outside owned paths
+- `SwissRegistries.register` (mod-core): one line registering `SnowTopLayerFeature`. The five cold biome JSONs: `minecraft:freeze_top_layer` → `swissworld:snow_top_layer`.
 - `mod/src/main/java/ch/bissbert/swissworld/gen/SwissChunkGenerator.java` (mod-core): added `CELL_MARGIN = 8`, and `fillFromNoise` now loads the cells under the chunk's corners widened by that margin. Without this, a chunk next to an aligned cell edge (z = −400 + 2000k) cannot see its neighbour columns, and banks and trees across the edge would depend on load order. `ColumnGrid.MARGIN` refers to this constant.
 
 ## For other workstreams
@@ -112,6 +113,8 @@ Milestone 1: WaterStage, OverlayStage, VegetationStage in `mod/src/main/java/ch/
 - **Shallow tunnels** (deck only a few blocks below the ground, e.g. in 2647_1177) come out as open trenches, because the 6-block clearance reaches the surface. A real cut-and-cover would need a roof; left as it is.
 - **Bridge ramps:** near the end of the diagonal footbridge at (14567, −6918), where the deck changes height, a pair of railing columns still blocks the path.
 - **Vanilla decoration** (mod-core, see above). Confirmed in the real-cell run: at high altitude (e.g. Gauli, y ≈ 670–745) the plains biome's freeze_top_layer turns river source tops into ice and adds snow layers. Level-1 blocks fed by a frozen source then drain (12 of 54 and 8 of 24 water blocks at two glacier steps). This is not a WaterStage bug.
+
+- **Snow without ice:** cold biomes use `swissworld:snow_top_layer` (`SnowTopLayerFeature`) instead of `minecraft:freeze_top_layer`: the same snow layers, but water never freezes, so frozen river sources can no longer drain the steps they feed. Checked at Gauli (23520, 6613): 0 ice, 54 of 54 water blocks (before: 42), 425 snow layers. Lakes stay liquid too. Vanilla weather (`tickPrecipitation`) can still freeze water at edges during snowfall in cold biomes; that is runtime, not generation.
 
 ## Contract proposals
 None. No contract file was changed.
