@@ -4,22 +4,37 @@ import ch.bissbert.swissworld.gen.GenContext;
 import ch.bissbert.swissworld.gen.GenStage;
 import java.util.List;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.LeavesBlock;
+import net.minecraft.world.level.block.RotatedPillarBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.ChunkAccess;
 
 /**
  * Trees, bushes, ground cover, orchard and vineyard rows, glacier ice by SURF class. Owner: mod-surface.
  * Trees come from {@link TreePlan}: each chunk places the in-chunk blocks of every tree within reach, logs before
- * leaves, and only into air. Everything is keyed by world position, never by RNG state.
+ * leaves, and only into air. Crowns stay off building columns and clear of overlays ({@value #OVERLAY_CLEARANCE} blocks
+ * above the deck). Everything is keyed by world position, never by RNG state.
  */
 public final class VegetationStage implements GenStage {
     private static final int SALT_COVER = 21, SALT_FLOWER = 22, SALT_ICE = 23;
     /** No grass or flowers above this. */
     private static final double COVER_TOP = 2600;
     private static final double ALPINE = 1500;
+    /** Free height above a road or rail deck under an overhanging crown. */
+    private static final int OVERLAY_CLEARANCE = 5;
+    /** {@code TTOP}/{@code CNPY} per cell; {@link TreeData#NONE} until {@code SwdCell} carries them. */
+    private final TreeData treeData;
+
+    public VegetationStage() {
+        this(TreeData.NONE);
+    }
+
+    public VegetationStage(TreeData treeData) {
+        this.treeData = treeData;
+    }
     private static final Block[] FLOWERS = {Blocks.DANDELION, Blocks.POPPY, Blocks.OXEYE_DAISY, Blocks.CORNFLOWER, Blocks.AZURE_BLUET};
     private static final Block[] ALPINE_FLOWERS = {Blocks.CORNFLOWER, Blocks.AZURE_BLUET, Blocks.OXEYE_DAISY, Blocks.ALLIUM};
 
@@ -35,15 +50,18 @@ public final class VegetationStage implements GenStage {
                 if (g.present(x, z)) column(chunk, g, x, z, pos);
             }
         }
-        List<TreePlan.Tree> trees = TreePlan.trees(g, x0, z0, x0 + 15, z0 + 15);
+        List<TreePlan.Tree> trees = TreePlan.trees(g, treeData, x0, z0, x0 + 15, z0 + 15);
+        List<List<TreePlan.Part>> shapes = trees.stream().map(TreePlan::shape).toList();
         for (boolean logs : new boolean[] {true, false}) {
-            for (TreePlan.Tree t : trees) {
+            for (int i = 0; i < trees.size(); i++) {
+                TreePlan.Tree t = trees.get(i);
                 int base = g.ground(t.x(), t.z()) + 1;
-                for (TreePlan.Part p : TreePlan.shape(t.species(), t.hash())) {
+                for (TreePlan.Part p : shapes.get(i)) {
                     if (p.log() != logs) continue;
-                    int x = t.x() + p.dx(), z = t.z() + p.dz();
+                    int x = t.x() + p.dx(), z = t.z() + p.dz(), y = base + p.dy();
                     if (x < x0 || x > x0 + 15 || z < z0 || z > z0 + 15) continue;
-                    pos.set(x, base + p.dy(), z);
+                    if (g.hasBuilding(x, z) || TreePlan.surfaceOverlay(g, x, z) && y <= g.deck(x, z) + OVERLAY_CLEARANCE) continue;
+                    pos.set(x, y, z);
                     if (chunk.getBlockState(pos).isAir()) chunk.setBlockState(pos, block(t.species(), p), false);
                 }
             }
@@ -56,7 +74,7 @@ public final class VegetationStage implements GenStage {
             case SPRUCE, LARCH -> Blocks.SPRUCE_LOG;
             default -> Blocks.OAK_LOG;
         };
-        if (p.log()) return log.defaultBlockState();
+        if (p.log()) return log.defaultBlockState().setValue(RotatedPillarBlock.AXIS, Direction.Axis.valueOf(p.axis().name()));
         Block leaves = switch (s) {
             case BIRCH -> Blocks.BIRCH_LEAVES;
             case SPRUCE, LARCH -> Blocks.SPRUCE_LEAVES;

@@ -81,8 +81,13 @@ Milestone 1: WaterStage, OverlayStage, VegetationStage in `mod/src/main/java/ch/
   - "larch" (spruce log, sparse spruce leaves) from 2,000 to 2,300 m;
   - nothing above 2,300 m.
   - SURF overrides: conifer forest (2) is always spruce; sparse (14) and urban green (11) are 40 % bushes.
-- **Cross-chunk trees:** I chose clipping over decoration. Every chunk lists all trees within 3 columns of itself, in a fixed order, and places only the blocks inside itself: all logs first, then leaves, and only into air. Neighbouring chunks therefore complete each other's trees from the same data. A unit test checks that two neighbouring chunks agree on the trees they share.
-- **Leaves:** distance = Manhattan distance to the nearest log of the same tree, at most 6, not persistent. Bushes have no log and use persistent leaves. Leaves only random-tick (and decay) at distance 7, so as placed they never decay.
+- **Real trees (TTOP, swd-format §6a):** a cell with a `TTOP` table gets exactly its trees and no statistical placement. The kind maps to a species: conifer → spruce (larch from 2,000 m), larch → larch, broadleaf → oak or birch by hash, unknown → by SURF and altitude (never dropped; under 4 m → bush). Height is `height_m`; the crown radius is `crown_dm` / 10, or derived from the height when 0. A real tree is skipped only where its own column is not dry open land (water, bank, overlay, building).
+- **TTOP/CNPY interface:** `TreeData` (`tops(eKm, nKm)`, `canopy(eKm, nKm)`) with parsers in `TreeTops`. The game passes `TreeData.NONE` until mod-core adds `SwdCell.trees()` / `canopy()`; hooking it up is a one-line `VegetationStage(TreeData)` change. CNPY is parsed but not yet used for placement.
+- **Statistical heights:** forest SURF 1–3 below 2,000 m: 18–35 m; everything else (sparse, urban, meadow, larch band): 8–20 m; fruit trees 4–7 m.
+- **Shapes scale with height and crown radius:** spruce is a tiered cone from 0.3 h; larch a sparse cone from 0.35 h; oak an ellipsoid centred at 0.62 h with a spreading trunk; birch a narrow ellipsoid. Default radius: spruce 1 + 0.12 h, larch/birch 1 + 0.1 h, oak 0.22 h. Wide crowns get horizontal branch logs (axis x/z), so no leaf is more than 6 from a log. Example: a 35 m fixture spruce (radius 5) has 46 logs and 745 leaves.
+- **Cross-chunk trees:** I chose clipping over decoration. Every chunk lists all trees whose crown can reach it, in a fixed order, and places only the blocks inside itself: all logs first, then leaves, and only into air. Crowns skip building columns, and over a road or rail they keep 5 blocks above the deck. Neighbouring chunks therefore complete each other's trees from the same data. Unit tests check that two neighbouring chunks agree, including with the widest crowns.
+- **REACH (CELL_MARGIN unchanged at 8):** real-tree crowns are clamped to `REACH = MARGIN − 1 = 7`, because a trunk's `top()` (bank check) looks one column further. Statistical trees check 3 columns around their trunk, so their crowns are capped at `STAT_REACH = MARGIN − 3 = 5`. Wider crowns would need a larger CELL_MARGIN.
+- **Leaves:** distance = vanilla distance, found by a breadth-first walk from the tree's logs through its own leaves (6-connected). Leaves the walk does not reach within 6 are left out, so as placed no leaf decays and an update changes no distance (unit test for all species, heights 2–40 and radii 1–7). Bushes have no log and use persistent leaves. Where two trees overlap, an update may raise a leaf's distance, but never above 6 next to its own logs.
 - **Ground cover:**
   - short grass and flowers on meadow, urban green and alpine pasture (alpine flower set above 1,500 m, nothing above 2,600 m);
   - ferns in forests;
@@ -119,6 +124,11 @@ None. No contract file was changed.
 - **Forest:** 430 spruce logs and 3,452 leaves in x −380…−360, z 200…240; no oak or birch logs there.
 - **Stability:** setblocks next to the rim and lake edge, then a 10 s wait: the rim stayed dry and the lake source unchanged.
 - **Unit tests:** `WaterPlanTest`, `OverlayPlanTest`, `TreePlanTest` (`./gradlew build` passes). The waterfall and tunnel-cover changes came after the in-game run. They are covered by unit tests, and the fixture has neither feature.
+
+## Verification (tree shapes, fixture in a private store `…/scratchpad/fixstore`, ports 25660/25661)
+- **Forest chunk x −352…−337, z 192…207:** 571 spruce logs (101 along x, 55 along z, 415 along y) and leaves at distances 1–5 only (1302/1474/766/192/11). There are none at 6–7, so nothing decays.
+- **Spruce at (−347, 193):** 35 m tall, radius 5, trunk y −1357…−1324 with its top leaf at −1323. Of its 791 planned blocks, 46 logs and 718 leaves are in place. The other 27 leaf spots hold neighbouring trees' logs, which are placed first.
+- **Stability:** after 30 s at randomTickSpeed 1000, all 791 positions were unchanged.
 
 ## Verification (real cells, private store, ports 25660/25661)
 - **Cells** were built from main (acccce9) with `build.assemble` + `Store.write`, using the cached raw data and TLM extract (no downloads), into the private store `<scratch>`:
