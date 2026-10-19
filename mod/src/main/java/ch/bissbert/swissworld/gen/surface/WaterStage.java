@@ -34,6 +34,16 @@ public final class WaterStage implements GenStage {
             for (int lz = 0; lz < 16; lz++) {
                 int x = x0 + lx, z = z0 + lz;
                 int bottom = g.ground(x, z) + 1;
+                int[] face = WaterPlan.bedFace(g, x, z);
+                if (face != null) {
+                    // the bed's stone where deeper water beside it shows it: gravel, laid bottom-up on solid ground
+                    for (int y = face[0]; y <= face[1]; y++) {
+                        if (chunk.getBlockState(pos.set(x, y, z)).is(Blocks.STONE)
+                                && chunk.getBlockState(pos.set(x, y - 1, z)).isSolid()) {
+                            chunk.setBlockState(pos.set(x, y, z), BANK_TOP, false);
+                        }
+                    }
+                }
                 WaterPlan.Fill f = WaterPlan.fill(g, x, z);
                 if (f != null && f.reed()) {
                     int s = f.sourceTop();

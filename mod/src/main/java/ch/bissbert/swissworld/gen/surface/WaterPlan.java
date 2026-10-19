@@ -107,6 +107,25 @@ public final class WaterPlan {
         return new Fill(s, top, false, false, lip, false);
     }
 
+    /**
+     * The part of this column's ground that a neighbour's water touches from the side: from the lowest water beside it
+     * up to its own ground, no higher than that water's top. A riverbed's gravel is one block thick over stone, so a
+     * step in the bed, or a shore a block above the bed, shows its stone there. {lo, hi}, or null.
+     */
+    public static int[] bedFace(ColumnGrid g, int x, int z) {
+        if (!g.present(x, z)) return null;
+        int lo = Integer.MAX_VALUE, hi = ColumnGrid.NONE;
+        for (int[] d : SIDES) {
+            int nx = x + d[0], nz = z + d[1];
+            Fill f = fill(g, nx, nz);
+            if (f == null || f.reed() || f.cane()) continue;
+            lo = Math.min(lo, g.ground(nx, nz) + 1);
+            hi = Math.max(hi, f.sourceTop());
+        }
+        hi = Math.min(hi, g.ground(x, z));
+        return lo <= hi ? new int[] {lo, hi} : null;
+    }
+
     /** The lowest block above the sources would have two source neighbours: an inner corner of a step. */
     private static boolean corner(ColumnGrid g, int x, int z, int s, int top) {
         return top > s && sourcesAt(g, x, z, s + 1) >= 2;
