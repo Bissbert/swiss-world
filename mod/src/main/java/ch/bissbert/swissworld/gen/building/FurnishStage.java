@@ -46,7 +46,9 @@ public final class FurnishStage implements GenStage {
         if (s.ladder()) {
             BlockState ladder = Blocks.LADDER.defaultBlockState().setValue(LadderBlock.FACING, Put.mc(s.dir()));
             int bx = s.x() - s.dir().dx, bz = s.z() - s.dir().dz;
-            for (int y = p.floorY(0) + 1; y <= p.floorY(f - 1); y++) {
+            // a single floor under a tall roof: the ladder climbs three blocks into the rafters
+            int topY = f > 1 ? p.floorY(f - 1) : Math.min(p.floorY(0) + 3, p.cols().cover(s.x(), s.z()) - 2);
+            for (int y = p.floorY(0) + 1; y <= topY; y++) {
                 put.set(s.x(), y, s.z(), ladder);
                 if (p.pillar(bx, bz)) put.set(bx, y, bz, pal.partition().defaultBlockState());
             }

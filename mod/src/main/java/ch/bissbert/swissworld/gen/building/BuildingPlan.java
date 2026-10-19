@@ -17,7 +17,7 @@ import java.util.Set;
  */
 public record BuildingPlan(long gid, Style style, Columns cols, int storey, List<Integer> floors, Door door,
                            Stairs stairs, List<Room> rooms, List<Partition> walls, List<Prop> props,
-                           List<Light> lights) {
+                           List<Light> lights, int wanted) {
 
     /**
      * Door column on the facade; {@code out} points outside. The door stands on floor 0, or one block above it ({@code up} = 1)
@@ -170,6 +170,7 @@ public record BuildingPlan(long gid, Style style, Columns cols, int storey, List
         }
 
         final double topY;
+        int wanted = 1;
         final int ceiling, flat, lift;
 
         void layFloors(int y0) {
@@ -208,13 +209,28 @@ public record BuildingPlan(long gid, Style style, Columns cols, int storey, List
                     layFloors(flat);
                     door = findDoor();
                 }
+                wanted = floors.size();
                 // upper floors no stair or ladder reaches are dropped, leaving a taller top storey
                 while (floors.size() > 1 && (stairs = findStairs()) == null) floors.remove(floors.size() - 1);
             }
-            view = new BuildingPlan(gid, style, c, s, List.copyOf(floors), door, stairs, rooms, walls, props, lights);
+            if (!style.empty() && floors.size() == 1 && stairs == null && height() >= 8) stairs = findLadder(floors.get(0));
+            view = new BuildingPlan(gid, style, c, s, List.copyOf(floors), door, stairs, rooms, walls, props, lights, 1);
             if (!style.empty()) for (int k = 0; k < floors.size(); k++) layoutFloor(k);
             return new BuildingPlan(gid, style, c, s, List.copyOf(floors), door, stairs, List.copyOf(rooms),
-                    List.copyOf(walls), List.copyOf(props), List.copyOf(lights));
+                    List.copyOf(walls), List.copyOf(props), List.copyOf(lights), wanted);
+        }
+
+        /** Blocks from the lowest column bottom to the highest roof: a building this tall gets a way up even with one floor. */
+        int height() {
+            int lo = Integer.MAX_VALUE, hi = Integer.MIN_VALUE;
+            for (int z = c.minZ; z <= c.maxZ; z++) {
+                for (int x = c.minX; x <= c.maxX; x++) {
+                    if (!c.body(x, z)) continue;
+                    lo = Math.min(lo, c.lo(x, z));
+                    hi = Math.max(hi, c.topFull(x, z));
+                }
+            }
+            return hi - lo;
         }
 
         Dir doorSide() {
@@ -379,6 +395,11 @@ public record BuildingPlan(long gid, Style style, Columns cols, int storey, List
                     }
                 }
             }
+            return findLadder(top);
+        }
+
+        /** A ladder on an interior wall or a pillar, with a free exit cell beside it. */
+        Stairs findLadder(int top) {
             int n = (c.maxX - c.minX + 1) * (c.maxZ - c.minZ + 1), rot = Hash.pick(gid, 6, n);
             for (int pass = 0; pass < 2; pass++) {
                 for (int o = 0; o < n; o++) {
@@ -399,7 +420,7 @@ public record BuildingPlan(long gid, Style style, Columns cols, int storey, List
         Dir exit(int x, int z, Dir back, int top) {
             for (Dir e : new Dir[]{back.opposite(), back.cw(), back.cw().cw().cw()}) {
                 int ex = x + e.dx, ez = z + e.dz;
-                if (c.interior(ex, ez) && c.lo(ex, ez) <= floors.get(1) && c.cover(ex, ez) >= top + 3) return e;
+                if (c.interior(ex, ez) && c.lo(ex, ez) <= floors.get(Math.min(1, floors.size() - 1)) && c.cover(ex, ez) >= top + 3) return e;
             }
             return null;
         }
@@ -418,6 +439,11 @@ public record BuildingPlan(long gid, Style style, Columns cols, int storey, List
         boolean usable(int k, int x, int z) {
             return c.interior(x, z) && view.floorAt(k, x, z) && c.cover(x, z) >= floors.get(k) + 3
                     && !view.reserved(x, z);
+        }
+
+        /** Like usable, but a single block of headroom is enough: a lantern stands on the floor. */
+        boolean lowUsable(int k, int x, int z) {
+            return c.interior(x, z) && view.floorAt(k, x, z) && c.cover(x, z) >= floors.get(k) + 2 && !view.reserved(x, z);
         }
 
         static long key(int k, int x, int z) {
@@ -442,6 +468,99 @@ public record BuildingPlan(long gid, Style style, Columns cols, int storey, List
                 furnish(room, walls);
                 light(room, false);
             }
+            lightGaps(k);
+        }
+
+        /**
+         * Spawn-proofing: spreads light over the floor as the game would (one level per cell, partitions block, the
+         * gap and open floor do not) and adds a standing lantern on every usable cell it does not reach.
+         */
+        void lightGaps(int k) {
+            int y = floors.get(k);
+            java.util.Set<Long> solid = new java.util.HashSet<>();
+            for (Prop pr : props) {
+                if (pr.y != y + 1) continue;
+                solid.add(key(0, pr.x, pr.z));
+                if (pr.kind == PropKind.BED) solid.add(key(0, pr.x + pr.facing.dx, pr.z + pr.facing.dz));
+            }
+            // each pass re-spreads the light over the footprint: bound the passes for big halls (their grid already lights them)
+            long area = (long) (c.maxX - c.minX + 1) * (c.maxZ - c.minZ + 1);
+            if (area > 6000) return; // halls this big are covered by the light grid; the spread model would cost more than the plan
+            int passes = Math.clamp(600_000L / ((c.maxX - c.minX + 1) * (c.maxZ - c.minZ + 1)), 2, 400);
+            for (int guard = 0; guard < passes; guard++) {
+                java.util.Map<Long, Integer> lv = new java.util.HashMap<>();
+                java.util.ArrayDeque<int[]> q = new java.util.ArrayDeque<>();
+                for (Light l : lights) {
+                    int top = k + 1 < floors.size() ? floors.get(k + 1) : y + 8;
+                    int base = (l.kind == LightKind.STANDING ? 14 : 15 - (l.y - y - 1));
+                    boolean here = l.kind == LightKind.GLOW ? l.y == (k + 1 < floors.size() ? top : c.cover(l.x, l.z)) : l.y > y && l.y < top;
+                    if (!here || base <= 0) continue;
+                    lv.merge(key(0, l.x, l.z), base, Math::max);
+                    q.add(new int[]{l.x, l.z, base});
+                }
+                while (!q.isEmpty()) {
+                    int[] a = q.poll();
+                    if (lv.getOrDefault(key(0, a[0], a[1]), 0) != a[2] || a[2] <= 1) continue;
+                    for (Dir d : Dir.values()) {
+                        int nx = a[0] + d.dx, nz = a[1] + d.dz;
+                        if (!c.interior(nx, nz) || !view.floorAt(k, nx, nz) || walled(k, a[0], a[1], nx, nz) || view.pillar(nx, nz) || solid.contains(key(0, nx, nz)) || lv.getOrDefault(key(0, nx, nz), 0) >= a[2] - 1) continue;
+                        lv.put(key(0, nx, nz), a[2] - 1);
+                        q.add(new int[]{nx, nz, a[2] - 1});
+                    }
+                }
+                // dark cells at least 9 apart share a pass: their lights cannot reach each other, so one spread serves all
+                List<int[]> picks = new ArrayList<>();
+                for (int z = c.minZ; z <= c.maxZ; z++) {
+                    for (int x = c.minX; x <= c.maxX; x++) {
+                        if (!lowUsable(k, x, z) || wallCell(k, x, z) || raised(k, x, z) || lv.getOrDefault(key(0, x, z), 0) >= 9 || used.contains(key(k, x, z))) continue;
+                        boolean near = false;
+                        for (int[] pk : picks) near |= Math.abs(pk[0] - x) + Math.abs(pk[1] - z) < 9;
+                        if (!near) picks.add(new int[]{x, z});
+                    }
+                }
+                if (picks.isEmpty()) return;
+                boolean placed = false;
+                for (int[] dark : picks) {
+                    boolean inner = k == 0 && door != null && dark[0] == door.x - door.out.dx && dark[1] == door.z - door.out.dz;
+                    if (inner) { // keep the entrance clear: hang the lantern if there is a ceiling to hang it from
+                        int cy = c.cover(dark[0], dark[1]) - 1;
+                        int ceil = k + 1 < floors.size() ? floors.get(k + 1) : c.cover(dark[0], dark[1]);
+                        if (cy >= y + 3) lights.add(new Light(dark[0], Math.min(cy, y + 4), dark[1], LightKind.HANGING));
+                        else if (ceil >= y + 3) lights.add(new Light(dark[0], ceil, dark[1], LightKind.GLOW)); // low ceiling: glowstone in it
+                        else continue;
+                    } else {
+                        lights.add(new Light(dark[0], y + 1, dark[1], LightKind.STANDING));
+                    }
+                    used.add(key(k, dark[0], dark[1]));
+                    placed = true;
+                }
+                if (!placed) return;
+            }
+        }
+
+        int storeyAt(int k) {
+            return k + 1 < floors.size() ? floors.get(k + 1) - floors.get(k) : 0;
+        }
+
+        /** True when (x, z) is filled by a partition of floor k (its gap cell is open). */
+        boolean wallCell(int k, int x, int z) {
+            if (!c.interior(x, z) || view.reserved(x, z)) return false;
+            for (Partition w : walls) {
+                if (w.floor != k) continue;
+                int u = w.alongX ? x : z, v = w.alongX ? z : x;
+                if (v == w.line && u >= w.from && u <= w.to && u != w.gap) return true;
+            }
+            return false;
+        }
+
+        boolean walled(int k, int ax, int az, int bx, int bz) {
+            return wallCell(k, bx, bz) || raised(k, bx, bz) || c.cover(bx, bz) <= floors.get(k) + 1;
+        }
+
+        /** True where the shell makes a wall at floor level because a neighbouring column starts higher up. */
+        boolean raised(int k, int x, int z) {
+            for (Dir d : Dir.values()) if (c.body(x + d.dx, z + d.dz) && c.lo(x + d.dx, z + d.dz) > floors.get(k) + 1) return true;
+            return false;
         }
 
         /** Rooms need two usable cells (a standing light and a container); smaller nooks stay empty. */
