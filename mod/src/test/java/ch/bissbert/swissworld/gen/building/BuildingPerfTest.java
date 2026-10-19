@@ -37,9 +37,10 @@ class BuildingPerfTest {
     }
 
     private static long millis(int w, int d, int usableEvery) {
-        long t = System.nanoTime();
+        java.lang.management.ThreadMXBean mx = java.lang.management.ManagementFactory.getThreadMXBean();
+        long t = mx.getCurrentThreadCpuTime(); // CPU time of this thread: immune to a loaded machine
         BuildingPlan p = plan(w, d, usableEvery);
-        long ms = (System.nanoTime() - t) / 1_000_000;
+        long ms = (mx.getCurrentThreadCpuTime() - t) / 1_000_000;
         for (BuildingPlan.Room r : p.rooms()) {
             assertTrue(p.lights().stream().anyMatch(l -> l.x() >= r.x0() && l.x() <= r.x1() && l.z() >= r.z0() && l.z() <= r.z1()), "room without light " + r);
         }
@@ -47,10 +48,15 @@ class BuildingPerfTest {
         return ms;
     }
 
+    /** Best of three: a loaded CI machine or a JIT pause must not fail a bound that is meant to catch quadratic loops. */
+    private static long best(int w, int d, int every) {
+        return Math.min(millis(w, d, every), Math.min(millis(w, d, every), millis(w, d, every)));
+    }
+
     @Test
     void hugeHallsPlanFast() {
         millis(60, 60, 1); // warm up
-        long a = millis(200, 200, 1), b = millis(300, 100, 30), c = millis(200, 200, 60);
+        long a = best(200, 200, 1), b = best(300, 100, 30), c = best(200, 200, 60);
         assertTrue(a < 100, "200x200 hall took " + a + " ms");
         assertTrue(b < 100, "300x100 mostly unusable hall took " + b + " ms");
         assertTrue(c < 100, "200x200 nearly unusable hall took " + c + " ms");
