@@ -244,35 +244,76 @@ public final class BuildingStage implements GenStage {
         return true;
     }
 
-    /** Landing in front of the door, then steps and a trench (higher ground) or fill (lower) down to the terrain. */
+    /**
+     * Landing in front of the door, then steps and a trench (higher ground) or fill (lower) down to the terrain.
+     * Where the way out is cut into higher ground it is three wide with a retaining wall on both sides (a sunken
+     * entrance), never a one block wide pit.
+     */
     static void steps(BuildingPlan p, Palette pal, Put put, CellView view) {
         BuildingPlan.Door d = p.door();
         int y0 = p.floorY(0) + d.up();
         int[] ys = trace(p.cols(), d, y0, view);
         if (ys == null) ys = fallbackPath(p, d, y0, view);
-        for (int i = 0; i < ys.length; i++) {
-            int x = d.x() + d.out().dx * (i + 1), z = d.z() + d.out().dz * (i + 1);
-            double h = view.terrain(x, z);
-            if (Double.isNaN(h) || view.foreign(x, z, p.gid())) break;
-            int ground = (int) Math.floor(SwissCoords.toY(h)), y = ys[i];
-            int prev = i == 0 ? y0 : ys[i - 1];
-            for (int a = y + 1; a <= Math.max(ground > y ? ground : y, i == 0 || p.cols().state(x, z) == Columns.EAVE ? y + 3 : y); a++) put.set(x, a, z, AIR);
-            if (y == ground && i > 0) continue;
-            BlockState b;
-            if (i == 0 || y == prev) b = pal.base().defaultBlockState();
-            else b = Put.with(pal.steps().defaultBlockState(), StairBlock.FACING,
-                    Put.mc(y < prev ? d.out().opposite() : d.out()));
-            if (y != ground || i == 0) put.set(x, y, z, b);
-            for (int a = ground + 1; a < y; a++) put.set(x, a, z, pal.foundation().defaultBlockState());
+        boolean cut = false;
+        for (int i = 0; i < ys.length && !cut; i++) {
+            double h = view.terrain(d.x() + d.out().dx * (i + 1), d.z() + d.out().dz * (i + 1));
+            cut = !Double.isNaN(h) && (int) Math.floor(SwissCoords.toY(h)) > ys[i];
         }
-        // low eave slabs over the natural ground where the path ends would block the way out
-        for (int i = ys.length; i < ys.length + 5; i++) {
-            int x = d.x() + d.out().dx * (i + 1), z = d.z() + d.out().dz * (i + 1);
-            double h = view.terrain(x, z);
-            if (Double.isNaN(h) || p.cols().state(x, z) != Columns.EAVE || view.foreign(x, z, p.gid())) continue;
-            int g = (int) Math.floor(SwissCoords.toY(h));
-            for (int a = g + 1; a <= g + 3; a++) put.set(x, a, z, AIR);
+        Dir side = d.out().cw();
+        for (int w = cut ? -1 : 0; w <= (cut ? 1 : 0); w++) {
+            for (int i = 0; i < ys.length; i++) {
+                int x = d.x() + d.out().dx * (i + 1) + side.dx * w, z = d.z() + d.out().dz * (i + 1) + side.dz * w;
+                if (w != 0 && (p.cols().state(x, z) == Columns.BODY || view.foreign(x, z, p.gid()))) continue;
+                stepCell(p, pal, put, view, x, z, ys[i], i == 0 ? y0 : ys[i - 1], i, d.out());
+            }
         }
+        if (cut) {
+            for (int w = -2; w <= 2; w += 4) {
+                for (int i = 0; i < ys.length; i++) {
+                    int x = d.x() + d.out().dx * (i + 1) + side.dx * w, z = d.z() + d.out().dz * (i + 1) + side.dz * w;
+                    double h = view.terrain(x, z);
+                    if (Double.isNaN(h) || p.cols().state(x, z) == Columns.BODY || view.foreign(x, z, p.gid())) continue;
+                    int ground = (int) Math.floor(SwissCoords.toY(h));
+                    // the face of the cut: the retaining wall, under the grass on top
+                    for (int a = ys[i] + 1; a < ground; a++) put.set(x, a, z, pal.foundation().defaultBlockState());
+                }
+            }
+        }
+        // and around the landing itself (a door in the corner of a stepped outline stands in a ring of eaves)
+        for (int dz = -2; dz <= 2; dz++) {
+            for (int dx = -2; dx <= 2; dx++) {
+                if (Math.abs(dx) + Math.abs(dz) == 4) continue;
+                int x = d.x() + d.out().dx + dx, z = d.z() + d.out().dz + dz;
+                double h = view.terrain(x, z);
+                if (Double.isNaN(h) || p.cols().state(x, z) != Columns.EAVE || view.foreign(x, z, p.gid())) continue;
+                int g = Math.max((int) Math.floor(SwissCoords.toY(h)), ys.length > 0 ? ys[0] : y0);
+                for (int a = g + 1; a <= g + 3; a++) put.set(x, a, z, AIR);
+            }
+        }
+        // low eave slabs over the natural ground where the path ends would block the way out: clear a three wide lane
+        for (int i = ys.length; i < ys.length + 12; i++) {
+            for (int w = -1; w <= 1; w++) {
+                int x = d.x() + d.out().dx * (i + 1) + side.dx * w, z = d.z() + d.out().dz * (i + 1) + side.dz * w;
+                double h = view.terrain(x, z);
+                if (Double.isNaN(h) || p.cols().state(x, z) != Columns.EAVE || view.foreign(x, z, p.gid())) continue;
+                int g = (int) Math.floor(SwissCoords.toY(h));
+                for (int a = g + 1; a <= g + 3; a++) put.set(x, a, z, AIR);
+            }
+        }
+    }
+
+    /** One column of the way out: cleared above, a floor block or stair at walking level, fill under it. */
+    private static void stepCell(BuildingPlan p, Palette pal, Put put, CellView view, int x, int z, int y, int prev, int i, Dir out) {
+        double h = view.terrain(x, z);
+        if (Double.isNaN(h) || view.foreign(x, z, p.gid())) return;
+        int ground = (int) Math.floor(SwissCoords.toY(h));
+        for (int a = y + 1; a <= Math.max(ground > y ? ground : y, i == 0 || p.cols().state(x, z) == Columns.EAVE ? y + 3 : y); a++) put.set(x, a, z, AIR);
+        if (y == ground && i > 0) return;
+        BlockState b;
+        if (i == 0 || y == prev) b = pal.base().defaultBlockState();
+        else b = Put.with(pal.steps().defaultBlockState(), StairBlock.FACING, Put.mc(y < prev ? out.opposite() : out));
+        if (y != ground || i == 0) put.set(x, y, z, b);
+        for (int a = ground + 1; a < y; a++) put.set(x, a, z, pal.foundation().defaultBlockState());
     }
 
     /** No path reaches the terrain: still cut the first cells so the door opens onto a landing. */
