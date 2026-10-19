@@ -1,7 +1,8 @@
-# NOTES — sidecar-core (Milestone 1, rebuild)
+# NOTES — sidecar-core (Milestone 1, rebuild, canopy)
 
-Decisions made autonomously, deviations from the brief, and contract proposals. Nothing in a contract file
-was changed.
+Decisions made autonomously, deviations from the brief, and contract proposals. Milestone 1 and the rebuild
+changed no contract file; the canopy task changed `swd.py`, `build.py` (`LayerResult.trees`) and `fixtures/`
+as the coordinator's task required (see *Canopy*).
 
 ## Contract proposals (need the coordinator)
 
@@ -257,3 +258,95 @@ features).
   - Some sheets lie outside the WGS84 box, in the brief's LV95 range (same precedent as ALTI).
   - No country-wide item.
 - Memory: 8 workers peaked at ≈ 4 GB RSS in total (trial run).
+
+## Canopy (CNPY + TTOP, `swissdata/canopy.py`)
+
+### Sources (opendata.swiss terms_by: "Open use. Must provide the source")
+- **swissSURFACE3D Raster**, STAC collection `ch.swisstopo.swisssurface3d-raster` (not the older point-cloud
+  collection `ch.swisstopo.swisssurface3d`). Items `swisssurface3d-raster_<year>_<e>-<n>`, asset
+  `<item>_0.5_2056_5728.tif`: 2000×2000 float32 COG, 0.5 m DSM, nodata -9999, Area, origin at the NW corner.
+  Licence: https://www.swisstopo.admin.ch/ogd-conditions, attribution "© swisstopo".
+  - Newest item per tile via `stac.SurfaceIndex` (a generic `TileIndex`, which `AltiIndex` now also uses);
+    pinned per cell as `sources.surface`. Years differ by tile (2632-1170: 2022, 2652-1170: 2023 (no 2022
+    item), 2632-1171 has a 2024 item).
+  - Download size per tile: 12,357,677 B (2632-1170), 15,857,897 (2652-1170), 16,746,456 (2631-1171),
+    15,914,978 (2642-1161). So 12-17 MB, ~15 MB typical.
+- **Waldmischungsgrad LFI** (forest mix rate NFI), STAC collection `ch.bafu.landesforstinventar-waldmischungsgrad`,
+  one item `landesforstinventar-waldmischungsgrad` (2023-10-31), asset `…_2056.tif`: 170,912,760 B, whole
+  country, 10 m, int8 = percent broadleaf, -128 = no forest, Sentinel-1/2 machine-learning product.
+  opendata.swiss dataset `waldmischungsgrad-lfi`, terms_by, attribution "© BAFU / WSL (LFI)".
+  - It is only published for the whole country. It is small, so it is fetched once and kept (it counts
+    towards the raw footprint), pinned as `sources.forestMix` = `landesforstinventar-waldmischungsgrad@2023-10-31`.
+  - Used for `kind`: conifer (1) / broadleaf (2), drawn per tree with probability = the pixel's broadleaf
+    share, from a hash of the global column (deterministic). No forest pixel -> 0. Larch (3) is never emitted:
+    no open larch layer was found (the mix raster counts larch as conifer).
+
+### Method (documented in the module docstring)
+- CHM = DSM − TERR (bilinear between 2 m nodes at each pixel centre). CNPY = rint(max of the column's 4
+  pixels), 0 below 2 m.
+- Masked (CNPY 0, no tops): BSPN columns + 1-column ring (roof edges), water (WKND/WLVL), bridge/dam decks
+  (OFLG), columns with CHM > 50 m + 1 ring (cliff rims the 2 m TERR misses, masts: ~0.1 % of tops, up to
+  77 m before), and rock/scree/glacier (SURF 4/5/6) outside the mix raster's forest (boulders and faces read
+  as 5-22 m "canopy" on 2652_1170).
+  - The building ring was checked: the share of CNPY > 0 at chessboard distance 2-6 from buildings is flat
+    (0.26-0.31) on 2632_1170, so 1 column is enough.
+- Tops: Gaussian smoothing (σ 0.5 m), 3×3 maxima ≥ 3 m, then a variable window: a top survives if no higher
+  candidate lies within r(h) = (3 m + 0.1·h)/2 (Popescu & Wynne 2004; lidR's lmf example). Tops on overlays
+  (OCLS ≠ 0, tunnels excepted) or masked columns are dropped. heightM = CNPY at the top's column (a tested
+  invariant).
+- crownDm: canopy columns ≥ half a top's height join the nearest top within 1 m + 0.15·h; radius of a disc
+  of that area. That is a nearest-top stand-in for a watershed (cheaper; good enough for crown sizing).
+
+### Seam rule (**deviation from the task**)
+The task suggested using neighbour DSMs if they are in raw, otherwise suppressing tops within 2 m of the east
+and south edges. Both parts were dropped:
+- Neighbour use would make TTOP depend on cache state: if only one side of a seam had its neighbour in raw,
+  both cells could keep the same tree, and a rebuild would not reproduce the cell from its pins.
+- An east/south band of 2 m (or r(h)) still duplicates trees whose crown is wider than the band: the west
+  cell sees the cut crown rising towards the edge and keeps a top there.
+
+Rule used instead (raw-independent): each tile is processed alone, and tops whose smoothed maximum lies on the
+outermost pixel ring are dropped (after the window test, so they still suppress the lower bumps of their own
+crown). A cut crown always peaks at the edge, so the cell that really contains the top is the only one keeping
+it, on all four sides alike. Cost: tops within ~1 m of a seam may be lost (~0.4 % of trees), never duplicated.
+Tests: crowns at −6.25…+6.25 m from an E-W and an N-S seam with radii 2.5/4/6 m, and a 4-cell corner.
+
+### Validation (private store, scratchpad; never the shared store)
+| cell | what | s | trees | trees/ha in forest¹ | height p10/50/90/99, max | CNPY / TTOP bytes |
+|---|---|---|---|---|---|---|
+| 2632_1170 | Interlaken town | 3.8 | 4,408 | 278 (0.5 ha) | 4/7/17/27, 42 | 136,727 / 35,268 |
+| 2652_1170 | subalpine 1560-2010 m | 1.4 | 6,832 | 190 | 4/10/23/31, 37 | 169,396 / 54,660 |
+| 2631_1171 | dense lowland mixed forest | 1.2 | 18,316 | 189 | 11/21/32/39, 48 | 481,017 / 146,532 |
+| 2642_1161 | dense conifer forest | 1.7 | 22,157 | 230 | 12/22/28/32, 39 | 471,315 / 177,260 |
+
+¹ trees whose top lies on SURF forest classes 1/2/3, per ha of those classes.
+- Lowland forest: dominant trees (p90-p99) 28-39 m, which fits the expected 25-40 m. The median is ~22 m
+  because ITD also finds intermediate and edge trees. Subalpine forest is lower (p90 26 m in forest).
+- 190-280 trees/ha: plausible for ITD in mature forest (a 1 m window would give > 800/ha).
+- Times are compute only, with the DSM already on disk (DSM read ≈ 1 s), plus a ~15 MB download per cell.
+  Earlier full builds were ~2.7 s per cell per worker, so canopy adds ~1-2 s.
+- Kinds: 2642_1161 is 95 % conifer, 2631_1171 is 76 % broadleaf, matching the mix raster.
+- Previews: `.data-cache/previews/{2632_1170,2652_1170,2631_1171,2642_1161}_CNPY.png` (CNPY plus a 200 m zoom
+  with tops, crowns and kinds).
+
+### Footprint
+- Raw: 171 MB mix (kept) + one DSM per cell in flight (≤ 17 MB per worker), deleted after extraction unless
+  `SWISSDATA_KEEP_RAW=1` is set **explicitly** (`Config.keep_surface_raw`; unlike the ALTI COGs, the dev
+  default does not keep them). With `KEEP_RAW=1` the test bbox needs ~1,286 × 15 MB ≈ 19 GB, too close to the
+  20 GB limit next to the current 5.1 GB raw.
+- Store: cells grow by CNPY (137-481 KB) + TTOP (35-177 KB), so forest cells go from ~0.4 MB to ~1 MB. My
+  estimate for the 1,286 shared cells is ~0.5 GB → ~1.1 GB.
+- **A shared-store rebuild re-downloads ~19 GB of DSM** (transient, deleted per cell), ~1,286 × 15 MB.
+  Not run: the coordinator holds it while mod-core benchmarks.
+- On demand, every newly built cell now downloads ~15 MB more, which adds latency for a player exploring new ground.
+
+### Contract changes (authorised by the task; please review)
+- `swd.py`: `CNPY` in the u8 layers (encoded after INSD); `Tree` dataclass, `KIND_*`; `Cell.trees` = None
+  (TTOP absent: no DSM, the mod keeps its statistical trees) vs `[]` (TTOP present and empty: DSM, no trees).
+  TTOP is sorted by (dz, dx) on write.
+- `build.py`: `LayerResult.trees`; `assemble` passes it on (only from builders declaring the TTOP tag);
+  `CanopyBuilder` is registered after Buildings (needs BSPN) and before DefaultSurface.
+- `fixtures/synthetic_2632_1170.*`: CNPY 18 m on the forest strip dx 500-599 (0 under the bridge deck), and
+  3 trees in TTOP; expected.json has `cnpy` per probe column and a `trees` list. `./gradlew test --offline`:
+  45 tests, 0 failures (1 skipped), so the Java readers ignore the new tags as specified.
+- New dependency: `scipy>=1.13` (ndimage, cKDTree).

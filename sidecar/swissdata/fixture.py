@@ -45,10 +45,19 @@ def build() -> swd.Cell:
     insd = np.ones((swd.CELL, swd.CELL), dtype="u1")
     insd[:, 990:] = 0
 
+    # canopy over the forest strip, none under the bridge deck; three trees with their tops on it
+    cnpy = np.zeros((swd.CELL, swd.CELL), dtype="u1")
+    cnpy[:, 500:600] = 18
+    cnpy[298:303, 500:600] = 0
+    trees = [swd.Tree(520, 40, 31, 35, swd.KIND_CONIFER), swd.Tree(575, 12, 24, 28, swd.KIND_BROADLEAF),
+             swd.Tree(590, 600, 2, 0, swd.KIND_UNKNOWN)]
+    for t in trees:
+        cnpy[t.dz, t.dx] = t.height_m
+
     cell = swd.Cell(E_KM, N_KM, layers={
         "TERR": terr, "SURF": surf, "WLVL": wlvl, "WKND": wknd,
-        "OCLS": ocls, "OELV": oelv, "OFLG": oflg, "INSD": insd,
-    })
+        "OCLS": ocls, "OELV": oelv, "OFLG": oflg, "INSD": insd, "CNPY": cnpy,
+    }, trees=trees)
     b = swd.Building(
         gid=swd.gid_from_uuid("fixture-building-1"), egid=123456, objektart=0,
         gwr_category=1021, gwr_class=1110, gwr_period=8014, floors=2, entrance_side=3,
@@ -70,15 +79,19 @@ def expected(cell: swd.Cell) -> dict:
         "eKm": E_KM, "nKm": N_KM, "border": True,
         "terrNodes": [{"i": i, "j": j, "h": terr_node(i, j)} for i, j in [(0, 0), (500, 0), (0, 500), (250, 100), (50, 450)]],
         "columns": [
-            {"dx": 10, "dz": 900, "surf": 7, "wlvl": 564.0, "wknd": 1, "ocls": 0, "oflg": 0, "insd": 1},
-            {"dx": 550, "dz": 10, "surf": 2, "wlvl": None, "wknd": 0, "ocls": 0, "oflg": 0, "insd": 1},
-            {"dx": 550, "dz": 300, "surf": 2, "wlvl": None, "wknd": 0, "ocls": 3, "oflg": swd.OFLG_BRIDGE, "oelv": 640.0, "insd": 1},
-            {"dx": 700, "dz": 10, "surf": 0, "wlvl": None, "wknd": 0, "ocls": 8, "oflg": swd.OFLG_RAIL, "insd": 1},
-            {"dx": 995, "dz": 10, "surf": 0, "wlvl": None, "wknd": 0, "ocls": 0, "oflg": 0, "insd": 0},
+            {"dx": 10, "dz": 900, "surf": 7, "wlvl": 564.0, "wknd": 1, "ocls": 0, "oflg": 0, "insd": 1, "cnpy": 0},
+            {"dx": 550, "dz": 10, "surf": 2, "wlvl": None, "wknd": 0, "ocls": 0, "oflg": 0, "insd": 1, "cnpy": 18},
+            {"dx": 550, "dz": 300, "surf": 2, "wlvl": None, "wknd": 0, "ocls": 3, "oflg": swd.OFLG_BRIDGE, "oelv": 640.0, "insd": 1,
+             "cnpy": 0},
+            {"dx": 700, "dz": 10, "surf": 0, "wlvl": None, "wknd": 0, "ocls": 8, "oflg": swd.OFLG_RAIL, "insd": 1, "cnpy": 0},
+            {"dx": 995, "dz": 10, "surf": 0, "wlvl": None, "wknd": 0, "ocls": 0, "oflg": 0, "insd": 0, "cnpy": 0},
         ],
         "buildings": [{"gid": str(cell.buildings[0].gid), "egid": 123456, "gwrClass": 1110, "floors": 2,
                        "bbox": [100, 100, 109, 107], "baseH": 610.0, "topH": 619.5}],
         "spanColumns": len(cell.spans),
+        # TTOP order: by (dz, dx)
+        "trees": [{"dx": t.dx, "dz": t.dz, "heightM": t.height_m, "crownDm": t.crown_dm, "kind": t.kind}
+                  for t in sorted(cell.trees, key=lambda t: (t.dz, t.dx))],
         "spanProbe": {"dx": 105, "dz": 103, "bottom": 610.0,
                       "top": float(swd.decode_height(cell.spans[(105, 103)][0].top_h)), "buildingIdx": 0, "roofFlags": 1},
     }

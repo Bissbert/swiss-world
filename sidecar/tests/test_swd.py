@@ -31,6 +31,10 @@ def test_golden_fixture_matches_expected():
         assert cell.layers["OCLS"][dz, dx] == c["ocls"]
         assert cell.layers["OFLG"][dz, dx] == c["oflg"]
         assert cell.layers["INSD"][dz, dx] == c["insd"]
+        assert cell.layers["CNPY"][dz, dx] == c["cnpy"]
+    assert [vars(t) for t in cell.trees] == [{"dx": t["dx"], "dz": t["dz"], "height_m": t["heightM"],
+                                             "crown_dm": t["crownDm"], "kind": t["kind"]} for t in exp["trees"]]
+    assert all(cell.layers["CNPY"][t.dz, t.dx] == t.height_m for t in cell.trees)
     p = exp["spanProbe"]
     s = cell.spans[(p["dx"], p["dz"])][0]
     assert abs(float(swd.decode_height(s.top_h)) - p["top"]) < 1e-9
