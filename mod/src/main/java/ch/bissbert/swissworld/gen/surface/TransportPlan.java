@@ -8,7 +8,8 @@ import java.util.Arrays;
  * Roads, rails and tunnels laid out from {@link ColumnGrid} data only, so that two chunks sharing a border agree on
  * every block. Each decision is a pure function of the columns within a fixed distance; there is no iteration.
  * Every look-up stays within {@link #MARGIN} of the chunk (the longest chain, a tunnel wall over a rail track whose
- * centre line a crossing way broke, reaches about 25).
+ * centre line a crossing way broke, reaches about 25, plus {@link #RAIL_CLIMB} where a rail bed is raised towards a
+ * bridge; a chunk planned with a wider grid comes out the same).
  * <ul>
  *   <li>Profile: a weighted mean of the deck heights of the same kind of way within {@link #ROAD_RADIUS} (roads) or
  *       {@link #RAIL_RADIUS} (rails). A mean over a disc keeps a constant grade and removes the cross slope, the
@@ -23,10 +24,12 @@ import java.util.Arrays;
  */
 public final class TransportPlan {
     /** Grid margin this plan needs: {@code new ColumnGrid(.., MARGIN)}. */
-    public static final int MARGIN = 26;
+    public static final int MARGIN = 36;
     static final int ROAD_RADIUS = 5, RAIL_RADIUS = 4;
     /** How far a culvert or a water-side constraint ramps the way up: one half block (road) or block (rail) per column. */
     static final int ROAD_RAMP = 6, RAIL_RAMP = 4;
+    /** A rail bed rises at most one block per CLIMB_RUN columns, raised (never cut) within RAIL_CLIMB columns. */
+    static final int RAIL_CLIMB = 10, CLIMB_RUN = 2;
     /** Clear height above a tunnel floor. */
     static final int RAIL_TUNNEL_HEIGHT = 6, ROAD_TUNNEL_HEIGHT = 5;
     static final int EARTHWORK_REACH = 3;
@@ -36,7 +39,7 @@ public final class TransportPlan {
     private static final int UNSET = Integer.MAX_VALUE;
 
     private final ColumnGrid g;
-    private final int[] roadHalf, railBase, railNode, railLevel, floor, ceil, wet, gap, joins, flipped;
+    private final int[] roadHalf, railBase, railProfile, railNode, railLevel, floor, ceil, wet, gap, joins, flipped;
     private final int[][] thinned;
 
     public TransportPlan(ColumnGrid g) {
@@ -45,6 +48,7 @@ public final class TransportPlan {
         int n = g.cells();
         roadHalf = filled(n);
         railBase = filled(n);
+        railProfile = filled(n);
         railNode = filled(n);
         railLevel = filled(n);
         floor = filled(n);
@@ -241,6 +245,13 @@ public final class TransportPlan {
         return (roadHalf(x, z) & 1) != 0;
     }
 
+    /** The rail profile (see {@link #profile}) as a block level. */
+    private int railProfile(int x, int z) {
+        int k = g.index(x, z);
+        if (railProfile[k] == UNSET) railProfile[k] = (int) Math.floor(profile(x, z, true));
+        return railProfile[k];
+    }
+
     /** Smoothed rail bed level before the track's own adjustments. */
     public int railBase(int x, int z) {
         int k = g.index(x, z);
@@ -251,7 +262,18 @@ public final class TransportPlan {
             for (int[] d : EIGHT) if (railTunnel(x + d[0], z + d[1])) b = Math.min(b, railBase(x + d[0], z + d[1]));
             return railBase[k] = b;
         }
-        int b = (int) Math.floor(profile(x, z, true));
+        int b = railProfile(x, z);
+        if (!g.flag(x, z, ColumnGrid.TUNNEL)) {
+            // never more than one block per CLIMB_RUN columns below a bridge's profile: the steep rise from the ground
+            // onto a bridge deck becomes a ramp a diagonal track can climb by its flipped corners
+            for (int jj = -RAIL_CLIMB; jj <= RAIL_CLIMB; jj++) {
+                for (int ii = -RAIL_CLIMB; ii <= RAIL_CLIMB; ii++) {
+                    int qx = x + ii, qz = z + jj;
+                    if (!railWay(qx, qz) || !g.flag(qx, qz, ColumnGrid.BRIDGE) || g.flag(qx, qz, ColumnGrid.TUNNEL) || crossing(x, z, qx, qz)) continue;
+                    b = Math.max(b, railProfile(qx, qz) - Math.max(Math.abs(ii), Math.abs(jj)) / CLIMB_RUN);
+                }
+            }
+        }
         for (int jj = -RAIL_RAMP; jj <= RAIL_RAMP; jj++) {
             for (int ii = -RAIL_RAMP; ii <= RAIL_RAMP; ii++) {
                 if (!railWay(x + ii, z + jj) || crossing(x, z, x + ii, z + jj)) continue;

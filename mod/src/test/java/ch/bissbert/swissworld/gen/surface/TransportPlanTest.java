@@ -346,6 +346,35 @@ class TransportPlanTest {
         assertEquals(82, rails, "rails on the staircase");
     }
 
+    /** The diagonal track east of Interlaken Ost ended where it met a rail bridge 5 m up (713,-1433,-545). */
+    @Test
+    void diagonalTrackClimbsOntoABridgeDeck() {
+        SwdCell c = Cells.flat(600);
+        for (int i = -50; i <= 50; i++) {
+            boolean bridge = i >= 0;
+            int f = bridge ? ColumnGrid.BRIDGE : 0;
+            double deck = bridge ? 605 : Double.NaN;
+            for (int j = -1; j <= 2; j++) Cells.overlay(c, i + j, i, OverlayPlan.RAIL_BED, f, deck);
+            Cells.overlay(c, i, i, OverlayPlan.RAIL_BED, RAIL | f, deck);
+            Cells.overlay(c, i + 1, i, OverlayPlan.RAIL_BED, RAIL | f, deck);
+        }
+        Voxels v = new Voxels(c, -30, -30, 30, 30, -1420, -1385);
+        List<String> bad = railFaults(v);
+        assertTrue(bad.isEmpty(), () -> "rail faults: " + bad);
+        // unbroken: two rails a row (a flipped corner moves one into the row beside it)
+        int rails = 0;
+        for (int i = -28; i <= 28; i++) {
+            for (int x = i - 1; x <= i + 2; x++) {
+                for (int y = v.y0; y < v.y0 + v.ny; y++) if (v.at(x, y, i) == B.RAIL) rails++;
+            }
+        }
+        assertTrue(Math.abs(rails - 2 * 57) <= 1, "rails on the staircase: " + rails);
+        // and it climbs onto the deck
+        int top = Integer.MIN_VALUE;
+        for (int y = v.y0; y < v.y0 + v.ny; y++) if (v.at(28, y, 28) == B.RAIL || v.at(29, y, 28) == B.RAIL) top = y;
+        assertEquals(v.deck[v.col(28, 28)] + 1, top, "rail on the deck");
+    }
+
     @Test
     void diagonalTrackClimbsAGradeWithoutSteps() {
         for (double grade : new double[] {0.02, 0.04, 0.08}) {
