@@ -12,6 +12,7 @@ import ch.bissbert.swissworld.world.ReturnPos;
 import ch.bissbert.swissworld.world.SwissOrigin;
 import com.google.gson.JsonObject;
 import com.mojang.brigadier.CommandDispatcher;
+import com.mojang.brigadier.arguments.DoubleArgumentType;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.LongArgumentType;
 import com.mojang.brigadier.context.CommandContext;
@@ -69,6 +70,11 @@ public final class SwissCommands {
                 .then(Commands.literal("back").executes(c -> back(c.getSource().getPlayerOrException())))
                 .then(Commands.literal("where").executes(c -> where(c.getSource().getPlayerOrException())))
                 .then(Commands.literal("info").executes(c -> info(c.getSource())))
+                .then(Commands.literal("goto")
+                        .then(Commands.argument("a", DoubleArgumentType.doubleArg())
+                                .then(Commands.argument("b", DoubleArgumentType.doubleArg())
+                                        .executes(c -> goTo(c.getSource().getPlayerOrException(),
+                                                DoubleArgumentType.getDouble(c, "a"), DoubleArgumentType.getDouble(c, "b"))))))
                 .then(Commands.literal("admin").requires(s -> s.hasPermission(2))
                         .then(Commands.literal("status").executes(c -> status(c.getSource())))
                         .then(Commands.literal("origin")
@@ -98,20 +104,50 @@ public final class SwissCommands {
     }
 
     private static int enter(ServerPlayer p) {
+        // back where you left Switzerland, else the origin
+        ReturnPos last = p.getData(SwissRegistries.LAST_SWISS_POS);
+        Pending t = last.present()
+                ? new Pending(new ChunkPos(BlockPos.containing(last.x(), 0, last.z())), last.x(), last.y(), last.z(), last.yRot(), last.xRot(), p.server.getTickCount())
+                : new Pending(new ChunkPos(0, 0), 0.5, Double.NaN, 0.5, p.getYRot(), p.getXRot(), p.server.getTickCount());
+        return travel(p, t);
+    }
+
+    /**
+     * {@code /swiss goto a b}: real-world coordinates, read as LV95 (2 600 000 1 200 000), LV03 (600 000 200 000) or
+     * WGS84 latitude longitude (46.68 7.87, the order map apps copy). Lands on the ground.
+     */
+    private static int goTo(ServerPlayer p, double a, double b) {
+        double e, n;
+        if (Math.abs(a) < 90 && Math.abs(b) < 180) {
+            double[] en = Wgs84.toLv95(a, b);
+            e = en[0];
+            n = en[1];
+        } else {
+            e = a < 1_000_000 ? a + 2_000_000 : a;
+            n = b < 1_000_000 ? b + 1_000_000 : b;
+        }
+        if (e < 2_480_000 || e > 2_840_000 || n < 1_070_000 || n > 1_300_000) {
+            p.sendSystemMessage(Component.literal(String.format(Locale.ROOT,
+                    "LV95 E %.0f N %.0f is outside Switzerland. Use LV95 (E N), LV03 or WGS84 (lat lon).", e, n)).withStyle(ChatFormatting.RED));
+            return 0;
+        }
+        SwissCoords c = SwissRuntime.coords();
+        double x = Math.floor(e - c.e0()) + 0.5, z = Math.floor(c.n0() - n) + 0.5;
+        p.sendSystemMessage(Component.literal(String.format(Locale.ROOT, "Going to LV95 E %.0f N %.0f (x %.0f, z %.0f)", e, n, Math.floor(x), Math.floor(z)))
+                .withStyle(ChatFormatting.GRAY));
+        return travel(p, new Pending(new ChunkPos(BlockPos.containing(x, 0, z)), x, Double.NaN, z, p.getYRot(), p.getXRot(), p.server.getTickCount()));
+    }
+
+    private static int travel(ServerPlayer p, Pending t) {
         ServerLevel swiss = p.server.getLevel(SwissRegistries.SWITZERLAND);
         if (swiss == null) {
             p.sendSystemMessage(Component.literal("The Switzerland dimension is not loaded").withStyle(ChatFormatting.RED));
             return 0;
         }
         if (PENDING.containsKey(p.getUUID())) {
-            p.sendSystemMessage(Component.literal("Still preparing your arrival in Switzerland…"));
+            p.sendSystemMessage(Component.literal("Still preparing your arrival in Switzerland… (/swiss back cancels)"));
             return 0;
         }
-        // back where you left Switzerland, else the origin
-        ReturnPos last = p.getData(SwissRegistries.LAST_SWISS_POS);
-        Pending t = last.present()
-                ? new Pending(new ChunkPos(BlockPos.containing(last.x(), 0, last.z())), last.x(), last.y(), last.z(), last.yRot(), last.xRot(), p.server.getTickCount())
-                : new Pending(new ChunkPos(0, 0), 0.5, Double.NaN, 0.5, p.getYRot(), p.getXRot(), p.server.getTickCount());
         swiss.getChunkSource().addRegionTicket(ENTER_TICKET, t.chunk(), 1, t.chunk());
         PENDING.put(p.getUUID(), t);
         SwissCoords c = SwissRuntime.coords();
@@ -140,13 +176,14 @@ public final class SwissCommands {
             if (p == null || swiss == null) continue;
             if (chunk != null) {
                 double y = Double.isNaN(t.y())
-                        ? chunk.getHeight(Heightmap.Types.MOTION_BLOCKING, (int) Math.floor(t.x()), (int) Math.floor(t.z())) + 1
+                        ? chunk.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, (int) Math.floor(t.x()), (int) Math.floor(t.z())) + 1
                         : t.y();
-                if (!inSwitzerland(p)) {
+                boolean arriving = !inSwitzerland(p);
+                if (arriving) {
                     p.setData(SwissRegistries.RETURN_POS, new ReturnPos(p.level().dimension(), p.getX(), p.getY(), p.getZ(), p.getYRot(), p.getXRot()));
                 }
                 p.teleportTo(swiss, t.x(), y, t.z(), t.yRot(), t.xRot());
-                p.sendSystemMessage(Component.literal("Welcome to Switzerland. ").append(whereText(p)));
+                p.sendSystemMessage(Component.literal(arriving ? "Welcome to Switzerland. " : "").append(whereText(p)));
             } else if (timeout) {
                 p.sendSystemMessage(Component.literal("The terrain there is not ready yet"
                         + (SwissRuntime.cells().sidecarDown() ? " (the data sidecar is not reachable)" : "")

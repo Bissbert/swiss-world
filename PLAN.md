@@ -389,6 +389,7 @@ Deferred. Recommended later: Macaw's Roofs + Windows + Doors (v1 evaluation).
 |---|---|---|
 | `/swiss` | all | Enter at the origin (or the last position), or leave if already inside. Prefetches before teleporting. |
 | `/swiss goto <place>` | all | swissNAMES3D place, tab-completed. Prefetch, then teleport to the surface. |
+| `/swiss goto <a> <b>` | all | Real coordinates: LV95 (`2638359 1237558`), LV03 (`638359 237558`) or WGS84 lat lon (`47.2878 7.9457`). Waits for the terrain, lands on the ground. |
 | `/swiss back` | all | Return to the saved overworld position |
 | `/swiss where` | all | LV95 + WGS84 coordinates, real altitude, a map.geo.admin.ch link |
 | `/swiss info` | all | Attribution ©swisstopo, data versions |

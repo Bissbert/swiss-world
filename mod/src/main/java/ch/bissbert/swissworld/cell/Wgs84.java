@@ -14,4 +14,12 @@ public final class Wgs84 {
         double lat = 16.9023892 + 3.238272 * x - 0.270978 * y * y - 0.002528 * x * x - 0.0447 * y * y * x - 0.0140 * x * x * x;
         return new double[] {lat * 100 / 36, lon * 100 / 36};
     }
+
+    /** @return {E, N} in LV95 metres */
+    public static double[] toLv95(double lat, double lon) {
+        double p = (lat * 3600 - 169_028.66) / 10_000, l = (lon * 3600 - 26_782.5) / 10_000;
+        double e = 2_600_072.37 + 211_455.93 * l - 10_938.51 * l * p - 0.36 * l * p * p - 44.54 * l * l * l;
+        double n = 1_200_147.07 + 308_807.95 * p + 3_745.25 * l * l + 76.63 * p * p - 194.56 * l * l * p + 119.79 * p * p * p;
+        return new double[] {e, n};
+    }
 }
