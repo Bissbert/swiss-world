@@ -129,4 +129,17 @@ class PlaceLookupTest {
         assertEquals(1, l.cachedCount());
         assertEquals(List.of(ZOFINGEN), l.suggest("interlaken").get());
     }
+
+    @Test
+    void buildingsOnlyByExactName() {
+        Place range = new Place("Zofingen Heitern 300/50/25m", "building", 2638900, 1237000, 470, null);
+        Place station = new Place("Zofingen", "station", 2638100, 1237900, 437, null);
+        assertTrue(PlaceLookup.offered(ZOFINGEN, "Zofi"));
+        assertTrue(PlaceLookup.offered(station, "Zofingen"));
+        assertTrue(!PlaceLookup.offered(range, "Zofingen"));
+        assertTrue(PlaceLookup.offered(range, "zofingen heitern 300 50 25m"));
+        assertEquals(ZOFINGEN, PlaceLookup.best(List.of(range, ZOFINGEN), "Zofingen"));
+        assertEquals(range, PlaceLookup.best(List.of(range), "Zofingen")); // nothing else: still better than not found
+        assertNull(PlaceLookup.best(List.of(), "x"));
+    }
 }

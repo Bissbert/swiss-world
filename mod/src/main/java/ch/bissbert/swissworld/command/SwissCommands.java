@@ -42,7 +42,9 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.level.TicketType;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.storage.LevelResource;
@@ -59,13 +61,37 @@ public final class SwissCommands {
 
     private static final TicketType<ChunkPos> ENTER_TICKET =
             TicketType.create("swissworld_enter", Comparator.comparingLong(ChunkPos::toLong));
-    private static final int TIMEOUT_TICKS = 120 * 20, PROGRESS_TICKS = 15 * 20;
+    private static final int STATUS_TICKS = 5 * 20;
     private static final String ATTRIBUTION = "Data ©swisstopo";
 
     /** Players waiting for their target chunk; main thread only. */
     private static final Map<UUID, Pending> PENDING = new HashMap<>();
 
-    private record Pending(ChunkPos chunk, double x, double y, double z, float yRot, float xRot, int startTick) {}
+    /** A wait for the target chunk: started in dimension {@code from}; {@code y} NaN lands on the ground. */
+    private static final class Pending {
+        final ChunkPos chunk;
+        final double x, y, z;
+        final float yRot, xRot;
+        final ResourceKey<Level> from;
+        final int startTick;
+        int lastProgressTick;
+        long progress = Long.MIN_VALUE;
+
+        Pending(ServerPlayer p, double x, double y, double z, float yRot, float xRot) {
+            this.chunk = new ChunkPos(BlockPos.containing(x, 0, z));
+            this.x = x;
+            this.y = y;
+            this.z = z;
+            this.yRot = yRot;
+            this.xRot = xRot;
+            this.from = p.level().dimension();
+            this.startTick = this.lastProgressTick = p.server.getTickCount();
+        }
+    }
+
+    /** Sidecar activity seen by the last /status poll (main thread only): downloads, requests, store size. */
+    private static long sidecarActivity;
+    private static boolean sidecarBusy, statusInFlight;
 
     private static final PlaceLookup PLACES = new PlaceLookup(SwissRuntime::sidecar, System::currentTimeMillis);
 
@@ -135,8 +161,8 @@ public final class SwissCommands {
         // back where you left Switzerland, else the origin
         ReturnPos last = p.getData(SwissRegistries.LAST_SWISS_POS);
         Pending t = last.present()
-                ? new Pending(new ChunkPos(BlockPos.containing(last.x(), 0, last.z())), last.x(), last.y(), last.z(), last.yRot(), last.xRot(), p.server.getTickCount())
-                : new Pending(new ChunkPos(0, 0), 0.5, Double.NaN, 0.5, p.getYRot(), p.getXRot(), p.server.getTickCount());
+                ? new Pending(p, last.x(), last.y(), last.z(), last.yRot(), last.xRot())
+                : new Pending(p, 0.5, Double.NaN, 0.5, p.getYRot(), p.getXRot());
         return travel(p, t);
     }
 
@@ -173,7 +199,7 @@ public final class SwissCommands {
     private static int travelLv95(ServerPlayer p, double e, double n) {
         SwissCoords c = SwissRuntime.coords();
         double x = Math.floor(e - c.e0()) + 0.5, z = Math.floor(c.n0() - n) + 0.5;
-        return travel(p, new Pending(new ChunkPos(BlockPos.containing(x, 0, z)), x, Double.NaN, z, p.getYRot(), p.getXRot(), p.server.getTickCount()));
+        return travel(p, new Pending(p, x, Double.NaN, z, p.getYRot(), p.getXRot()));
     }
 
     /**
@@ -187,20 +213,21 @@ public final class SwissCommands {
         if (PENDING.containsKey(player.getUUID())) return travel(player, PENDING.get(player.getUUID()));
         MinecraftServer server = player.server;
         UUID id = player.getUUID();
-        PLACES.find(query, 4).whenComplete((list, err) -> server.execute(() -> {
+        PLACES.find(query, 8).whenComplete((list, err) -> server.execute(() -> {
             ServerPlayer p = server.getPlayerList().getPlayer(id);
             if (p == null) return;
             if (err != null) {
                 p.sendSystemMessage(Component.literal(PlaceLookup.failure(err)).withStyle(ChatFormatting.RED));
                 return;
             }
-            Place best = list.stream().filter(pl -> insideLv95(pl.e(), pl.n())).findFirst().orElse(null);
+            List<Place> inside = list.stream().filter(pl -> insideLv95(pl.e(), pl.n())).toList();
+            Place best = PlaceLookup.best(inside, query);
             if (best == null) {
                 p.sendSystemMessage(Component.literal(PlaceLookup.notFound(query)).withStyle(ChatFormatting.RED));
                 return;
             }
             p.sendSystemMessage(Component.literal(PlaceLookup.going(best)).withStyle(ChatFormatting.GRAY));
-            MutableComponent also = alternatives(list, best);
+            MutableComponent also = alternatives(inside, best, query);
             if (also != null) p.sendSystemMessage(also);
             travelLv95(p, best.e(), best.n());
         }));
@@ -208,11 +235,11 @@ public final class SwissCommands {
     }
 
     /** "also: [Zofingen (station)] [...]", each one a click on /swiss goto E N; null when there are none. */
-    private static MutableComponent alternatives(List<Place> list, Place best) {
+    private static MutableComponent alternatives(List<Place> list, Place best, String query) {
         MutableComponent also = Component.literal("also: ").withStyle(ChatFormatting.GRAY);
         int shown = 0;
         for (Place pl : list) {
-            if (pl == best || !insideLv95(pl.e(), pl.n()) || shown == 3) continue;
+            if (pl == best || !PlaceLookup.offered(pl, query) || shown == 3) continue;
             String cmd = String.format(Locale.ROOT, "/swiss goto %.0f %.0f", pl.e(), pl.n());
             if (shown > 0) also.append(Component.literal(", ").withStyle(ChatFormatting.GRAY));
             also.append(Component.literal(PlaceLookup.label(pl)).withStyle(st -> st.withColor(ChatFormatting.AQUA).withUnderlined(true)
@@ -233,52 +260,142 @@ public final class SwissCommands {
             p.sendSystemMessage(Component.literal("Still preparing your arrival in Switzerland… (/swiss back cancels)"));
             return 0;
         }
-        swiss.getChunkSource().addRegionTicket(ENTER_TICKET, t.chunk(), 1, t.chunk());
+        swiss.getChunkSource().addRegionTicket(ENTER_TICKET, t.chunk, 1, t.chunk);
         PENDING.put(p.getUUID(), t);
         SwissCoords c = SwissRuntime.coords();
         if (SwissConfig.PREFETCH.get()) {
-            SwissRuntime.sidecar().prefetch(c.e0() + t.x(), c.n0() - t.z(), 1000, 0, 0).exceptionally(e -> 0);
+            SwissRuntime.sidecar().prefetch(c.e0() + t.x, c.n0() - t.z, 1000, 0, 0).exceptionally(e -> 0);
         }
         p.sendSystemMessage(Component.literal("Preparing Switzerland… (" + ATTRIBUTION + ")").withStyle(ChatFormatting.GRAY));
         return 1;
     }
 
-    /** Server tick: teleport players whose target chunk is ready. */
+    /**
+     * Server tick: teleport players whose target chunk is ready. The wait has no fixed limit: it goes on while cells
+     * arrive, chunks generate or the sidecar downloads/builds, and gives up after {@link Arrival#NO_PROGRESS_TICKS}
+     * without any of that (or {@link Arrival#HARD_CAP_TICKS} in all), or when the player leaves the dimension they
+     * started from. Progress shows on the action bar.
+     */
     public static void tick(MinecraftServer server) {
         if (PENDING.isEmpty()) return;
         ServerLevel swiss = server.getLevel(SwissRegistries.SWITZERLAND);
         int now = server.getTickCount();
+        pollSidecar(server, now);
         for (Iterator<Map.Entry<UUID, Pending>> it = PENDING.entrySet().iterator(); it.hasNext(); ) {
             Map.Entry<UUID, Pending> en = it.next();
             Pending t = en.getValue();
             ServerPlayer p = server.getPlayerList().getPlayer(en.getKey());
-            LevelChunk chunk = swiss == null ? null : swiss.getChunkSource().getChunkNow(t.chunk().x, t.chunk().z);
-            boolean timeout = now - t.startTick() > TIMEOUT_TICKS;
-            if (p == null || chunk != null || timeout || swiss == null) {
+            LevelChunk chunk = swiss == null ? null : swiss.getChunkSource().getChunkNow(t.chunk.x, t.chunk.z);
+            int[] counts = swiss == null ? new int[4] : counts(swiss, t);
+            long progress = sidecarActivity * 31 + SwissRuntime.chunksGenerated() * 7 + counts[0] * 1000L + counts[2];
+            if (progress != t.progress) {
+                t.progress = progress;
+                t.lastProgressTick = now;
+            }
+            boolean moved = p != null && p.level().dimension() != t.from;
+            boolean timeout = Arrival.givesUp(now, t.startTick, t.lastProgressTick, sidecarBusy);
+            if (p == null || chunk != null || timeout || moved || swiss == null) {
                 it.remove();
-                if (swiss != null) swiss.getChunkSource().removeRegionTicket(ENTER_TICKET, t.chunk(), 1, t.chunk());
+                if (swiss != null) swiss.getChunkSource().removeRegionTicket(ENTER_TICKET, t.chunk, 1, t.chunk);
             }
             if (p == null || swiss == null) continue;
-            if (chunk != null) {
-                double y = Double.isNaN(t.y())
-                        ? chunk.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, (int) Math.floor(t.x()), (int) Math.floor(t.z())) + 1
-                        : t.y();
+            if (moved) {
+                p.sendSystemMessage(Component.literal("Trip to Switzerland cancelled: you changed dimension.").withStyle(ChatFormatting.GRAY));
+            } else if (chunk != null) {
+                double x = t.x, z = t.z, y = t.y;
+                if (Double.isNaN(y)) {
+                    int[] at = landing(swiss, (int) Math.floor(x), (int) Math.floor(z));
+                    x = at[0] + 0.5;
+                    z = at[1] + 0.5;
+                    y = at[2] + 1;
+                }
                 boolean arriving = !inSwitzerland(p);
                 if (arriving) {
                     p.setData(SwissRegistries.RETURN_POS, new ReturnPos(p.level().dimension(), p.getX(), p.getY(), p.getZ(), p.getYRot(), p.getXRot()));
                 }
-                p.teleportTo(swiss, t.x(), y, t.z(), t.yRot(), t.xRot());
+                p.teleportTo(swiss, x, y, z, t.yRot, t.xRot);
+                p.displayClientMessage(Component.empty(), true);
                 p.sendSystemMessage(Component.literal(arriving ? "Welcome to Switzerland. " : "").append(whereText(p)));
             } else if (timeout) {
-                p.sendSystemMessage(Component.literal("The terrain there is not ready yet"
+                p.sendSystemMessage(Component.literal("The terrain there is not ready yet: no progress for "
+                        + Arrival.NO_PROGRESS_TICKS / 20 + " s"
                         + (SwissRuntime.cells().sidecarDown() ? " (the data sidecar is not reachable)" : "")
                         + ". Try again in a while.").withStyle(ChatFormatting.RED));
-            } else if ((now - t.startTick()) % PROGRESS_TICKS == 0 && now != t.startTick()) {
-                CellCache cells = SwissRuntime.cells();
-                p.sendSystemMessage(Component.literal("Still building terrain… " + cells.pendingCount() + " cells pending"
-                        + (cells.sidecarDown() ? ", sidecar not reachable" : "")).withStyle(ChatFormatting.GRAY));
+            } else if ((now - t.startTick) % Arrival.BAR_TICKS == 0) {
+                p.displayClientMessage(Component.literal(Arrival.bar(counts[0], counts[1], counts[2], counts[3],
+                        SwissRuntime.cells().sidecarDown())).withStyle(ChatFormatting.GRAY), true);
             }
         }
+    }
+
+    /** {cells ready, cells needed, chunks generated, chunks needed} for the 3x3 chunks the arrival ticket loads. */
+    private static int[] counts(ServerLevel swiss, Pending t) {
+        CellCache cells = SwissRuntime.cells();
+        SwissCoords c = SwissRuntime.coords();
+        int chunks = 0, ready = 0;
+        java.util.Set<Long> seen = new java.util.HashSet<>();
+        for (int dz = -1; dz <= 1; dz++) {
+            for (int dx = -1; dx <= 1; dx++) {
+                int cx = t.chunk.x + dx, cz = t.chunk.z + dz;
+                if (swiss.getChunkSource().getChunkNow(cx, cz) != null) chunks++;
+                for (int corner = 0; corner < 4; corner++) {
+                    int bx = cx * 16 + (corner & 1) * 15, bz = cz * 16 + (corner >> 1) * 15;
+                    int e = SwissCoords.cellKm(c.east(bx)), n = SwissCoords.cellKm(c.north(bz));
+                    if (seen.add(CellCache.key(e, n))
+                            && (cells.getIfPresent(e, n) != null || cells.coverageState(e, n) == ch.bissbert.swissworld.cell.Coverage.OUTSIDE)) {
+                        ready++;
+                    }
+                }
+            }
+        }
+        return new int[] {ready, seen.size(), chunks, 9};
+    }
+
+    /** Asks the sidecar's /status now and then while someone waits; its counters move while it downloads and builds. */
+    private static void pollSidecar(MinecraftServer server, int now) {
+        if (statusInFlight || now % STATUS_TICKS != 0) return;
+        statusInFlight = true;
+        SwissRuntime.sidecar().status().whenComplete((st, err) -> server.execute(() -> {
+            statusInFlight = false;
+            if (err != null || st == null) {
+                sidecarBusy = false;
+                return;
+            }
+            try {
+                JsonObject q = st.getAsJsonObject("queue"), up = st.getAsJsonObject("upstream"), store = st.getAsJsonObject("store");
+                sidecarBusy = q.get("building").getAsInt() + q.get("now").getAsInt() > 0;
+                sidecarActivity = up.get("requests").getAsLong() * 3 + up.get("downloads").getAsLong() * 5
+                        + up.get("downloadBytes").getAsLong() + store.get("cells").getAsLong() * 11;
+            } catch (RuntimeException e) {
+                sidecarBusy = false;
+            }
+        }));
+    }
+
+    /**
+     * Where to stand near column (x, z): {x, z, top block y}. The column itself when it is open ground, else the
+     * nearest open column within {@link Arrival#LANDING_RADIUS} (street, yard, square); the roof only if there is none.
+     */
+    private static int[] landing(ServerLevel swiss, int x, int z) {
+        int[] at = Arrival.nearestOpen(x, z, Arrival.LANDING_RADIUS, (cx, cz) -> openColumn(swiss, cx, cz));
+        if (at == null) at = new int[] {x, z};
+        LevelChunk ch = swiss.getChunkSource().getChunkNow(at[0] >> 4, at[1] >> 4);
+        return new int[] {at[0], at[1], ch.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, at[0], at[1])};
+    }
+
+    private static boolean openColumn(ServerLevel swiss, int x, int z) {
+        LevelChunk ch = swiss.getChunkSource().getChunkNow(x >> 4, z >> 4);
+        if (ch == null) return false;
+        SwissCoords c = SwissRuntime.coords();
+        long e = c.east(x), n = c.north(z);
+        SwdCell cell = SwissRuntime.cells().getIfPresent(SwissCoords.cellKm(e), SwissCoords.cellKm(n));
+        if (cell == null) return false;
+        int dx = SwissCoords.dx(e), dz = SwissCoords.dz(n);
+        SwdCell.Span[] spans = cell.spansAt(dx, dz);
+        int top = ch.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
+        boolean fluid = !ch.getFluidState(new BlockPos(x, top, z)).isEmpty();
+        return Arrival.openColumn(top, fluid, spans != null && spans.length > 0,
+                SwissCoords.toY(cell.terrain(dx + 0.5, dz + 0.5)));
     }
 
     /** Server stopping: drop pending entries (their tickets go with the level). */
@@ -289,7 +406,8 @@ public final class SwissCommands {
     private static int back(ServerPlayer p) {
         if (PENDING.remove(p.getUUID()) instanceof Pending t) {
             ServerLevel swiss = p.server.getLevel(SwissRegistries.SWITZERLAND);
-            if (swiss != null) swiss.getChunkSource().removeRegionTicket(ENTER_TICKET, t.chunk(), 1, t.chunk());
+            if (swiss != null) swiss.getChunkSource().removeRegionTicket(ENTER_TICKET, t.chunk, 1, t.chunk);
+            p.displayClientMessage(Component.empty(), true);
             p.sendSystemMessage(Component.literal("Cancelled."));
             return 1;
         }
@@ -404,23 +522,43 @@ public final class SwissCommands {
             return 0;
         }
         MinecraftServer server = s.getServer();
-        PLACES.find(name, 1).whenComplete((list, err) -> server.execute(() -> {
-            if (err != null) {
-                s.sendFailure(Component.literal(PlaceLookup.failure(err)));
-                return;
+        java.util.concurrent.CompletableFuture<List<Place>> f = PLACES.find(name, 8);
+        if (!(s.getEntity() instanceof ServerPlayer)) {
+            // rcon and the console collect the reply only while the command runs: wait for the lookup here
+            try {
+                f.get(PlaceLookup.LOOKUP_TIMEOUT.toMillis() + 500, java.util.concurrent.TimeUnit.MILLISECONDS);
+            } catch (Exception ignored) {
+                // reported by originPlaceAnswer from the completed (or failed) future below
             }
-            Place best = list.stream().filter(pl -> insideLv95(pl.e(), pl.n())).findFirst().orElse(null);
-            if (best == null) {
-                s.sendFailure(Component.literal(PlaceLookup.notFound(name)));
-                return;
+            if (f.isDone()) {
+                List<Place> list = f.isCompletedExceptionally() ? null : f.join();
+                Throwable err = list == null ? f.handle((v, e) -> e).join() : null;
+                return originPlaceAnswer(s, name, list, err);
             }
-            long e = Math.round(best.e()), n = Math.round(best.n());
-            if (!SwissRuntime.changeOrigin(e, n)) {
-                s.sendFailure(Component.literal("The origin got locked meanwhile: chunks were already generated."));
-                return;
-            }
-            s.sendSuccess(() -> Component.literal("Origin set to " + PlaceLookup.label(best) + ", E " + e + " N " + n), true);
-        }));
+        }
+        f.whenComplete((list, err) -> server.execute(() -> originPlaceAnswer(s, name, list, err)));
+        return 1;
+    }
+
+    private static int originPlaceAnswer(CommandSourceStack s, String name, List<Place> list, Throwable err) {
+        String fail = null;
+        Place best = null;
+        if (err != null) {
+            fail = PlaceLookup.failure(err);
+        } else {
+            best = PlaceLookup.best(list.stream().filter(pl -> insideLv95(pl.e(), pl.n())).toList(), name);
+            if (best == null) fail = PlaceLookup.notFound(name);
+        }
+        long e = best == null ? 0 : Math.round(best.e()), n = best == null ? 0 : Math.round(best.n());
+        if (fail == null && !SwissRuntime.changeOrigin(e, n)) fail = "The origin got locked meanwhile: chunks were already generated.";
+        if (fail != null) {
+            SwissWorld.LOGGER.info("origin place {} by {}: {}", name, s.getTextName(), fail);
+            s.sendFailure(Component.literal(fail));
+            return 0;
+        }
+        String ok = "Origin set to " + PlaceLookup.label(best) + ", E " + e + " N " + n;
+        SwissWorld.LOGGER.info("origin place {} by {}: {}", name, s.getTextName(), ok);
+        s.sendSuccess(() -> Component.literal(ok), true);
         return 1;
     }
 

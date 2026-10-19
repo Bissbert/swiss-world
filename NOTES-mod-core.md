@@ -33,7 +33,7 @@ Dev evidence comes from `mod/run` on ports 25640/25641, with private stores only
   - The affected chunks are handled as at shutdown: empty while loaded, downgraded on save, regenerated once reloaded. `SwissRuntime.clearAborted` drops the mark when a chunk generates for real.
   - Trade-off: a force-loaded chunk can sit empty (air) until it is unloaded and loaded again. The guard logs a warning that says so.
 - **Origin.** The origin lives in `world/SwissOrigin`, a SavedData in the Switzerland dimension. It comes from the config on first use and is locked once the first chunk generates. `/swiss admin origin E N` works only before the lock; after it, the command points to `/swiss admin reset confirm`, which deletes the dimension at the next start. Tested: set → lock → refused → persisted across a restart.
-- **Entering.** `/swiss` takes you to your last position in Switzerland, else to the origin's ground. It waits for the target chunk with a ticket, without blocking, and gives up after a timeout with a message. `/swiss` from inside Switzerland, or `/swiss back`, returns you to where you came from (`world/ReturnPos`). `/swiss goto <a> <b>` takes real coordinates (LV95, LV03 or WGS84 lat lon, told apart by magnitude) and uses the same wait-for-chunk path; outside Switzerland's LV95 box it refuses.
+- **Entering.** `/swiss` takes you to your last position in Switzerland, else to the origin's ground. It waits for the target chunk with a ticket, without blocking, and gives up after 60 s without progress (see "Arrival" below). `/swiss` from inside Switzerland, or `/swiss back`, returns you to where you came from (`world/ReturnPos`). `/swiss goto <a> <b>` takes real coordinates (LV95, LV03 or WGS84 lat lon, told apart by magnitude) and uses the same wait-for-chunk path; outside Switzerland's LV95 box it refuses.
 - **Reset.** `/swiss admin reset confirm` writes a marker. The dimension folder is deleted at the next start, before the level loads, and the origin unlocks. Tested.
 - **Prefetch.**
   - At startup: `startupPrefetchRadiusM` around the origin.
@@ -208,8 +208,27 @@ None. The real cells copied from the shared store (layers TERR/SURF/WLVL/WKND/OC
   ground; xyzzyq → not found; sidecar stopped → "not reachable"; index missing → "still being prepared", then
   built from the raw cache in 8 s. Completion answers within the 400 ms. `origin place` set the origin on a fresh
   world and was refused once locked.
-- Seen, not fixed: city cells (Zürich) take > 2 min to build the first time, so the first goto times out (120 s);
-  urban chunks generate at 1–4 s each. `stop` waits for chunks whose cells are still being built.
+- Seen, not fixed: `stop` waits for chunks whose cells are still being built.
+
+## Arrival: wait on progress, land on the street (2026-10-19)
+
+- `/swiss`, `goto E N` and `goto <place>` share `travel`/`tick`. No fixed timeout any more (`Arrival`): the wait goes
+  on while cells for the 3x3 target chunks arrive, chunks generate, or the sidecar's `/status` counters move or show a
+  build in progress (polled every 5 s); it gives up after 60 s without any of that, after 10 min in all, on
+  `/swiss back`, or when the player changes dimension. Action bar: "Building terrain… 1/4 cells", then "Generating
+  terrain… 6/9 chunks".
+- Landing: the target column is open ground only if no building span covers it, the top (MOTION_BLOCKING_NO_LEAVES)
+  is not fluid and sits ≤ 2 blocks above the DEM. Otherwise the nearest open column within 32 blocks (loaded chunks
+  only), else the roof.
+- Alternatives (and the pick, if anything else matched) skip building, tower, monument, boulder, chapel and church
+  unless the query is their exact name (`PlaceLookup.offered`); the lookup asks for 8 to still show 3.
+- `origin place` from rcon/console waits for the lookup on the server thread (≤ 5.5 s) so the reply reaches rcon;
+  players stay async. Every outcome is logged.
+- Headless (8096/25700): first goto Bern (cell cold) waited ~96 s with the bar and landed in the street at 542 m,
+  4 blocks from a 4-storey building at the target point; Zofingen landed on the ground (439 m, was a 454 m roof),
+  no "Heitern 300/50/25m" in "also:"; numeric goto into Luzern waited on 4 cells and arrived; `/swiss back` and a
+  tp to the Nether cancelled; sidecar stopped → gave up after 60 s with "not reachable". rcon `origin place`:
+  set/not found/connection refused/locked replies all arrived.
 
 ## M2 notes
 

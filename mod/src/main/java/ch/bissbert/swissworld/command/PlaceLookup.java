@@ -113,6 +113,21 @@ public final class PlaceLookup {
         }
     }
 
+    /** swissNAMES3D objects too small to travel to unless asked for by name: "Zofingen Heitern 300/50/25m" (building). */
+    static final java.util.Set<String> INSTALLATIONS = java.util.Set.of("building", "tower", "monument", "boulder", "chapel", "church");
+
+    /** Whether {@code p} may be offered for {@code query}: places always, buildings and installations only by exact name. */
+    static boolean offered(Place p, String query) {
+        if (!INSTALLATIONS.contains(p.kind())) return true;
+        String q = key(query);
+        return key(p.name()).equals(q) || p.matched() != null && key(p.matched()).equals(q);
+    }
+
+    /** The place to go to: the first one {@link #offered}, else the first one at all; null for an empty list. */
+    static Place best(List<Place> list, String query) {
+        return list.stream().filter(p -> offered(p, query)).findFirst().orElse(list.isEmpty() ? null : list.get(0));
+    }
+
     /** "Zofingen (town)", "Genève (city, as Genf)". */
     static String label(Place p) {
         String as = p.matched() != null && !p.matched().equals(p.name()) ? ", as " + p.matched() : "";
