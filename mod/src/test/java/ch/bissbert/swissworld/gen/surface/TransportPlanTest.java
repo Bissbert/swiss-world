@@ -321,6 +321,39 @@ class TransportPlanTest {
         assertTrue(curves >= 40, "curves " + curves);
     }
 
+    @Test
+    void diagonalTrackClimbsAGradeWithoutSteps() {
+        for (double grade : new double[] {0.02, 0.04, 0.08}) {
+            SwdCell c = Cells.flat(600);
+            Voxels.terrain(c, (x, z) -> 600 - grade * (x + z));
+            // a staircase track running south-east (down the grade), its bed three columns either side
+            for (int i = -50; i <= 50; i++) {
+                for (int j = -3; j <= 4; j++) Cells.overlay(c, i + j, i, OverlayPlan.RAIL_BED, 0, Double.NaN);
+            }
+            for (int i = -50; i <= 50; i++) {
+                Cells.overlay(c, i, i, OverlayPlan.RAIL_BED, RAIL, Double.NaN);
+                Cells.overlay(c, i + 1, i, OverlayPlan.RAIL_BED, RAIL, Double.NaN);
+            }
+            Voxels v = new Voxels(c, -30, -30, 30, 30, -1420, -1385);
+            List<String> bad = railFaults(v);
+            assertTrue(bad.isEmpty(), () -> "grade " + grade + " rail faults: " + bad);
+            // the track is there all the way and climbs: rails at more than one level, none missing
+            int rails = 0, lo = Integer.MAX_VALUE, hi = Integer.MIN_VALUE;
+            for (int x = -29; x <= 29; x++) {
+                for (int z = -29; z <= 29; z++) {
+                    for (int y = v.y0; y < v.y0 + v.ny; y++) {
+                        if (v.at(x, y, z) != B.RAIL) continue;
+                        rails++;
+                        lo = Math.min(lo, y);
+                        hi = Math.max(hi, y);
+                    }
+                }
+            }
+            assertTrue(rails >= 2 * 57, "grade " + grade + " rails " + rails);
+            assertTrue(hi - lo >= (int) (grade * 100) - 1, "grade " + grade + " climbs " + (hi - lo));
+        }
+    }
+
     /** A branch running in on a shallow staircase (three east per south) from (x, z) until it reaches row {@code toZ}. */
     private static void branch(SwdCell c, int x, int z, int toZ, int touching) {
         int cx = x, cz = z;

@@ -35,7 +35,7 @@ public final class TransportPlan {
     private static final int UNSET = Integer.MAX_VALUE;
 
     private final ColumnGrid g;
-    private final int[] roadHalf, railBase, railNode, railLevel, floor, ceil, wet, gap, joins;
+    private final int[] roadHalf, railBase, railNode, railLevel, floor, ceil, wet, gap, joins, flipped;
     private final int[][] thinned;
 
     public TransportPlan(ColumnGrid g) {
@@ -51,6 +51,7 @@ public final class TransportPlan {
         wet = filled(n);
         gap = filled(n);
         joins = filled(n);
+        flipped = filled(n);
         thinned = new int[THIN.length][];
         for (int i = 0; i < THIN.length; i++) thinned[i] = filled(n);
     }
@@ -431,11 +432,109 @@ public final class TransportPlan {
     /** Shortest track kept: where tracks merge, the thinning leaves short pieces that lead nowhere. */
     static final int MIN_RUN = 4;
 
-    /** A rail block goes here: a rail centre on a run of at least {@link #MIN_RUN} track nodes, at most two neighbours. */
-    public boolean rail(int x, int z) {
+    /** A track node: a rail centre on a run of at least {@link #MIN_RUN} nodes, before corners are flipped. */
+    private boolean node0(int x, int z) {
         int k = g.index(x, z);
         if (railNode[k] == UNSET) railNode[k] = c2(x, z) && run(x, z) >= MIN_RUN ? 1 : 0;
         return railNode[k] == 1;
+    }
+
+    /**
+     * A rail block goes here: a track node, with the corners of diagonal staircases flipped where the track changes
+     * level (see {@link #flip}).
+     */
+    public boolean rail(int x, int z) {
+        int k = g.index(x, z);
+        if (flipped[k] == UNSET) {
+            boolean on = node0(x, z) ? !flip(x, z) : false;
+            for (int[] d : DIAG) on |= flip(x + d[0], z + d[1]) && !node0(x, z) && flipTarget(x + d[0], z + d[1], x, z);
+            flipped[k] = on ? 1 : 0;
+        }
+        return flipped[k] == 1;
+    }
+
+    private static final int[][] DIAG = {{1, 1}, {1, -1}, {-1, 1}, {-1, -1}};
+
+    /** Bit mask of track neighbours before flips. */
+    private int links0(int x, int z) {
+        int m = 0;
+        for (int d = 0; d < 4; d++) if (node0(x + DIRS[d][0], z + DIRS[d][1])) m |= 1 << d;
+        return m;
+    }
+
+    /**
+     * A corner of a diagonal staircase (a curve between two curves) where the bed rises from the neighbour it shares a
+     * level with to the other: no rail can climb between curves, so the corner moves to the other side of the step,
+     * which turns both neighbours into straight rails, one of them ascending. The column it moves to must be free rail
+     * way, and no other such corner lies within two nodes.
+     */
+    private boolean flip(int x, int z) {
+        if (!flipCorner(x, z)) return false;
+        int px = x, pz = z;
+        int[] next = new int[2];
+        for (int d = 0; d < 4; d++) {
+            if ((links0(x, z) & 1 << d) == 0) continue;
+            int cx = x + DIRS[d][0], cz = z + DIRS[d][1];
+            if (flipCorner(cx, cz)) return false;
+            if (other(cx, cz, px, pz, next) && flipCorner(next[0], next[1])) return false;
+        }
+        return true;
+    }
+
+    /** The track neighbour of (x, z) other than (px, pz), into {@code out}; false if none. */
+    private boolean other(int x, int z, int px, int pz, int[] out) {
+        int m = links0(x, z);
+        if (Integer.bitCount(m) != 2) return false;
+        for (int e = 0; e < 4; e++) {
+            int qx = x + DIRS[e][0], qz = z + DIRS[e][1];
+            if ((m & 1 << e) != 0 && (qx != px || qz != pz)) {
+                out[0] = qx;
+                out[1] = qz;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** {@link #flip}'s test without the spacing rule. */
+    private boolean flipCorner(int x, int z) {
+        if (!node0(x, z)) return false;
+        int m = links0(x, z);
+        if (!curve(m)) return false;
+        int ax = NONE, az = NONE, bx = NONE, bz = NONE;
+        for (int d = 0; d < 4; d++) {
+            if ((m & 1 << d) == 0) continue;
+            int cx = x + DIRS[d][0], cz = z + DIRS[d][1];
+            if (!curve(links0(cx, cz))) return false;
+            if (ax == NONE) {
+                ax = cx;
+                az = cz;
+            } else {
+                bx = cx;
+                bz = cz;
+            }
+        }
+        int a = railBase(ax, az), b = railBase(bx, bz), here = railBase(x, z);
+        if (Math.abs(a - b) != 1 || here != Math.min(a, b)) return false;
+        int fx = ax + bx - x, fz = az + bz - z;
+        if (node0(fx, fz) || !railWay(fx, fz)) return false;
+        // nothing else beside the column it moves to
+        for (int[] d : DIRS) {
+            int qx = fx + d[0], qz = fz + d[1];
+            if (node0(qx, qz) && !(qx == ax && qz == az) && !(qx == bx && qz == bz)) return false;
+        }
+        return true;
+    }
+
+    /** The corner (x, z), when flipped, moves to (tx, tz). */
+    private boolean flipTarget(int x, int z, int tx, int tz) {
+        int m = links0(x, z), sx = 0, sz = 0;
+        for (int d = 0; d < 4; d++) {
+            if ((m & 1 << d) == 0) continue;
+            sx += DIRS[d][0];
+            sz += DIRS[d][1];
+        }
+        return x + sx == tx && z + sz == tz;
     }
 
     /** Nodes in the run of {@code c2} nodes through (x, z), counted up to {@link #MIN_RUN} (each has at most two). */
@@ -521,8 +620,8 @@ public final class TransportPlan {
 
     /**
      * Level of a rail (its bed block; the rail lies one above). A curve takes the highest base level along its run
-     * of curves up to {@link #CHAIN_WALK} steps each way, including the straight rail that ends the run, so the
-     * straight rail ascends to the curve. A straight rail between two higher ones is raised to them.
+     * of curves up to {@link #CHAIN_WALK} steps each way. A straight rail between two higher ones is raised to them;
+     * one a level above the curve beside it drops to the curve and ascends towards its other side.
      */
     public int railLevel(int x, int z) {
         int k = g.index(x, z);
@@ -530,13 +629,24 @@ public final class TransportPlan {
         int lvl = preLevel(x, z);
         int m = track(x, z);
         if (Integer.bitCount(m) == 2 && !curve(m)) {
-            int a = -1, b = -1;
+            int a = NONE, b = NONE;
+            boolean ac = false, bc = false;
             for (int d = 0; d < 4; d++) {
                 if ((m & 1 << d) == 0) continue;
-                int p = preLevel(x + DIRS[d][0], z + DIRS[d][1]);
-                if (a == -1) a = p; else b = p;
+                int nx = x + DIRS[d][0], nz = z + DIRS[d][1];
+                int p = preLevel(nx, nz);
+                boolean c = curve(track(nx, nz));
+                if (a == NONE) {
+                    a = p;
+                    ac = c;
+                } else {
+                    b = p;
+                    bc = c;
+                }
             }
             if (a > lvl && b > lvl) lvl = Math.min(a, b);
+            // one up from a curve (which cannot climb): drop to it and climb towards the other side instead
+            else if (ac && a == lvl - 1 && b >= lvl - 1 && b <= lvl || bc && b == lvl - 1 && a >= lvl - 1 && a <= lvl) lvl--;
         }
         return railLevel[k] = lvl;
     }
@@ -549,9 +659,9 @@ public final class TransportPlan {
             if ((m & 1 << d) == 0) continue;
             int px = x, pz = z, cx = x + DIRS[d][0], cz = z + DIRS[d][1];
             for (int step = 1; step <= CHAIN_WALK; step++) {
-                lvl = Math.max(lvl, railBase(cx, cz));
                 int cm = track(cx, cz);
                 if (!curve(cm)) break;
+                lvl = Math.max(lvl, railBase(cx, cz));
                 int nx = NONE, nz = NONE;
                 for (int e = 0; e < 4; e++) {
                     if ((cm & 1 << e) == 0) continue;
