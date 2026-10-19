@@ -273,9 +273,11 @@ class CanopyBuilder:
             dsm = self._dsm_for(item)
         else:
             path = fetch(cfg, stac.surface_href(item))
-            dsm = read_dsm(path)
-            if not cfg.keep_surface_raw:
-                path.unlink(missing_ok=True)
+            try:
+                dsm = read_dsm(path)
+            finally:  # also after a failed read: a broken tile is fetched again on retry
+                if not cfg.keep_surface_raw:
+                    path.unlink(missing_ok=True)
         if self._mix_for:
             mix = self._mix_for(e_km, n_km)
         else:

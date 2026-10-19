@@ -210,6 +210,15 @@ def test_builder_deletes_dsm_unless_kept(tmp_path, monkeypatch):
         r = canopy.CanopyBuilder().build(2632, 1170, cfg, partial, pinned)
         assert dsm_file.exists() == keep and r.trees == []
         assert r.sources["forestMix"] == "landesforstinventar-waldmischungsgrad@2023-10-31"
+    # a tile that cannot be read is evicted as well
+    def broken(path):
+        raise OSError("truncated")
+    monkeypatch.setattr(canopy, "read_dsm", broken)
+    dsm_file.write_bytes(b"x")
+    with pytest.raises(OSError):
+        canopy.CanopyBuilder().build(2632, 1170, cfg, partial, pinned)
+    assert not dsm_file.exists()
+    monkeypatch.setattr(canopy, "read_dsm", lambda path: np.full((PX, PX), 600.0))
     # a pinned forest mix release is kept, without asking STAC for the current one
     monkeypatch.setattr(canopy, "forest_mix_pin", lambda: pytest.fail("STAC must not be queried"))
     r = canopy.CanopyBuilder().build(2632, 1170, cfg, partial, pinned | {"forestMix": "x@2023-01-01"})
