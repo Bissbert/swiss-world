@@ -9,7 +9,8 @@ Needs an offline-mode server with network-compression-threshold=-1. Op the bot w
     wait:<seconds>       keep the connection alive and print chat
     walk:<dx>,<dz>,<v>   fly in a straight line at v m/s (spectator mode recommended), one move packet per tick
 
-Chat is printed as "chat: ..."; URLs in click events are printed as "link: ...".
+Chat is printed as "chat: ..."; URLs in click events are printed as "link: ...". Login and respawn packets print
+"spawn: <dimension> flat=<isFlat>" (the client's sky horizon depends on isFlat).
 """
 
 from __future__ import annotations
@@ -184,6 +185,18 @@ class Bot:
                 self.send(0x00, varint(tid))
                 self.send(0x1B, struct.pack(">dddff?", x, y, z, 0.0, 0.0, False))
                 print(f"position: {x:.1f} {y:.1f} {z:.1f}", flush=True)
+            elif pid in (0x2B, 0x47):  # login / respawn: CommonPlayerSpawnInfo
+                if pid == 0x2B:
+                    b.take(5)
+                    for _ in range(b.varint()):
+                        b.string()
+                    b.varint(), b.varint(), b.varint()
+                    b.take(3)
+                b.varint()
+                dim = b.string()
+                b.take(10)
+                debug, flat = b.unpack("??")
+                print(f"spawn: {dim} flat={flat}", flush=True)
             elif pid == 0x6C:
                 text, links = component(b)
                 print("chat:", text, flush=True)

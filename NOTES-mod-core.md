@@ -2,7 +2,7 @@
 
 ## Status
 
-M1 is merged (main `bb9e79f`). M1.1 (snow, CNPY/TTOP, tick re-measurement) is on `mod-core` on top of it. `./gradlew build` passes with 51 tests (M2 fix 1 below).
+M1 is merged (main `bb9e79f`). M1.1 (snow, CNPY/TTOP, tick re-measurement) is on `mod-core` on top of it. `./gradlew build` passes with 53 tests (M2 fix 1 and the sky fix below).
 Dev evidence comes from `mod/run` on ports 25640/25641, with private stores only:
 
 - `/tmp/swissworld-mod-core` holds the fake sidecar's synthetic cells.
@@ -19,7 +19,7 @@ Dev evidence comes from `mod/run` on ports 25640/25641, with private stores only
 | Determinism | Three fresh worlds, `level-seed=4242`, `forceload add -100 -100 100 100` (196 forced chunks, 324 saved full). Runs 2 and 3, block by block: terrain, water and biomes are identical; 10 ore blocks in 6 chunks differ where ore blobs of neighbouring chunks overlap. That depends on decoration order, the same as vanilla. Runs 1 and 2 differed in 12 chunk hashes, not analysed block by block. |
 | Snow line ~2,300 m | Creative bot at 2,336 m with rain for 120 s: 12,014 snow layers, the lowest at y 314 = **2,314 m**. Vanilla: temperature 0.45 freezes above y 320 (2,320 m), plus noise. |
 | ms/chunk, memory | 3.3–11.7 ms/chunk (pipeline only; the high end is under load). Heap 1.3–2.8 GB of 16 GB with 2–4 cells cached; one decoded cell is ~10 MB. |
-| Sky/fog at y −1400 | Not checkable headless. Untested. |
+| Sky/fog at y −1400 | Not checkable headless. The black horizon below y 63 is fixed by sending isFlat (see "Client sky"); needs a visual check. |
 
 ## Decisions
 
@@ -116,7 +116,7 @@ None. The real cells copied from the shared store (layers TERR/SURF/WLVL/WKND/OC
 - `tools/fake_sidecar.py`: a dev-only fake of the control plane. It writes synthetic cells and a synthetic coverage.bin, and refuses to run on the shared store.
 - `mod/build.gradle`: Minecraft on the unit-test classpath (`addModdingDependenciesTo(sourceSets.test)`) for the vanilla-pack comparison; the `swissworld.vanillaPack` run property.
 - `mod/src/main/templates/META-INF/neoforge.mods.toml`: the `[[mixins]]` entry. `META-INF/accesstransformer.cfg`: `PalettedContainer.data` and `PalettedContainer$Data` public.
-- `tools/bot.py`: a headless 1.21.1 offline client for smoke tests (commands, waits, straight-line flights).
+- `tools/bot.py`: a headless 1.21.1 offline client for smoke tests (commands, waits, straight-line flights; prints the isFlat flag of login/respawn packets).
 
 ## Dev pitfalls
 
@@ -142,9 +142,17 @@ None. The real cells copied from the shared store (layers TERR/SURF/WLVL/WKND/OC
 - Spreading chunk unloads: **not done, not needed.** `ChunkMap.processUnloads` already only saves while the tick has time left (`hasMoreTime`), forcing more only above a 2000-chunk backlog, plus at most 20 `saveChunkIfNeeded` per tick in spare time. The old ~50 ms P95 was spare-time saving filling the budget, not a stall; with the fast path that saving is cheap.
 - `-Dswissworld.vanillaPack=true` (run config: `SWISSWORLD_VANILLA_PACK=true`) turns the fast path off for A/B checks.
 
+## Client sky below y 63: Switzerland is sent as "flat" (2026-10-19)
+
+- Bug (playtest screenshots 2026-10-19_16.53.43 / 16.54.38): a vanilla client draws the lower sky hemisphere black when the eye is below `ClientLevelData.getHorizonHeight()` = `isFlat ? minBuildHeight : 63`, and darkens fog while `(y − minBuildHeight) · getClearColorScale() < 1`, scale = `isFlat ? 1 : 1/32`. Our terrain is at y −2000..+1000, so the horizon was black.
+- Fix, server-only: `mixin/ServerPlayerMixin` (RETURN of `ServerPlayer.createCommonSpawnInfo`) → `world/FlatHorizon.forClient` sets `isFlat=true` in the `CommonPlayerSpawnInfo` for `swissworld:switzerland` only. That record is what login, respawn and dimension change send (PlayerList:201, PlayerList:490, ServerPlayer:907). With it, the client horizon is y −2032 (never above the eye), and the fog factor is ≥ 1 above y −2031.
+- Unchanged: `ServerLevel.isFlat()` (its only server-side reader is `createCommonSpawnInfo`; `WorldData.isFlatWorld` and the level.dat flag stay vanilla). Client-side, `isFlat` is read only by `ClientLevelData` for these two values. Other dimensions keep the vanilla flag.
+- Evidence: `FlatHorizonTest` (Switzerland gets the flag with every other field kept; overworld/nether/end returned as is). Live check with the fake sidecar: `tools/bot.py` now prints `spawn: <dim> flat=<isFlat>` from the login/respawn packets. Overworld login `flat=False`; `/swiss` → `swissworld:switzerland flat=True`; reconnecting inside Switzerland → `flat=True`; `/swiss back` → `minecraft:overworld flat=False`. The death-respawn path was not exercised live (the bot can't respawn); it builds the same record.
+- **To check visually (real client):** in Switzerland, in the valley (~y −1430) and on a peak, the sky below the horizon is sky-coloured, not black, and the fog matches the overworld at the same time of day; the same after `/swiss` → `/swiss back` → `/swiss` and after dying and respawning there. The overworld sky is unchanged. If the void fog now looks too bright near the bottom, that is the vanilla flat-world behaviour.
+
 ## M2 notes
 
 - Sea and ocean fish spawns at y −1807.
-- Sky/fog colours at real altitudes, which need a client check.
+- Sky/fog colours at real altitudes: the black horizon is fixed server-side (see above); still needs a visual client check.
 - The pack fast path is done (see above); the all-air-section idea was dropped.
 - Ores: ore veins (`ore_veins` noise) are not reproduced.

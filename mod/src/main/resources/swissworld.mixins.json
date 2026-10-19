@@ -4,7 +4,8 @@
   "package": "ch.bissbert.swissworld.mixin",
   "compatibilityLevel": "JAVA_21",
   "mixins": [
-    "PalettedContainerMixin"
+    "PalettedContainerMixin",
+    "ServerPlayerMixin"
   ],
   "injectors": {
     "defaultRequire": 1
