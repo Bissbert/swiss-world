@@ -132,6 +132,7 @@ final class BuildingRender {
         BuildingPlan p = r.p;
         Columns c = r.c;
         boolean[] out = r.outside();
+        res.addAll(r.gaps());
         int open = 0;
         String firstPane = "";
         for (int z = c.minZ; z <= c.maxZ; z++) {
@@ -192,6 +193,40 @@ final class BuildingRender {
             // hemmed in: other buildings (counted as solid) wall the landing in; else the door itself is at fault
             res.add((r.walkOut(ox, y0 + 1, oz, false) ? "hemmed" : "door") + " landing-unreachable seen=" + r.walkSeen + " [" + r.walkEnd + "]");
         }
+        return res;
+    }
+
+    /**
+     * Visible roof gaps in the footprint: "gap-under" = a roof stair or slab of a body column with air directly
+     * below it (the dark underside seen from the side of a stepped roof), "roof-hole" = a body column whose
+     * topmost block is not roof material. Eave columns (outside the walls) overhang on purpose and do not count.
+     */
+    java.util.List<String> gaps() {
+        java.util.List<String> res = new java.util.ArrayList<>();
+        if (p.style().empty() || p.style() == Style.TANK) return res;
+        Palette pal = Palette.of(p.style(), p.gid());
+        int under = 0, holes = 0;
+        String fu = "", fh = "";
+        for (int z = c.minZ; z <= c.maxZ; z++) {
+            for (int x = c.minX; x <= c.maxX; x++) {
+                if (!c.body(x, z) || p.style() == Style.WALL) continue;
+                int top = c.topFull(x, z);
+                int y = Math.min(y0 + h - 1, top + 2);
+                while (y >= y0 && at(x, y, z).isAir()) y--;
+                net.minecraft.world.level.block.Block b = at(x, y, z).getBlock();
+                boolean shaped = b == pal.roofStairs() || b == pal.roofSlab();
+                if (!shaped && b != pal.roof() && b != pal.wall() && b != pal.base() && b != Blocks.STONE) {
+                    holes++;
+                    if (fh.isEmpty()) fh = x + "," + y + "," + z + " " + b.getDescriptionId();
+                }
+                if (shaped && y - 1 > c.lo(x, z) && air(x, y - 1, z)) {
+                    under++;
+                    if (fu.isEmpty()) fu = x + "," + y + "," + z;
+                }
+            }
+        }
+        if (under > 0) res.add("gap-under n=" + under + " first=" + fu);
+        if (holes > 0) res.add("roof-hole n=" + holes + " first=" + fh);
         return res;
     }
 

@@ -20,6 +20,8 @@ public final class Columns {
     /** The building these columns belong to. */
     public final long gid;
     private final int w;
+    /** Set by the planner for styles whose roof is never stairs (greenhouse glass, wall): no roof support underneath. */
+    boolean flatRoof;
     private final byte[] state;
     private final int[] lo, top2, eave2;
 
@@ -76,7 +78,20 @@ public final class Columns {
                 }
             }
         }
+        c.fillPits();
         return c;
+    }
+
+    /** A single body column lower than all four body neighbours is a hole in the roof: raise it to the lowest of them. */
+    private void fillPits() {
+        for (int z = minZ; z <= maxZ; z++) {
+            for (int x = minX; x <= maxX; x++) {
+                if (!body(x, z)) continue;
+                int m = Integer.MAX_VALUE;
+                for (Dir d : Dir.values()) m = body(x + d.dx, z + d.dz) ? Math.min(m, top2(x + d.dx, z + d.dz)) : Integer.MIN_VALUE;
+                if (m > top2(x, z) && m != Integer.MAX_VALUE) top2[index(x, z)] = m;
+            }
+        }
     }
 
     static int indexOf(SwdCell cell, long gid) {
@@ -150,9 +165,14 @@ public final class Columns {
 
     /** Lowest roof level (exclusive) among this column and its body neighbours: above it a side is open to the sky. */
     public int cover(int x, int z) {
-        int m = topFull(x, z);
+        int m = topFull(x, z) - (stairRoof(x, z) ? 1 : 0);
         for (Dir d : Dir.values()) if (state(x + d.dx, z + d.dz) == BODY) m = Math.min(m, topFull(x + d.dx, z + d.dz));
         return m;
+    }
+
+    /** True if the top block of the column is a roof stair, which gets a full roof block directly below it. */
+    public boolean stairRoof(int x, int z) {
+        return !flatRoof && body(x, z) && topFull(x, z) - 1 > lo(x, z) && uphill(x, z) != null;
     }
 
     /** Neighbour of a body column with no building at all (not even an eave): an outer facade side. */
@@ -177,6 +197,12 @@ public final class Columns {
         // a gradient below one half block per column is the height noise of the mapped roof, not a slope
         if (best == null || Math.abs(bestG) < 2) return null;
         Dir up = bestG > 0 ? best : best.opposite(), down = up.opposite();
+        // a column no lower than anything within two columns each way along the slope is the ridge: a full block
+        boolean ridge = true;
+        for (int i = 1; i <= 2; i++) {
+            ridge &= roof2(x + up.dx * i, z + up.dz * i, own) <= own && roof2(x + down.dx * i, z + down.dz * i, own) <= own;
+        }
+        if (ridge) return null;
         int n = roof2(x + down.dx, z + down.dz);
         return n == NONE && state(x + down.dx, z + down.dz) != UNKNOWN || n != NONE && n < own
                 ? up : null;

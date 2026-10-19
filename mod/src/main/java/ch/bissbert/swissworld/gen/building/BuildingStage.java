@@ -61,7 +61,12 @@ public final class BuildingStage implements GenStage {
     static void column(BuildingPlan p, Columns c, Palette pal, int x, int z, Put put, CellView view) {
         int lo = c.lo(x, z), top = c.topFull(x, z);
         foundation(p, pal, x, z, lo, put, view);
-        for (int y = lo; y <= top; y++) put.set(x, y, z, y == top ? roof(p, pal, x, z) : block(p, c, pal, x, y, z));
+        boolean stairs = c.stairRoof(x, z);
+        for (int y = lo; y <= top; y++) {
+            // a stair is never left hanging over air: a full roof block under it closes the stepped roof
+            BlockState b = y == top ? roof(p, pal, x, z) : block(p, c, pal, x, y, z);
+            put.set(x, y, z, stairs && y == top - 1 && b.isAir() ? pal.roof().defaultBlockState() : b);
+        }
         if ((c.top2(x, z) & 1) != 0 && p.style() != Style.GREENHOUSE && c.uphill(x, z) == null) {
             put.set(x, top + 1, z, Put.with(pal.roofSlab().defaultBlockState(), SlabBlock.TYPE, SlabType.BOTTOM));
         }

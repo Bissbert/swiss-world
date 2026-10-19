@@ -127,3 +127,9 @@ None. No contract file was changed.
 - Windows: panes only on straight wall runs (BuildingStage.straight), else solid wall.
 - Test: BuildingSweepTest.watertight* flood-fills outside air; reports leaking, doorless, bad door, open panes, "hemmed" (neighbours block landing) and "thin". Env: SWISSWORLD_SWEEP_STORE, SWISSWORLD_SWEEP_LIST (cells), WT_NEAR=x,z (inspect), SWISSWORLD_PROBE_OUT/PER_STYLE/GIDS (probeTargets export for in-game probes).
 - Residual: 16 hemmed + 2 thin of 3556 buildings in a 7-cell sweep (buildings nested inside bigger neighbours).
+
+## Stepped roofs (playtest 19.11.32)
+- Every roof stair gets a full roof block directly below it (BuildingStage.column, Columns.stairRoof); Columns.cover() drops by one there so rooms, partitions and lantern chains stop under that block.
+- Columns.fillPits raises a single column lower than its four body neighbours; Columns.uphill returns null on the ridge (no higher within two columns either way), so the ridge is full blocks.
+- Sweep checks (BuildingRender.gaps): "gap-under" (air directly below a roof stair/slab of a body column) and "roof-hole" (topmost block of a body column is not roof/wall material). Eaves outside the walls are exempt. WT_SLICE=z,xa,xb,ya,yb adds an XY slice to WT_NEAR output.
+- Probe: probeTargets also writes T lines (roof stairs); tools in scratch probe.py check stairs plus non-air below.

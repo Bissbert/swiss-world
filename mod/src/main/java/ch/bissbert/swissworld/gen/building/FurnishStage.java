@@ -87,7 +87,7 @@ public final class FurnishStage implements GenStage {
             case STANDING -> put.set(l.x(), l.y(), l.z(), Blocks.LANTERN.defaultBlockState());
             case HANGING -> {
                 put.set(l.x(), l.y(), l.z(), Blocks.LANTERN.defaultBlockState().setValue(LanternBlock.HANGING, true));
-                for (int y = l.y() + 1; y < p.cols().topFull(l.x(), l.z()); y++) {
+                for (int y = l.y() + 1; y < p.cols().cover(l.x(), l.z()); y++) {
                     put.set(l.x(), y, l.z(), Blocks.CHAIN.defaultBlockState());
                 }
             }

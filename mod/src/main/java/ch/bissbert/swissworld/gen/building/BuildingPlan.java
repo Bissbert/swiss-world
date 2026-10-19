@@ -146,6 +146,7 @@ public record BuildingPlan(long gid, Style style, Columns cols, int storey, List
             }
             // only overhang spans (free-standing roof, swd-format §6): a canopy whatever the OBJEKTART
             this.style = area == 0 && unknown == 0 ? Style.CANOPY : Style.pick(b, c.baseH, area);
+            c.flatRoof = style == Style.GREENHOUSE || style == Style.WALL;
             double topY = c.y(Heights.toMetres(b.topH()));
             int ceiling = (int) Math.floor(topY) - 1;
             // the ground floor sits on the level most of the footprint starts at (the mapped base, or one block above:

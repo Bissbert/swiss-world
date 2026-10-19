@@ -150,6 +150,17 @@ class BuildingSweepTest {
                     lines.add("R " + cx + " " + (fy + 1) + " " + cz + " " + t);
                     n++;
                 }
+                Palette pal = Palette.of(p.style(), p.gid());
+                List<String> stairs = new ArrayList<>();
+                for (int z = p.cols().minZ; z <= p.cols().maxZ; z++) {
+                    for (int x = p.cols().minX; x <= p.cols().maxX; x++) {
+                        if (!p.cols().body(x, z)) continue;
+                        int yy = p.cols().topFull(x, z);
+                        if (r.at(x, yy, z).getBlock() == pal.roofStairs()) stairs.add("T " + x + " " + yy + " " + z);
+                    }
+                }
+                int step = Math.max(1, stairs.size() / 60);
+                for (int i = 0; i < stairs.size(); i += step) lines.add(stairs.get(i));
                 n = 0;
                 for (int yy = r.y0; yy < r.y0 + r.h && n < 3; yy++) {
                     for (int z = p.cols().minZ; z <= p.cols().maxZ && n < 3; z++) {
@@ -178,7 +189,7 @@ class BuildingSweepTest {
         net.minecraft.server.Bootstrap.bootStrap();
         List<String> bad = new ArrayList<>();
         Map<String, Integer> causes = new java.util.TreeMap<>();
-        int total = 0, checked = 0, skipped = 0, withRooms = 0, leaking = 0, doorless = 0, badDoor = 0, openPanes = 0, hemmed = 0, thin = 0;
+        int total = 0, checked = 0, skipped = 0, withRooms = 0, leaking = 0, doorless = 0, badDoor = 0, openPanes = 0, gapUnder = 0, roofHoles = 0, hemmed = 0, thin = 0;
         String near = System.getenv("WT_NEAR");
         for (SwdCell cell : cells) {
             for (SwdCell.Building b : cell.buildings()) {
@@ -196,6 +207,8 @@ class BuildingSweepTest {
                 }
                 if (why.stream().anyMatch(w -> w.startsWith("leak"))) leaking++;
                 if (why.stream().anyMatch(w -> w.startsWith("pane-open"))) openPanes++;
+                if (why.stream().anyMatch(w -> w.startsWith("gap-under"))) gapUnder++;
+                if (why.stream().anyMatch(w -> w.startsWith("roof-hole"))) roofHoles++;
                 if (why.stream().anyMatch(w -> w.startsWith("nodoor"))) doorless++;
                 else if (why.stream().anyMatch(w -> w.startsWith("door"))) badDoor++;
                 else if (why.stream().anyMatch(w -> w.startsWith("hemmed"))) hemmed++;
@@ -205,8 +218,8 @@ class BuildingSweepTest {
             }
         }
         System.out.printf("watertight[%s]: %d buildings, %d checked, %d at a missing cell edge, %d with rooms, %d leaking, "
-                + "%d without door, %d bad door, %d with open panes, %d hemmed in by neighbours, %d thin; %s%n", label, total,
-                checked, skipped, withRooms, leaking, doorless, badDoor, openPanes, hemmed, thin, causes);
+                + "%d without door, %d bad door, %d with open panes, %d with gaps under roof stairs, %d with roof holes, %d hemmed in by neighbours, %d thin; %s%n", label, total,
+                checked, skipped, withRooms, leaking, doorless, badDoor, openPanes, gapUnder, roofHoles, hemmed, thin, causes);
         // acceptance: nothing leaks or lacks a door; a door may only fail where neighbouring buildings or a thin shell
         // leave no room (a handful per thousand)
         org.junit.jupiter.api.Assertions.assertTrue(hemmed + thin <= Math.max(2, withRooms / 100),
@@ -241,6 +254,12 @@ class BuildingSweepTest {
                 sb.append(ch);
             }
             sb.append('\n');
+        }
+        String sl = System.getenv("WT_SLICE");
+        if (sl != null) {
+            String[] a = sl.split(",");
+            return List.of(sb.toString(), r.dump(), r.top(), r.slice(Integer.parseInt(a[0]), Integer.parseInt(a[1]), Integer.parseInt(a[2]),
+                    Integer.parseInt(a[3]), Integer.parseInt(a[4])));
         }
         return List.of(sb.toString(), r.dump(), r.top());
     }
