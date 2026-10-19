@@ -79,6 +79,17 @@ def test_free_roof_pieces_of_one_unit_form_one_row():
     assert (sh.building == 1).sum() == 8
 
 
+def test_free_roofs_without_uuid():
+    # some sheets carry roof skins without UUID: they must not break the row-id choice
+    a = box(E0 + 20.0, N0, 2.0, 2.0, 603.0, 603.2)
+    b = box(E0 + 22.0, N0, 2.0, 2.0, 603.0, 603.2)
+    c = box(E0 + 40.0, N0, 2.0, 2.0, 603.0, 603.2)
+    sh = buildings.sheet_from_solids("swissbuildings3d_3_0_2021_1208-43", [],
+                                     [(props(None, "{U7}"), a), (props("{R3}", "{U7}"), b),
+                                      (props(None, "{U8}"), c), (props(None, "{U8}"), a)])
+    assert sh.uuid.tolist() == ["{R3}", "{U8}"] and sh.orphan_roofs == 4
+
+
 def test_cell_buildings_cross_border_and_dz_sign():
     sh = synthetic_sheet()
     table = gwr.GwrTable(np.array([1346414]), np.array([1040], "u2"), np.array([1211], "u2"),
