@@ -52,8 +52,11 @@ public final class CellCache {
         long k = key(eKm, nKm);
         SwdCell hit = getIfPresent(eKm, nKm);
         if (hit != null) return CompletableFuture.completedFuture(Optional.of(hit));
-        return loading.computeIfAbsent(k, kk -> CompletableFuture.supplyAsync(() -> load(eKm, nKm), io)
-                .whenComplete((r, t) -> loading.remove(kk)));
+        CompletableFuture<Optional<SwdCell>> f =
+                loading.computeIfAbsent(k, kk -> CompletableFuture.supplyAsync(() -> load(eKm, nKm), io));
+        // remove outside computeIfAbsent: a future that is already complete would otherwise recurse into the map
+        f.whenComplete((r, t) -> loading.remove(k, f));
+        return f;
     }
 
     private Optional<SwdCell> load(int eKm, int nKm) {

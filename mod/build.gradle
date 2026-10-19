@@ -61,6 +61,8 @@ neoForge {
         server {
             server()
             programArgument '--nogui'
+            // shared store: SWISSWORLD_STORE (absolute) if set, else <repo>/store
+            systemProperty 'swissworld.store', System.getenv('SWISSWORLD_STORE') ?: rootProject.file('../store').absolutePath
             systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
         }
 

@@ -19,7 +19,12 @@ public final class GenContext {
         this.cells = cells;
     }
 
-    /** The cell containing block column (x, z), or null if outside coverage (ocean). */
+    /**
+     * The cell containing block column (x, z), or null if there is no cell (ocean, or not built yet).
+     * Local indices: {@code SwissCoords.dx(coords.east(x))}, {@code SwissCoords.dz(coords.north(z))}.
+     * Sample {@link SwdCell#terrain} at column centres: {@code terrain(dx + 0.5, dz + 0.5)}.
+     * Real height h becomes y via {@link SwissCoords#toY}; a column is solid up to {@code floor(toY(h))} inclusive.
+     */
     public SwdCell cellAt(int x, int z) {
         return cells.get(SwissCoords.cellKm(coords.east(x)), SwissCoords.cellKm(coords.north(z)));
     }
