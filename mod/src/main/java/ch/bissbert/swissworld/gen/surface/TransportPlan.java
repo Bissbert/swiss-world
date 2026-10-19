@@ -817,6 +817,7 @@ public final class TransportPlan {
                 if (a == NONE || b == NONE || a + b - 1 > BORE_GAP || a + b >= span) continue;
                 int ax = x - a * d[0], az = z - a * d[1], bx = x + b * d[0], bz = z + b * d[1];
                 if (g.overlay(ax, az) != g.overlay(bx, bz)) continue;
+                if (across(ax, az, d) || across(bx, bz, d)) continue;
                 // the smoothed bed, not deck(): a rail deck looks at rail centres, which may be gaps themselves
                 int da = road(ax, az) ? roadDeck(ax, az) : railBase(ax, az);
                 int db = road(bx, bz) ? roadDeck(bx, bz) : railBase(bx, bz);
@@ -828,6 +829,23 @@ public final class TransportPlan {
             }
         }
         return gap[k] = best;
+    }
+
+    /** Run of tunnel cells across a gap's direction, each side, beyond which the tunnel runs across it. */
+    private static final int TUBE_RUN = 8;
+
+    /**
+     * The tunnel at (x, z) runs straight across direction d, not along it: a line of tunnel cells through it at right
+     * angles to d, {@link #TUBE_RUN} each side, longer than any tunnel is wide. A gap in direction d from there would
+     * lie between two parallel tubes, not inside one tube a way crossed.
+     */
+    private boolean across(int x, int z, int[] d) {
+        int px = d[1], pz = d[0];
+        for (int s = -TUBE_RUN; s <= TUBE_RUN; s++) {
+            int cx = x + s * px, cz = z + s * pz;
+            if (!g.present(cx, cz) || !tunnel(cx, cz)) return false;
+        }
+        return true;
     }
 
     /** Steps from (x, z) to the first tunnel cell in direction (dx, dz) across overlay cells, or NONE. */

@@ -629,6 +629,42 @@ class TransportPlanTest {
         assertEquals(B.AIR, v.at(1, -1379, -1));
     }
 
+    /**
+     * Two parallel rail tunnels (twin tubes) 3 to 8 columns apart, with way columns between them that lost the
+     * tunnel flag (a shoulder or a path burnt over the hill). The bore gap must not carry a bore across: the tubes stay
+     * separate, with their walls and rock between them.
+     */
+    @Test
+    void twinTunnelsStaySeparate() {
+        for (int sep = 3; sep <= 8; sep++) {
+            SwdCell c = Cells.flat(600);
+            Voxels.terrain(c, (x, z) -> Math.abs(z) >= 50 ? 600 : Math.abs(z) > 35 ? 650 - Math.abs(z) : 615);
+            int east = 2 + sep + 3; // the second tube's centre
+            for (int z = -70; z <= 70; z++) {
+                boolean tunnel = Math.abs(z) <= 40;
+                for (int i = -2; i <= 2; i++) {
+                    int flags = (i == 0 ? RAIL : 0) | (tunnel ? TUNNEL : 0);
+                    Cells.overlay(c, i, z, OverlayPlan.RAIL_BED, flags, tunnel ? 600 : Double.NaN);
+                    Cells.overlay(c, east + i, z, OverlayPlan.RAIL_BED, flags, tunnel ? 600 : Double.NaN);
+                }
+                for (int x = 3; x < east - 2; x++) Cells.overlay(c, x, z, OverlayPlan.RAIL_BED, 0, Double.NaN);
+            }
+            Voxels v = new Voxels(c, -10, -60, east + 10, 60, -1430, -1370);
+            List<String> bad = new ArrayList<>();
+            for (int z = -30; z <= 30; z++) {
+                // walls and rock between the tubes: nothing of a bore there
+                for (int x = 3; x < east - 2; x++) {
+                    for (int y = -1399; y <= -1394; y++) {
+                        if (v.at(x, y, z) != B.SOLID) bad.add(x + "," + y + "," + z + " open between the tubes");
+                    }
+                }
+            }
+            bad.addAll(railFaults(v));
+            int s = sep;
+            assertTrue(bad.isEmpty(), () -> "separation " + s + ": " + bad);
+        }
+    }
+
     @Test
     void tunnelPortalsOpenToTheApproach() {
         Voxels v = new Voxels(tunnelHill(), -10, -60, 10, 60, -1430, -1370);
