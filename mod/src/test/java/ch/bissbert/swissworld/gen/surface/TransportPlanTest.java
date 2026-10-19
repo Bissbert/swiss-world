@@ -824,6 +824,41 @@ class TransportPlanTest {
         assertTrue(bad.isEmpty(), () -> "faults: " + bad);
     }
 
+    /**
+     * Brienz (12194,-7972): a road the sidecar burnt over a rail tunnel at a slant took the tunnel's columns, rail bit
+     * and flag included, and its two ends lie offset both ways. The bore still runs under the road, and so does the
+     * track.
+     */
+    @ParameterizedTest
+    @ValueSource(doubles = {0, 0.1, 0.3})
+    void roadAcrossATunnelAtASlantIsBoredUnder(double slope) {
+        SwdCell c = Cells.flat(600);
+        Voxels.terrain(c, (x, z) -> {
+            double a = Math.abs(x + z) / 2.0;
+            return a >= 30 ? 600 : a > 20 ? 600 + 2 * (30 - a) : 620;
+        });
+        for (int i = -50; i <= 50; i++) {
+            boolean t = Math.abs(i) <= 22;
+            double h = 600 + slope * i;
+            for (int j = -3; j <= 4; j++) Cells.overlay(c, i + j, i, OverlayPlan.RAIL_BED, t ? TUNNEL : 0, h);
+            for (int j = 0; j <= 1; j++) Cells.overlay(c, i + j, i, OverlayPlan.RAIL_BED, RAIL | (t ? TUNNEL : 0), h);
+        }
+        // a road four wide over the hill, north to south: later wins, so it takes the tunnel's columns
+        for (int z = -30; z <= 30; z++) {
+            for (int x = -2; x <= 1; x++) Cells.overlay(c, x, z, 4, 0, Double.NaN);
+        }
+        Voxels v = new Voxels(c, -40, -40, 40, 40, -1420, -1370);
+        List<String> bad = new ArrayList<>(railFaults(v));
+        for (int z = -6; z <= 6; z++) {
+            if (!hasRail(v, z, z) && !hasRail(v, z + 1, z)) bad.add("no rail at row " + z);
+        }
+        // the road keeps its deck on the hill over the bore
+        for (int z = -4; z <= 4; z++) {
+            if (v.at(-1, v.deck[v.col(-1, z)], z) != B.SOLID) bad.add("road deck open at -1," + z);
+        }
+        assertTrue(bad.isEmpty(), () -> "faults: " + bad);
+    }
+
     private static boolean hasRail(Voxels v, int x, int z) {
         for (int y = v.y0; y < v.y0 + v.ny; y++) if (v.at(x, y, z) == B.RAIL) return true;
         return false;

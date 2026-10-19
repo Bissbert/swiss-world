@@ -2,7 +2,9 @@ package ch.bissbert.swissworld.gen.surface;
 
 import ch.bissbert.swissworld.cell.SwissCoords;
 import ch.bissbert.swissworld.gen.surface.OverlayPlan.Rail;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 
 /**
  * Roads, rails and tunnels laid out from {@link ColumnGrid} data only, so that two chunks sharing a border agree on
@@ -296,6 +298,15 @@ public final class TransportPlan {
         int k = g.index(x, z);
         if (railBase[k] != UNSET) return railBase[k];
         if (gapKind(x, z) == GAP_RAIL) return railBase[k] = boreDeck(x, z);
+        if (gapSide(x, z)) {
+            int b = Integer.MAX_VALUE;
+            // the lower of the track's columns beside it: a corner moved here is the foot of the step
+            for (int[] d : DIRS) {
+                int nx = x + d[0], nz = z + d[1];
+                if (gapKind(nx, nz) == GAP_RAIL || tunnelRailNode(nx, nz)) b = Math.min(b, railBase(nx, nz));
+            }
+            return railBase[k] = b;
+        }
         if (cut(x, z)) {
             int b = Integer.MAX_VALUE;
             for (int[] d : EIGHT) if (railTunnel(x + d[0], z + d[1])) b = Math.min(b, railBase(x + d[0], z + d[1]));
@@ -627,7 +638,8 @@ public final class TransportPlan {
         int a = railBase(ax, az), b = railBase(bx, bz), here = railBase(x, z);
         if (Math.abs(a - b) != 1 || here != Math.min(a, b)) return false;
         int fx = ax + bx - x, fz = az + bz - z;
-        if (node0(fx, fz) || !railWay(fx, fz)) return false;
+        // in a bore under a crossing way ({@link #joinGap}) the corner may move onto the way's column beside the track
+        if (node0(fx, fz) || !railWay(fx, fz) && !(gapKind(x, z) == GAP_RAIL && gapSide(fx, fz))) return false;
         // nothing else beside the column it moves to
         for (int[] d : DIRS) {
             int qx = fx + d[0], qz = fz + d[1];
@@ -979,8 +991,107 @@ public final class TransportPlan {
                 span = a + b;
                 best = f * 4 + kind;
             }
+            if (best == NONE || Math.floorMod(best, 4) != GAP_RAIL) {
+                int j = joinGap(x, z);
+                if (j != NONE) best = j;
+            }
         }
         return gap[k] = best;
+    }
+
+    /**
+     * A column on the staircase between two rail tunnel ends that face each other more than {@link #BRIDGE} steps and at
+     * most {@link #BORE_GAP} + 1 apart (each axis) across other ways: floor * 4 + {@link #GAP_RAIL}, or NONE. The axis scan of {@link #gap} misses a way
+     * that crosses the tunnel at a slant, whose two ends are offset both ways (Brienz, 12194,-7972 to 12198,-7969: the
+     * sidecar keeps a short road crossing's deck over the tunnel, and the mod bores under it).
+     */
+    private int joinGap(int x, int z) {
+        int r = BORE_GAP + 1;
+        if (!g.inside(x, z, r + ROAD_RADIUS + ROAD_RAMP + 1)) return NONE;
+        List<int[]> ends = null;
+        for (int dz = -r; dz <= r; dz++) {
+            for (int dx = -r; dx <= r; dx++) {
+                int[] u = tunnelEnd(x + dx, z + dz);
+                if (u == null) continue;
+                if (ends == null) ends = new ArrayList<>();
+                ends.add(new int[] {x + dx, z + dz, u[0], u[1]});
+            }
+        }
+        if (ends == null || ends.size() < 2) return NONE;
+        int best = NONE, span = Integer.MAX_VALUE;
+        for (int i = 0; i < ends.size(); i++) {
+            for (int j = i + 1; j < ends.size(); j++) {
+                int[] a = ends.get(i), b = ends.get(j); // a before b: the same staircase from both
+                int ex = b[0] - a[0], ez = b[1] - a[1];
+                int m = Math.abs(ex) + Math.abs(ez);
+                // a shorter cut is joined by its track's ends (bridge) and keeps the axis gap's floor
+                if (m <= BRIDGE || m >= span || Math.max(Math.abs(ex), Math.abs(ez)) > r) continue;
+                if (a[2] * ex + a[3] * ez <= 0 || -(b[2] * ex + b[3] * ez) <= 0) continue; // facing each other
+                int[][] p = staircase(a[0], a[1], b[0], b[1]);
+                int at = -1;
+                boolean ok = true;
+                for (int q = 0; q < p.length && ok; q++) {
+                    int px = p[q][0], pz = p[q][1];
+                    ok = g.present(px, pz) && g.overlay(px, pz) != 0 && !g.flag(px, pz, ColumnGrid.TUNNEL)
+                            && !OverlayPlan.railCentre(g, px, pz);
+                    if (px == x && pz == z) at = q;
+                }
+                if (!ok || at < 0) continue;
+                // along the line's main axis: the level changes on straight links (or on the north-south steps of a
+                // diagonal, which climb by their flipped corners), never between the two rails of a corner
+                int da = railBase(a[0], a[1]), db = railBase(b[0], b[1]);
+                double t = 2 * Math.abs(ez) >= Math.abs(ex) ? (z - a[1]) / (double) ez : (x - a[0]) / (double) ex;
+                int f = da + (int) Math.round((db - da) * t);
+                span = m;
+                best = f * 4 + GAP_RAIL;
+            }
+        }
+        return best;
+    }
+
+    /** A column of another way beside a {@link #joinGap} rail column, where a staircase corner may move (see {@link #flip}). */
+    private boolean gapSide(int x, int z) {
+        if (!g.present(x, z) || railWay(x, z) || g.overlay(x, z) == 0 || g.flag(x, z, ColumnGrid.TUNNEL)) return false;
+        if (gapKind(x, z) == GAP_RAIL) return false;
+        for (int[] d : DIRS) if (gapKind(x + d[0], z + d[1]) == GAP_RAIL) return true;
+        return false;
+    }
+
+    /**
+     * A rail tunnel's centre column with exactly one centre beside it: the way out, from that neighbour to this end, or
+     * null.
+     */
+    private int[] tunnelEnd(int x, int z) {
+        if (!g.present(x, z) || !g.flag(x, z, ColumnGrid.TUNNEL) || !OverlayPlan.railCentre(g, x, z)) return null;
+        int[] out = null;
+        for (int[] d : DIRS) {
+            if (!OverlayPlan.railCentre(g, x + d[0], z + d[1])) continue;
+            if (out != null) return null;
+            out = new int[] {-d[0], -d[1]};
+        }
+        return out;
+    }
+
+    /** The 4-connected line {@link #path} would take from (ex, ez) to (tx, tz), both ends excluded, unchecked. */
+    private static int[][] staircase(int ex, int ez, int tx, int tz) {
+        int n = Math.abs(tx - ex) + Math.abs(tz - ez) - 1;
+        int sx = Integer.signum(tx - ex), sz = Integer.signum(tz - ez);
+        int[][] p = new int[n][];
+        int cx = ex, cz = ez;
+        for (int i = 0; i < n; i++) {
+            boolean xs;
+            if (cx == tx) xs = false;
+            else if (cz == tz) xs = true;
+            else {
+                long ax = Math.abs((long) (cx + sx - ex) * (tz - ez) - (long) (cz - ez) * (tx - ex));
+                long az = Math.abs((long) (cx - ex) * (tz - ez) - (long) (cz + sz - ez) * (tx - ex));
+                xs = ax <= az;
+            }
+            if (xs) cx += sx;
+            else cz += sz;
+            p[i] = new int[] {cx, cz};
+        }
+        return p;
     }
 
     /** Run of tunnel cells across a gap's direction, each side, beyond which the tunnel runs across it. */
@@ -1298,7 +1409,9 @@ public final class TransportPlan {
             for (int y = lo; y < floor; y++) out.set(y, Part.LINING);
             for (int y = floor + 1; y < ceil; y++) out.set(y, Part.AIR);
             for (int y = ceil; y <= hi; y++) out.set(y, Part.LINING);
-            if (tunnel(x, z) || gapKind(x, z) == GAP_RAIL) {
+            // a rail of a crossing way's bore that sits off its floor (a moved staircase corner) keeps its own level below
+            boolean own = !tunnel(x, z) && rail(x, z) && railLevel(x, z) != floor;
+            if (tunnel(x, z) || gapKind(x, z) == GAP_RAIL && !own) {
                 boolean road = road(x, z) && tunnel(x, z);
                 out.set(floor, road ? Part.SURFACE : Part.BALLAST);
                 if (road && roadSlab(x, z)) out.set(floor + 1, Part.SLAB);
