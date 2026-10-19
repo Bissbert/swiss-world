@@ -22,6 +22,10 @@ final class Voxels {
     /** Water level (1..7 flowing, 8 falling) of FLOW blocks. */
     private final int[] level;
     private final Rail[] shape;
+    /** The transport part built here, or null (terrain, water). */
+    private final Part[] part;
+    /** WaterPlan's rock: the stone WaterStage writes between two water levels. */
+    private final boolean[] rock;
     /** Per column: the deck the plan reported (road/rail), or NONE. */
     final int[] deck;
     /** Per column: the floor of a bored profile here (whatever way runs above or through it), or NONE. */
@@ -29,7 +33,16 @@ final class Voxels {
     final boolean[] slab, tunnelWay, openRoad, railWay, wayCol;
     final int[] originalTop;
 
+    /** The grid a chunk is built with, from its north-west corner. */
+    interface Grids {
+        ColumnGrid grid(int x, int z);
+    }
+
     Voxels(SwdCell cell, int x0, int z0, int x1, int z1, int y0, int y1) {
+        this((x, z) -> Cells.grid(cell, x, z, TransportPlan.MARGIN), x0, z0, x1, z1, y0, y1);
+    }
+
+    Voxels(Grids grids, int x0, int z0, int x1, int z1, int y0, int y1) {
         this.x0 = x0;
         this.z0 = z0;
         this.y0 = y0;
@@ -39,6 +52,8 @@ final class Voxels {
         b = new B[nx * nz * ny];
         level = new int[b.length];
         shape = new Rail[b.length];
+        part = new Part[b.length];
+        rock = new boolean[b.length];
         java.util.Arrays.fill(b, B.AIR);
         deck = new int[nx * nz];
         bore = new int[nx * nz];
@@ -51,7 +66,7 @@ final class Voxels {
         originalTop = new int[nx * nz];
         for (int cx = Math.floorDiv(x0, 16); cx <= Math.floorDiv(x1, 16); cx++) {
             for (int cz = Math.floorDiv(z0, 16); cz <= Math.floorDiv(z1, 16); cz++) {
-                ColumnGrid g = Cells.grid(cell, cx * 16, cz * 16, TransportPlan.MARGIN);
+                ColumnGrid g = grids.grid(cx * 16, cz * 16);
                 TransportPlan t = new TransportPlan(g);
                 for (int x = Math.max(x0, cx * 16); x <= Math.min(x1, cx * 16 + 15); x++) {
                     for (int z = Math.max(z0, cz * 16); z <= Math.min(z1, cz * 16 + 15); z++) column(g, t, x, z);
@@ -71,11 +86,17 @@ final class Voxels {
             for (int y = ground + 1; y < s; y++) put(x, y, z, B.SOLID, 0);
             put(x, s, z, B.CANE, 0);
             put(x, f.fallTop(), z, B.FLOW, 1);
+        } else if (f != null && f.cane()) {
+            for (int y = ground + 1; y <= f.sourceTop(); y++) put(x, y, z, B.SOLID, 0);
+            for (int y = f.sourceTop() + 1; y <= f.fallTop(); y++) put(x, y, z, B.CANE, 0);
         } else if (f != null) {
             for (int y = ground + 1; y <= f.sourceTop(); y++) put(x, y, z, B.SOURCE, 0);
             if (f.lip()) put(x, f.sourceTop() + 1, z, B.FLOW, 2);
             if (f.rock()) {
-                for (int y = f.sourceTop() + 1; y <= f.fallTop(); y++) put(x, y, z, B.SOLID, 0);
+                for (int y = f.sourceTop() + 1; y <= f.fallTop(); y++) {
+                    put(x, y, z, B.SOLID, 0);
+                    if (in(x, y, z)) rock[idx(x, y, z)] = true;
+                }
             } else {
                 for (int y = f.sourceTop() + 1; y < f.fallTop(); y++) put(x, y, z, B.FLOW, 8);
                 if (f.falls()) put(x, f.fallTop(), z, B.FLOW, 1);
@@ -96,6 +117,10 @@ final class Voxels {
                 default -> B.SOLID;
             };
             put(x, y, z, v, 0);
+            if (in(x, y, z)) {
+                part[idx(x, y, z)] = p;
+                rock[idx(x, y, z)] = false;
+            }
             if (p == Part.RAIL) shape[idx(x, y, z)] = t.railShape(x, z);
         });
         bore[c] = t.tunnelFloor(x, z);
@@ -132,6 +157,16 @@ final class Voxels {
         if (y < y0) return B.SOLID;
         if (!in(x, y, z)) return B.AIR;
         return b[idx(x, y, z)];
+    }
+
+    /** The transport part built at this block, or null. */
+    Part part(int x, int y, int z) {
+        return in(x, y, z) ? part[idx(x, y, z)] : null;
+    }
+
+    /** True where WaterStage writes its rock (stone) between two water levels. */
+    boolean rock(int x, int y, int z) {
+        return in(x, y, z) && rock[idx(x, y, z)];
     }
 
     int level(int x, int y, int z) {
@@ -229,6 +264,29 @@ final class Voxels {
                     boolean ew = surface(x + 1, y, z) && surface(x - 1, y, z);
                     boolean ns = surface(x, y, z + 1) && surface(x, y, z - 1);
                     if (ew || ns) bad.add(x + "," + y + "," + z);
+                }
+            }
+        }
+        return bad;
+    }
+
+    /**
+     * The stone WaterStage writes (rock corners of steps) where it shows: a face open to water or air, or under the
+     * open sky (nothing solid above). Margin columns at the box's edge are skipped.
+     */
+    List<String> exposedRock(int margin) {
+        List<String> bad = new ArrayList<>();
+        for (int x = x0 + margin; x < x0 + nx - margin; x++) {
+            for (int z = z0 + margin; z < z0 + nz - margin; z++) {
+                for (int y = y0 + 1; y < y0 + ny - 1; y++) {
+                    if (!rock(x, y, z) || at(x, y, z) != B.SOLID) continue;
+                    for (int[] d : new int[][] {{1, 0, 0}, {-1, 0, 0}, {0, 0, 1}, {0, 0, -1}, {0, 1, 0}}) {
+                        B n = at(x + d[0], y + d[1], z + d[2]);
+                        if (n != B.SOLID && n != B.SLAB) {
+                            bad.add(x + "," + y + "," + z + " open towards " + d[0] + "," + d[1] + "," + d[2] + ": " + n);
+                            break;
+                        }
+                    }
                 }
             }
         }

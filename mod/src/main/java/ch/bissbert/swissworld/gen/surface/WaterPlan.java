@@ -16,8 +16,10 @@ package ch.bissbert.swissworld.gen.surface;
  *       neighbours matter: the inner corner of a step that runs diagonally or turns. A one-block step corner is a
  *       {@link Fill#reed}: sand up to below the lower level, sugar cane at it (no source, holds no water, not solid) and
  *       the flowing top above; its lower neighbours without a top of their own get the level-2 water that the flowing
- *       top spreads to them ({@link Fill#lip}). Where the reed's conditions fail, or on higher steps, the corner is rock
- *       from its source level up ({@link Fill#rock}). Rock and cane are no source, so neither spreads.</li>
+ *       top spreads to them ({@link Fill#lip}). Where those conditions fail (shallow water, a low shore), or on steps up
+ *       to {@link #CANE_STEP} high, the corner is a {@link Fill#cane}: sand at its source level, beside the water of a
+ *       neighbour, and sugar cane up to the upper level. Only waterfalls and higher steps keep a rock corner
+ *       ({@link Fill#rock}). Rock and cane are no source, so neither spreads.</li>
  *   <li>Dry columns up to {@link #BANK_REACH} from water whose ground is below that water are raised to it (but never
  *       above a 4-neighbour's water), so a bank is a flat gravel shore instead of a ridge with a pit behind it.</li>
  * </ul>
@@ -30,14 +32,18 @@ public final class WaterPlan {
     /**
      * Water of one column: sources from {@code ground + 1} to {@code sourceTop}, falling water above, and a flowing
      * block (level 1) at {@code fallTop}, level with the neighbouring source that feeds it. With {@code rock}, the
-     * part above {@code sourceTop} is solid instead.
+     * part above {@code sourceTop} is solid instead. With {@code cane}, there is no water: fill up to below
+     * {@code sourceTop}, sand at it and sugar cane above it up to {@code fallTop}.
      */
-    public record Fill(int sourceTop, int fallTop, boolean rock, boolean reed, boolean lip) {
+    public record Fill(int sourceTop, int fallTop, boolean rock, boolean reed, boolean lip, boolean cane) {
         /** No falling part when {@code fallTop <= sourceTop}. */
         public boolean falls() {
-            return fallTop > sourceTop && !rock;
+            return fallTop > sourceTop && !rock && !cane;
         }
     }
+
+    /** Highest step whose corner is a {@link Fill#cane} instead of rock. */
+    static final int CANE_STEP = 3;
 
     /** How far from water a dry column lower than that water is raised to it. */
     static final int BANK_REACH = 2;
@@ -90,14 +96,34 @@ public final class WaterPlan {
         int top = Math.max(s, neighbourSource(g, x, z));
         if (corner(g, x, z, s, top)) {
             boolean reed = reed(g, x, z, s, top);
-            return new Fill(s, top, !reed, reed, false);
+            boolean cane = !reed && cane(g, x, z, s, top);
+            return new Fill(s, top, !reed && !cane, reed, false, cane);
         }
         boolean lip = false;
         if (top == s) {
             // the reed's flowing top spreads onto the columns at the reed's own level, not onto the upper ones
             for (int[] d : SIDES) lip |= sourceLevel(g, x + d[0], z + d[1]) == s && reedAt(g, x + d[0], z + d[1]);
         }
-        return new Fill(s, top, false, false, lip);
+        return new Fill(s, top, false, false, lip, false);
+    }
+
+    /**
+     * The part of this column's ground that a neighbour's water touches from the side: from the lowest water beside it
+     * up to its own ground, no higher than that water's top. A riverbed's gravel is one block thick over stone, so a
+     * step in the bed, or a shore a block above the bed, shows its stone there. {lo, hi}, or null.
+     */
+    public static int[] bedFace(ColumnGrid g, int x, int z) {
+        if (!g.present(x, z)) return null;
+        int lo = Integer.MAX_VALUE, hi = ColumnGrid.NONE;
+        for (int[] d : SIDES) {
+            int nx = x + d[0], nz = z + d[1];
+            Fill f = fill(g, nx, nz);
+            if (f == null || f.reed() || f.cane()) continue;
+            lo = Math.min(lo, g.ground(nx, nz) + 1);
+            hi = Math.max(hi, f.sourceTop());
+        }
+        hi = Math.min(hi, g.ground(x, z));
+        return lo <= hi ? new int[] {lo, hi} : null;
     }
 
     /** The lowest block above the sources would have two source neighbours: an inner corner of a step. */
@@ -132,6 +158,23 @@ public final class WaterPlan {
             if (g.ground(nx, nz) < s - 1) wetBelow = true;
         }
         return wetBelow;
+    }
+
+    /**
+     * A step corner can hold sugar cane on sand at its own source level when that sand has water beside it at that
+     * level (a neighbour's source that stays one: not another corner) and the step is not a waterfall's or higher than
+     * {@link #CANE_STEP}. Cane holds no water, so the upper sources beside it stay put and nothing spreads.
+     */
+    private static boolean cane(ColumnGrid g, int x, int z, int s, int top) {
+        if (top - s > CANE_STEP || g.waterKind(x, z) == WATERFALL) return false;
+        for (int[] d : SIDES) {
+            int nx = x + d[0], nz = z + d[1];
+            if (sourceAt(g, nx, nz, s) == 0) continue;
+            int ns = sourceLevel(g, nx, nz);
+            int nt = Math.max(ns, neighbourSource(g, nx, nz));
+            if (!corner(g, nx, nz, ns, nt)) return true;
+        }
+        return false;
     }
 
     /** Neighbours that have a source block at height y. */

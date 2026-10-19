@@ -34,6 +34,16 @@ public final class WaterStage implements GenStage {
             for (int lz = 0; lz < 16; lz++) {
                 int x = x0 + lx, z = z0 + lz;
                 int bottom = g.ground(x, z) + 1;
+                int[] face = WaterPlan.bedFace(g, x, z);
+                if (face != null) {
+                    // the bed's stone where deeper water beside it shows it: gravel, laid bottom-up on solid ground
+                    for (int y = face[0]; y <= face[1]; y++) {
+                        if (chunk.getBlockState(pos.set(x, y, z)).is(Blocks.STONE)
+                                && chunk.getBlockState(pos.set(x, y - 1, z)).isSolid()) {
+                            chunk.setBlockState(pos.set(x, y, z), BANK_TOP, false);
+                        }
+                    }
+                }
                 WaterPlan.Fill f = WaterPlan.fill(g, x, z);
                 if (f != null && f.reed()) {
                     int s = f.sourceTop();
@@ -41,6 +51,13 @@ public final class WaterStage implements GenStage {
                     chunk.setBlockState(pos.set(x, s - 1, z), REED_BED, false);
                     chunk.setBlockState(pos.set(x, s, z), REED, false);
                     chunk.setBlockState(pos.set(x, f.fallTop(), z), FLOWING, false);
+                    continue;
+                }
+                if (f != null && f.cane()) {
+                    int s = f.sourceTop();
+                    for (int y = bottom; y < s; y++) chunk.setBlockState(pos.set(x, y, z), FILL, false);
+                    chunk.setBlockState(pos.set(x, s, z), REED_BED, false);
+                    for (int y = s + 1; y <= f.fallTop(); y++) chunk.setBlockState(pos.set(x, y, z), REED, false);
                     continue;
                 }
                 if (f != null) {
@@ -56,7 +73,8 @@ public final class WaterStage implements GenStage {
                 }
                 int bank = WaterPlan.bankTop(g, x, z);
                 for (int y = bottom; y <= bank; y++) {
-                    chunk.setBlockState(pos.set(x, y, z), y == bank ? BANK_TOP : BANK, false);
+                    // earth under the gravel: a bank side that shows in the water is no stone wall
+                    chunk.setBlockState(pos.set(x, y, z), y == bank ? BANK_TOP : FILL, false);
                 }
             }
         }

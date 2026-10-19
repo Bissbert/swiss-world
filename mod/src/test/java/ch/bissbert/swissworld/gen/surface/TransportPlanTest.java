@@ -1,6 +1,7 @@
 package ch.bissbert.swissworld.gen.surface;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -153,6 +154,7 @@ class TransportPlanTest {
                     List<int[]> ends = ends(s);
                     for (int[] d : ends) {
                         int[] p = target(v, x, y, z, s, d);
+                        if (p == null && switchAt(v, x, y, z, s, d)) continue;
                         if (p == null) {
                             boolean edge = x + d[0] <= v.x0 || x + d[0] >= v.x0 + v.nx - 1 || z + d[1] <= v.z0 || z + d[1] >= v.z0 + v.nz - 1;
                             if (!edge) bad.add(x + "," + y + "," + z + " " + s + " open towards " + d[0] + "," + d[1]);
@@ -163,6 +165,9 @@ class TransportPlanTest {
                         for (int dy = -1; dy <= 1; dy++) {
                             if (v.at(x + d[0], y + dy, z + d[1]) != B.RAIL) continue;
                             boolean joined = ends.stream().anyMatch(e -> e[0] == d[0] && e[1] == d[1]);
+                            // a switch: the through track's rail on its outside points at it
+                            joined |= railsBeside(v, x, y, z) == 3 && !ends(v.shape(x + d[0], y + dy, z + d[1])).isEmpty()
+                                    && ends(v.shape(x + d[0], y + dy, z + d[1])).stream().anyMatch(e -> e[0] == -d[0] && e[1] == -d[1]);
                             if (!joined) bad.add(x + "," + y + "," + z + " " + s + " beside a rail at " + d[0] + "," + dy + "," + d[1]);
                         }
                     }
@@ -176,6 +181,29 @@ class TransportPlanTest {
             }
         }
         return bad;
+    }
+
+    /** Rails on the four sides of (x, y, z), one level up or down included. */
+    private static int railsBeside(Voxels v, int x, int y, int z) {
+        int n = 0;
+        for (int[] d : new int[][] {{1, 0}, {-1, 0}, {0, 1}, {0, -1}}) {
+            for (int dy = -1; dy <= 1; dy++) if (v.at(x + d[0], y + dy, z + d[1]) == B.RAIL) n++;
+        }
+        return n;
+    }
+
+    /**
+     * The open end towards d meets the outside of a switch (vanilla's T junction): a curve with three rails beside it,
+     * at the same level or, if this rail ascends towards it, one up.
+     */
+    private static boolean switchAt(Voxels v, int x, int y, int z, Rail s, int[] d) {
+        int[] up = dirUp(s);
+        int ty = up != null && up[0] == d[0] && up[1] == d[1] ? y + 1 : y;
+        int tx = x + d[0], tz = z + d[1];
+        if (v.at(tx, ty, tz) != B.RAIL) return false;
+        Rail o = v.shape(tx, ty, tz);
+        boolean curve = o == Rail.NORTH_EAST || o == Rail.NORTH_WEST || o == Rail.SOUTH_EAST || o == Rail.SOUTH_WEST;
+        return curve && railsBeside(v, tx, ty, tz) == 3;
     }
 
     private static List<int[]> ends(Rail s) {
@@ -295,6 +323,82 @@ class TransportPlanTest {
     }
 
     @Test
+    void diagonalTrackClimbsAGradeWithoutSteps() {
+        for (double grade : new double[] {0.02, 0.04, 0.08}) {
+            SwdCell c = Cells.flat(600);
+            Voxels.terrain(c, (x, z) -> 600 - grade * (x + z));
+            // a staircase track running south-east (down the grade), its bed three columns either side
+            for (int i = -50; i <= 50; i++) {
+                for (int j = -3; j <= 4; j++) Cells.overlay(c, i + j, i, OverlayPlan.RAIL_BED, 0, Double.NaN);
+            }
+            for (int i = -50; i <= 50; i++) {
+                Cells.overlay(c, i, i, OverlayPlan.RAIL_BED, RAIL, Double.NaN);
+                Cells.overlay(c, i + 1, i, OverlayPlan.RAIL_BED, RAIL, Double.NaN);
+            }
+            Voxels v = new Voxels(c, -30, -30, 30, 30, -1420, -1385);
+            List<String> bad = railFaults(v);
+            assertTrue(bad.isEmpty(), () -> "grade " + grade + " rail faults: " + bad);
+            // the track is there all the way and climbs: rails at more than one level, none missing
+            int rails = 0, lo = Integer.MAX_VALUE, hi = Integer.MIN_VALUE;
+            for (int x = -29; x <= 29; x++) {
+                for (int z = -29; z <= 29; z++) {
+                    for (int y = v.y0; y < v.y0 + v.ny; y++) {
+                        if (v.at(x, y, z) != B.RAIL) continue;
+                        rails++;
+                        lo = Math.min(lo, y);
+                        hi = Math.max(hi, y);
+                    }
+                }
+            }
+            assertTrue(rails >= 2 * 57, "grade " + grade + " rails " + rails);
+            assertTrue(hi - lo >= (int) (grade * 100) - 1, "grade " + grade + " climbs " + (hi - lo));
+        }
+    }
+
+    /** A branch running in on a shallow staircase (three east per south) from (x, z) until it reaches row {@code toZ}. */
+    private static void branch(SwdCell c, int x, int z, int toZ, int touching) {
+        int cx = x, cz = z;
+        while (cz < toZ) {
+            for (int i = 0; i < 3; i++) railBand(c, cx++, cz, 0);
+            railBand(c, cx - 1, ++cz, 0);
+        }
+        for (int i = 0; i < touching; i++) railBand(c, cx++, cz, 0);
+    }
+
+    @Test
+    void tracksMergingSideBySideJoinAtASwitchWithoutDeadEnds() {
+        SwdCell c = Cells.flat(600);
+        for (int x = -50; x <= 50; x++) {
+            for (int z = -24; z <= 24; z++) Cells.overlay(c, x, z, OverlayPlan.RAIL_BED, 0, Double.NaN);
+        }
+        // the main tracks: rows -12 and 12, east-west
+        for (int x = -50; x <= 50; x++) {
+            Cells.overlay(c, x, -12, OverlayPlan.RAIL_BED, RAIL, Double.NaN);
+            Cells.overlay(c, x, 12, OverlayPlan.RAIL_BED, RAIL, Double.NaN);
+        }
+        // a branch that runs in beside the northern track, touching it for 8 columns before it ends
+        branch(c, -50, -22, -13, 8);
+        // a branch whose centre line stops two rows short of the southern track
+        branch(c, -50, 2, 9, 0);
+        Voxels v = new Voxels(c, -46, -24, 40, 24, -1410, -1390);
+        List<String> bad = railFaults(v);
+        assertTrue(bad.isEmpty(), () -> "rail faults: " + bad);
+        int switches = 0;
+        for (int x = -45; x <= 39; x++) {
+            for (int z = -23; z <= 23; z++) {
+                int y = v.deck[v.col(x, z)] + 1;
+                if (v.at(x, y, z) == B.RAIL && railsBeside(v, x, y, z) == 3) switches++;
+            }
+        }
+        assertEquals(2, switches, "one switch per branch");
+        // the main tracks run through
+        for (int x = -45; x <= 39; x++) {
+            assertEquals(B.RAIL, v.at(x, v.deck[v.col(x, -12)] + 1, -12), "northern track at " + x);
+            assertEquals(B.RAIL, v.at(x, v.deck[v.col(x, 12)] + 1, 12), "southern track at " + x);
+        }
+    }
+
+    @Test
     void shortTrackPiecesWhereTracksMergeAreDropped() {
         SwdCell c = Cells.flat(600);
         for (int x = -20; x <= 20; x++) Cells.overlay(c, x, 0, OverlayPlan.RAIL_BED, RAIL, Double.NaN);
@@ -396,6 +500,11 @@ class TransportPlanTest {
             int bed = v.originalTop[v.col(x, 14)];
             for (int y = bed + 1; y <= -1395; y++) assertTrue(Voxels.water(v.at(x, y, 14)), "saddle stream at " + x + "," + y);
             assertEquals(B.SOLID, v.at(x, bed, 14), "bed under the saddle stream at " + x);
+            // the bed is bed material, not the tunnel's lining (playtest: stone bricks in the stream bed); right over
+            // the bore's air it is one that cannot fall
+            TransportPlan.Part p = v.part(x, bed, 14);
+            assertNotEquals(TransportPlan.Part.LINING, p, "lining in the stream bed at " + x);
+            if (v.at(x, bed - 1, 14) == B.AIR) assertEquals(TransportPlan.Part.BED, p, "bed over the bore at " + x);
         }
     }
 
@@ -436,6 +545,10 @@ class TransportPlanTest {
                     bad.add(x + "," + z + " no bore");
                     continue;
                 }
+                // its floor is the rail tunnel's ballast, not lining (playtest: stone bricks under the absorbed path)
+                TransportPlan.Part fp = v.part(x, f, z);
+                if (fp != TransportPlan.Part.BALLAST && fp != TransportPlan.Part.FLOOR) bad.add(x + "," + z + " floor " + fp);
+                if (fp == TransportPlan.Part.FLOOR && boreClass(c, x, z) != OverlayPlan.RAIL_BED) bad.add(x + "," + z + " floor class");
                 int h = v.tunnelWay[col] || z < 34 ? head : head - 1;
                 for (int y = f + 1; y <= f + h; y++) {
                     B b = v.at(x, y, z);
@@ -470,6 +583,92 @@ class TransportPlanTest {
         bad.addAll(railFaults(v));
         bad.addAll(v.unstableWater(2));
         assertTrue(bad.isEmpty(), () -> "faults: " + bad);
+    }
+
+    private static int boreClass(SwdCell c, int x, int z) {
+        return new TransportPlan(Cells.grid(c, x, z, TransportPlan.MARGIN)).boreClass(x, z);
+    }
+
+    /**
+     * A diagonal rail tunnel under a hill (top 620 m) with open approaches at 600 m. A footpath crosses over it at an
+     * angle (the sidecar burns it over the tunnel: its columns lose the tunnel flag and the rail centre), and at the
+     * south portal the rail centre lacks the tunnel flag, beside the headwall (playtest 17.09.19, 5892/-4699).
+     */
+    @Test
+    void diagonalTunnelKeepsItsTrackWhereOtherWaysCutIt() {
+        SwdCell c = Cells.flat(600);
+        Voxels.terrain(c, (x, z) -> {
+            double a = Math.abs(x + z) / 2.0;
+            return a >= 30 ? 600 : a > 20 ? 600 + 2 * (30 - a) : 620;
+        });
+        for (int i = -50; i <= 50; i++) {
+            boolean tunnel = Math.abs(i) <= 22;
+            for (int j = -3; j <= 4; j++) {
+                Cells.overlay(c, i + j, i, OverlayPlan.RAIL_BED, tunnel ? TUNNEL : 0, 600); // a cut up to the portals
+            }
+            for (int j = 0; j <= 1; j++) {
+                boolean portal = i == 22; // the centre line's last tunnel row has no tunnel flag
+                Cells.overlay(c, i + j, i, OverlayPlan.RAIL_BED, RAIL | (tunnel && !portal ? TUNNEL : 0), 600);
+            }
+        }
+        // the footpath, two wide, running north-east over the hill
+        for (int i = -30; i <= 30; i++) {
+            for (int j = 0; j <= 1; j++) Cells.overlay(c, i + j, -i, 6, 0, Double.NaN);
+        }
+        Voxels v = new Voxels(c, -40, -40, 40, 40, -1420, -1370);
+        List<String> bad = new ArrayList<>(railFaults(v));
+        int rails = 0;
+        for (int x = -39; x <= 39; x++) {
+            for (int z = -39; z <= 39; z++) {
+                int f = v.bore[v.col(x, z)];
+                if (f != ColumnGrid.NONE && !v.tunnelWay[v.col(x, z)]) {
+                    TransportPlan.Part p = v.part(x, f, z);
+                    if (p != TransportPlan.Part.BALLAST && p != TransportPlan.Part.FLOOR) bad.add(x + "," + z + " floor " + p);
+                }
+                for (int y = v.y0; y < v.y0 + v.ny; y++) if (v.at(x, y, z) == B.RAIL) rails++;
+            }
+        }
+        assertTrue(bad.isEmpty(), () -> "faults: " + bad);
+        assertTrue(rails >= 2 * 78, "rails " + rails);
+        // the path still runs over the hill
+        assertEquals(B.SOLID, v.at(1, -1380, -1));
+        assertEquals(B.AIR, v.at(1, -1379, -1));
+    }
+
+    /**
+     * Two parallel rail tunnels (twin tubes) 3 to 8 columns apart, with way columns between them that lost the
+     * tunnel flag (a shoulder or a path burnt over the hill). The bore gap must not carry a bore across: the tubes stay
+     * separate, with their walls and rock between them.
+     */
+    @Test
+    void twinTunnelsStaySeparate() {
+        for (int sep = 3; sep <= 8; sep++) {
+            SwdCell c = Cells.flat(600);
+            Voxels.terrain(c, (x, z) -> Math.abs(z) >= 50 ? 600 : Math.abs(z) > 35 ? 650 - Math.abs(z) : 615);
+            int east = 2 + sep + 3; // the second tube's centre
+            for (int z = -70; z <= 70; z++) {
+                boolean tunnel = Math.abs(z) <= 40;
+                for (int i = -2; i <= 2; i++) {
+                    int flags = (i == 0 ? RAIL : 0) | (tunnel ? TUNNEL : 0);
+                    Cells.overlay(c, i, z, OverlayPlan.RAIL_BED, flags, tunnel ? 600 : Double.NaN);
+                    Cells.overlay(c, east + i, z, OverlayPlan.RAIL_BED, flags, tunnel ? 600 : Double.NaN);
+                }
+                for (int x = 3; x < east - 2; x++) Cells.overlay(c, x, z, OverlayPlan.RAIL_BED, 0, Double.NaN);
+            }
+            Voxels v = new Voxels(c, -10, -60, east + 10, 60, -1430, -1370);
+            List<String> bad = new ArrayList<>();
+            for (int z = -30; z <= 30; z++) {
+                // walls and rock between the tubes: nothing of a bore there
+                for (int x = 3; x < east - 2; x++) {
+                    for (int y = -1399; y <= -1394; y++) {
+                        if (v.at(x, y, z) != B.SOLID) bad.add(x + "," + y + "," + z + " open between the tubes");
+                    }
+                }
+            }
+            bad.addAll(railFaults(v));
+            int s = sep;
+            assertTrue(bad.isEmpty(), () -> "separation " + s + ": " + bad);
+        }
     }
 
     @Test

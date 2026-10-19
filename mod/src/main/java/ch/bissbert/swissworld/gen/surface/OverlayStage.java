@@ -5,6 +5,7 @@ import ch.bissbert.swissworld.gen.GenStage;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.FallingBlock;
 import net.minecraft.world.level.block.LanternBlock;
 import net.minecraft.world.level.block.RailBlock;
 import net.minecraft.world.level.block.SlabBlock;
@@ -28,6 +29,8 @@ public final class OverlayStage implements GenStage {
     private static final BlockState SOIL = Blocks.DIRT.defaultBlockState();
     private static final BlockState BEAM = Blocks.STONE_BRICKS.defaultBlockState();
     private static final BlockState LINING = Blocks.STONE_BRICKS.defaultBlockState();
+    /** A stream bed that cannot fall into the tunnel under it. */
+    private static final BlockState BED = Blocks.CLAY.defaultBlockState();
     private static final BlockState COVER = Blocks.GRASS_BLOCK.defaultBlockState();
     private static final BlockState BALLAST = Blocks.GRAVEL.defaultBlockState();
     private static final BlockState BALLAST_EDGE = Blocks.ANDESITE.defaultBlockState();
@@ -65,11 +68,13 @@ public final class OverlayStage implements GenStage {
             case COVER -> COVER;
             case BALLAST -> g.flag(x, z, ColumnGrid.EDGE) ? BALLAST_EDGE : BALLAST;
             case SURFACE -> surface(g, x, z, cls, y);
+            case FLOOR -> floor(t, x, z, y);
             case SLAB -> slab(cls);
             case RAIL -> rail(t, x, z);
             case RAILING -> railing(g, x, z);
             case LANTERN -> LANTERN;
             case TOP -> top.isAir() ? COVER : top;
+            case BED -> top.isAir() || top.getBlock() instanceof FallingBlock ? BED : top;
         };
     }
 
@@ -101,6 +106,13 @@ public final class OverlayStage implements GenStage {
         if (cls == 0) return;
         set(chunk, pos, x, deck, z, surface(g, x, z, cls, deck));
         if (OverlayPlan.railing(g, x, z)) set(chunk, pos, x, deck + 1, z, railing(g, x, z));
+    }
+
+    /** A bore's floor under a way it took over: ballast in a rail tunnel, the road's surface in a road tunnel. */
+    private static BlockState floor(TransportPlan t, int x, int z, int y) {
+        int cls = t.boreClass(x, z);
+        if (cls == OverlayPlan.RAIL_BED || cls == OverlayPlan.RACK_BED) return BALLAST;
+        return cls == 7 ? LINING : surface(t.grid(), x, z, cls, y);
     }
 
     private static BlockState surface(ColumnGrid g, int x, int z, int cls, int deck) {

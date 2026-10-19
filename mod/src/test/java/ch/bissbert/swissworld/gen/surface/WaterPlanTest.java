@@ -132,10 +132,49 @@ class WaterPlanTest {
             for (int z = -12; z <= 12; z++) Cells.water(c, x, z, x + z <= 0 ? 601 : 600, 2);
         }
         Voxels v = new Voxels(c, -15, -15, 15, 15, -1415, -1390);
-        // where the step meets the shore the corner stays rock (the shore is too low for a reed): check mid-river
-        List<String> stones = v.stonesInWater(6), unstable = v.unstableWater(1);
+        // playtest: "in a river going uphill there are stone blocks on the border of the two levels", also where
+        // the step meets the shore
+        List<String> stones = v.stonesInWater(1), rock = v.exposedRock(1), unstable = v.unstableWater(1);
         assertTrue(stones.isEmpty(), () -> "stone in the river: " + stones);
+        assertTrue(rock.isEmpty(), () -> "stone showing at the step: " + rock);
         assertTrue(unstable.isEmpty(), () -> "water that would move: " + unstable);
+    }
+
+    /**
+     * Playtest river step (14110, -6414): the bed's gravel is one block thick over stone, so where the bed steps down,
+     * or the shore stands a block above it, the deeper water showed the stone. That face is the bed's to cover.
+     */
+    @Test
+    void bedStepsAndLowShoresShowNoStoneToTheWater() {
+        SwdCell c = Cells.flat(591);
+        for (int z = -12; z <= 12; z++) {
+            for (int x = -4; x <= 4; x++) {
+                Cells.ground(c, x, z, Math.abs(x) <= 1 ? 587.5 : 588.5); // a deeper channel in the middle
+                Cells.water(c, x, z, 590.2, 2);
+            }
+        }
+        ColumnGrid g = Cells.grid(c, 0, 0);
+        int checked = 0;
+        for (int x = -6; x <= 6; x++) {
+            for (int z = -4; z <= 4; z++) {
+                for (int[] d : new int[][] {{1, 0}, {-1, 0}, {0, 1}, {0, -1}}) {
+                    WaterPlan.Fill n = WaterPlan.fill(g, x + d[0], z + d[1]);
+                    int nGround = g.ground(x + d[0], z + d[1]);
+                    if (n == null || nGround >= g.ground(x, z)) continue;
+                    // this column's ground from the neighbour's floor up to its water: the face the water touches
+                    int lo = nGround + 1, hi = Math.min(g.ground(x, z), n.sourceTop());
+                    int[] face = WaterPlan.bedFace(g, x, z);
+                    String at = x + "," + z + " beside " + (x + d[0]) + "," + (z + d[1]);
+                    assertTrue(face != null && face[0] <= lo && face[1] >= hi, () -> "uncovered face at " + at);
+                    checked++;
+                }
+                int[] face = WaterPlan.bedFace(g, x, z);
+                if (face != null) assertTrue(face[1] <= g.ground(x, z), "face above the ground at " + x + "," + z);
+            }
+        }
+        assertTrue(checked >= 18, "channel steps and shores checked: " + checked);
+        // dry land well away from the water has none
+        assertNull(WaterPlan.bedFace(g, 9, 0));
     }
 
     /** Playtest 17.16.32: a 1-wide stream in a wide stone bed showed staircase banks. */
