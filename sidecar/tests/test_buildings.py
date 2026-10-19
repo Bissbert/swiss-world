@@ -51,9 +51,11 @@ def synthetic_sheet():
 def test_sheet_overhang_and_orphans():
     sh = synthetic_sheet()
     assert sh.orphan_roofs == 1 and sh.odd_columns == 0
-    assert abs(sh.volume[0] - 480.0) < 1e-6
+    assert abs(sh.volume[0] - (480.0 + 18.0)) < 1e-6  # body + roof skin
     a = sh.building == 0
     assert (sh.part[a] == 0).sum() == 80
+    # the skin resting on the body raises it to the roof surface
+    assert np.all(sh.top[a & (sh.part == 0)] == swd.encode_height(606.2))
     over = a & (sh.part == 1)
     assert over.sum() == 10 and set(sh.n[over]) == {N0 + 499}
     assert np.all(sh.roof[a] & buildings.ROOF_TOP)

@@ -7,7 +7,7 @@ once into a cached .npz (scratch), so all cells on a sheet reuse it.
 - Body spans (part 0) come from `Building_solid`.
 - `Roof_solid` holds ~20 cm roof skins linked by GEBAEUDEEINHEIT.
   Where a skin lies outside every body column of its building unit it becomes an eave/overhang span (part 1).
-  Skins over the body are dropped (the body already reaches the roof underside).
+  A skin resting on the body raises the body span to the roof surface; one clearly above it is its own span.
 """
 
 from __future__ import annotations
@@ -36,6 +36,8 @@ ASSET_URL = "https://data.geo.admin.ch/" + COLLECTION + "/{item}/{item}_2056_572
 SHEET_ITEM = re.compile(r"^swissbuildings3d_3_0_(\d{4})_(\d{4}-\d{2})$")
 # buildings are assigned to one sheet but may stick out of its nominal extent (seen: 43 m)
 SEARCH_PAD_M = 150.0
+# a roof skin whose underside is within this of the body top rests on the body (Roof_solid is ~0.2 m thick)
+SKIN_GAP_M = 0.5
 
 PART_BODY = 0
 PART_OVERHANG = 1
@@ -57,7 +59,7 @@ OBJEKTART = {
     "Bruecke gedeckt": 10,
 }  # values seen in the test-area sheets; new ones get the next free code
 
-_CACHE_VERSION = 1
+_CACHE_VERSION = 2
 
 
 def sheet_of(item: str) -> str:
@@ -110,7 +112,7 @@ class Sheet:
     objektart: np.ndarray  # u2
     base_m: np.ndarray  # f8, lowest point of the body
     top_m: np.ndarray  # f8, highest point of body and its roof skins
-    volume: np.ndarray  # f8, Building_solid volume (m³)
+    volume: np.ndarray  # f8, volume of the body and its roof skins (m³)
     # one row per span, sorted by (building, e, n, bottom)
     building: np.ndarray  # i4
     e: np.ndarray  # i8 column Ei
@@ -175,6 +177,7 @@ def sheet_from_solids(item: str, bodies: list[tuple[dict, np.ndarray]],
         b = cand[np.argmin(((centres[cand] - c) ** 2).sum(axis=1))]
         roof_body[r] = b
         top_m[b] = max(top_m[b], t[:, :, 2].max())
+        volume[b] += voxel.solid_volume(t)
     orphan_roofs = int((roof_body < 0).sum())
 
     bs = voxel.voxelise(body_tris)
@@ -189,16 +192,33 @@ def sheet_from_solids(item: str, bodies: list[tuple[dict, np.ndarray]],
     def key(unit, e, n):
         return (unit << 40) | ((e - e_min) << 20) | (n - n_min)
 
-    body_keys = np.unique(key(body_unit[bs.solid], bs.e, bs.n))
+    # topmost body span per (unit, column)
+    body_key = key(body_unit[bs.solid], bs.e, bs.n)
+    order = np.lexsort((bs.top, body_key))
+    last = np.ones(len(order), dtype=bool)
+    last[:-1] = body_key[order][1:] != body_key[order][:-1]
+    top_span = order[last]
+    top_keys = body_key[top_span]
     roof_keys = key(body_unit[np.maximum(rb, 0)], rs.e, rs.n)
-    over = rs_keep & ~np.isin(roof_keys, body_keys)
+    pos = np.clip(np.searchsorted(top_keys, roof_keys), 0, max(len(top_keys) - 1, 0))
+    has_body = (top_keys[pos] == roof_keys) if len(top_keys) else np.zeros(len(rs), dtype=bool)
+    over = rs_keep & ~has_body
+    # a skin resting on the body (within SKIN_GAP_M of its top) raises that body span to the roof surface;
+    # a skin clearly above it (e.g. a canopy over a lower annex) is its own body span; skins below are dropped
+    span = top_span[pos]
+    on = rs_keep & has_body
+    rests = on & (rs.bottom <= bs.top[span] + SKIN_GAP_M) & (rs.top > bs.top[span])
+    above = on & (rs.bottom > bs.top[span] + SKIN_GAP_M)
+    body_top = bs.top.copy()
+    np.maximum.at(body_top, span[rests], rs.top[rests])
 
-    building = np.concatenate([bs.solid, rb[over]]).astype(np.int32)
-    e = np.concatenate([bs.e, rs.e[over]])
-    n = np.concatenate([bs.n, rs.n[over]])
-    bottom = swd.encode_height(np.concatenate([bs.bottom, rs.bottom[over]]))
-    top = swd.encode_height(np.concatenate([bs.top, rs.top[over]]))
-    part = np.concatenate([np.full(len(bs), PART_BODY), np.full(int(over.sum()), PART_OVERHANG)]).astype("u1")
+    extra = over | above
+    building = np.concatenate([bs.solid, rb[extra]]).astype(np.int32)
+    e = np.concatenate([bs.e, rs.e[extra]])
+    n = np.concatenate([bs.n, rs.n[extra]])
+    bottom = swd.encode_height(np.concatenate([bs.bottom, rs.bottom[extra]]))
+    top = swd.encode_height(np.concatenate([body_top, rs.top[extra]]))
+    part = np.concatenate([np.full(len(bs), PART_BODY), np.where(over[extra], PART_OVERHANG, PART_BODY)]).astype("u1")
     ok = top > bottom  # thinner than 1 dm after encoding
     building, e, n, bottom, top, part = building[ok], e[ok], n[ok], bottom[ok], top[ok], part[ok]
     order = np.lexsort((part, bottom, n, e, building))
