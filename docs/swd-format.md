@@ -78,6 +78,8 @@ Layer blobs follow, in directory order.
 | `OFLG` | no | `u8[1000·1000]` | Overlay flags: bit0 bridge, bit1 tunnel, bit2 rail centre line (place a rail block here), bit3 overlay edge (kerb/shoulder), bit4 dam body |
 | `INSD` | when flags.bit0 | `u8[1000·1000]` | 1 = inside Switzerland, 0 = outside (ocean). Absent = all inside. |
 | `BTBL` | no | see §6 | Building table |
+| `CNPY` | no | `u8[1000·1000]` | **Canopy height** in whole metres above `TERR`, from swissSURFACE3D minus swissALTI3D (max of the 0.5 m pixels in the column). 0 = no vegetation or below 2 m. Building footprints and water are 0. Absent = no canopy data. |
+| `TTOP` | no | see §6a | Tree tops detected from the canopy |
 | `BSPN` | no | see §6 | Building column spans |
 
 ### Coverage index (not a cell)
@@ -191,6 +193,25 @@ columnCount × column:
 |  |  | 12 | Flugdach |
 
 The mod derives walls, floors, stairs and roof shapes from spans and neighbours. A building that crosses a cell border has spans in each cell and the same `gid` everywhere.
+
+## 6a. Trees (`TTOP`)
+
+Individual trees, detected by the sidecar as local maxima of the canopy height model (with the neighbouring tiles where available, so a tree near an edge is found once). **A tree belongs to the cell that contains its top**; the mod looks up trees in neighbouring cells for crowns that reach across.
+
+```
+u32 count
+count × 8 bytes, sorted by (dz, dx):
+  0  u16 dx          top column, 0..999
+  2  u16 dz          top column, 0..999
+  4  u8  heightM     tree height in metres above TERR at the top column (2..255)
+  5  u8  crownDm     crown radius in decimetres (0 = unknown; the mod derives it from the height)
+  6  u8  kind        0 unknown, 1 conifer, 2 broadleaf, 3 larch (append-only)
+  7  u8  reserved = 0
+```
+
+- `kind` comes from data where the sidecar has it, otherwise 0 and the mod chooses the species (SURF class, altitude).
+- Trees on building footprints, water or overlay columns are dropped by the sidecar.
+- A cell with `TTOP` replaces the mod's statistical tree placement **inside that cell**. Cells without it keep the statistical placement.
 
 ## 7. `manifest.json` (store root, written by the sidecar only)
 
