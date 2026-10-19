@@ -85,6 +85,36 @@ class BuildingPlanTest {
         assertTrue(plan.floorAt(1, lx, lz) && !plan.cut(1, lx, lz));
     }
 
+    @Test
+    void everyFloorReachable() {
+        assertNotNull(plan.stairs());
+        assertTrue(plan.reachable());
+    }
+
+    /** Lagertank, large wall and covered bridge have no door, interior or loot; a greenhouse is a glass hall. */
+    @Test
+    void specialTypes() {
+        SwdCell.Building b = cell.buildings().get(0);
+        for (int oa : new int[]{7, 8, 9, 10}) {
+            SwdCell.Building t = new SwdCell.Building(b.gid(), b.egid(), oa, b.gwrCategory(), b.gwrClass(),
+                    b.gwrPeriod(), b.floors(), b.entranceSide(), b.baseH(), b.topH(), b.minX(), b.minZ(), b.maxX(),
+                    b.maxZ());
+            SwdCell c = copy(cell, cell.eKm(), t, cell.spans());
+            BuildingPlan p = BuildingPlan.of(view(c), c, t);
+            assertEquals(1, p.floors().size(), "objektart " + oa);
+            assertTrue(p.reachable());
+            if (oa == 8) {
+                assertEquals(Style.GREENHOUSE, p.style());
+                assertFalse(p.rooms().isEmpty());
+                assertTrue(p.props().stream().anyMatch(pr -> pr.kind().container()));
+            } else {
+                assertEquals(oa == 7 ? Style.TANK : oa == 9 ? Style.WALL : Style.BRIDGE, p.style());
+                assertNull(p.door());
+                assertTrue(p.rooms().isEmpty() && p.props().isEmpty() && p.lights().isEmpty(), "objektart " + oa);
+            }
+        }
+    }
+
     /** CellView over a block-column lookup (as GenContext.cellAt) must find the same cell as a km lookup. */
     @Test
     void cellViewFromColumns() {

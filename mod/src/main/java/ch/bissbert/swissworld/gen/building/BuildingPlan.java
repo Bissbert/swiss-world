@@ -20,7 +20,11 @@ public record BuildingPlan(long gid, Style style, Columns cols, int storey, List
     /** Door column on the facade; {@code out} points outside. The door stands on floor 0. */
     public record Door(int x, int z, Dir out) {}
 
-    /** First step of every flight at (x, z), rising along dir; walk is the side of the parallel landing row. */
+    /**
+     * First step of every flight at (x, z), rising along dir; walk is the side of the parallel landing row.
+     * A ladder at (x, z) faces dir, leans on the cell behind it (a pillar if that cell is interior) and is left
+     * towards walk on every floor.
+     */
     public record Stairs(int x, int z, Dir dir, Dir walk, boolean ladder) {}
 
     public record Room(int floor, int x0, int z0, int x1, int z1, RoomType type) {}
@@ -67,11 +71,33 @@ public record BuildingPlan(long gid, Style style, Columns cols, int storey, List
         return i >= storey - 3 && i <= storey - 2 && i >= 0;
     }
 
-    /** The cells kept free of walls and props: stair run, landing row and ladder. */
+    /** The cells kept free of walls and props: stair run, landing row, ladder with its pillar and exit. */
     public boolean reserved(int x, int z) {
         if (stairs == null) return false;
-        if (stairs.ladder) return x == stairs.x && z == stairs.z;
+        if (stairs.ladder) {
+            return x == stairs.x && z == stairs.z || pillar(x, z)
+                    || x == stairs.x + stairs.walk.dx && z == stairs.z + stairs.walk.dz;
+        }
         return runIndex(x, z) >= 0 || runIndex(x - stairs.walk.dx, z - stairs.walk.dz) >= 0;
+    }
+
+    /** True for the interior cell a free-standing ladder leans on; a support pillar fills it. */
+    public boolean pillar(int x, int z) {
+        return stairs != null && stairs.ladder && x == stairs.x - stairs.dir.dx && z == stairs.z - stairs.dir.dz
+                && cols.interior(x, z);
+    }
+
+    /** Every floor above the ground floor has solid floor at the flight's landing or the ladder's exit. */
+    public boolean reachable() {
+        if (floors.size() < 2) return true;
+        if (stairs == null) return false;
+        for (int k = 1; k < floors.size(); k++) {
+            int x = stairs.x + (stairs.ladder ? stairs.walk.dx : stairs.dir.dx * storey);
+            int z = stairs.z + (stairs.ladder ? stairs.walk.dz : stairs.dir.dz * storey);
+            if (stairs.ladder && cols.topFull(stairs.x, stairs.z) < floorY(k) + 3) return false;
+            if (!floorAt(k, x, z) || cut(k, x, z) || pillar(x, z)) return false;
+        }
+        return true;
     }
 
     /** Storey height from the BTBL height span and GASTW (floors above ground); 3 or 4 blocks. */
@@ -113,10 +139,13 @@ public record BuildingPlan(long gid, Style style, Columns cols, int storey, List
         }
 
         BuildingPlan plan() {
-            door = findDoor();
-            if (floors.size() > 1) stairs = findStairs();
+            if (!style.empty()) {
+                door = findDoor();
+                // upper floors no stair or ladder reaches are dropped, leaving a taller top storey
+                while (floors.size() > 1 && (stairs = findStairs()) == null) floors.remove(floors.size() - 1);
+            }
             view = new BuildingPlan(gid, style, c, s, List.copyOf(floors), door, stairs, rooms, walls, props, lights);
-            for (int k = 0; k < floors.size(); k++) layoutFloor(k);
+            if (!style.empty()) for (int k = 0; k < floors.size(); k++) layoutFloor(k);
             return new BuildingPlan(gid, style, c, s, List.copyOf(floors), door, stairs, List.copyOf(rooms),
                     List.copyOf(walls), List.copyOf(props), List.copyOf(lights));
         }
@@ -163,7 +192,7 @@ public record BuildingPlan(long gid, Style style, Columns cols, int storey, List
             return Math.abs(x - ix) + Math.abs(z - iz) <= 1;
         }
 
-        /** Straight stacked flights along the long axis next to a wall, else a ladder against a facade. */
+        /** Straight stacked flights along the long axis next to a wall, else a ladder against a facade or a pillar. */
         Stairs findStairs() {
             int top = floors.get(floors.size() - 1);
             boolean longX = c.maxX - c.minX >= c.maxZ - c.minZ;
@@ -185,14 +214,26 @@ public record BuildingPlan(long gid, Style style, Columns cols, int storey, List
                 }
             }
             int n = (c.maxX - c.minX + 1) * (c.maxZ - c.minZ + 1), rot = Hash.pick(gid, 6, n);
-            for (int o = 0; o < n; o++) {
-                int i = (o + rot) % n, x = c.minX + i % (c.maxX - c.minX + 1), z = c.minZ + i / (c.maxX - c.minX + 1);
-                if (!c.interior(x, z) || c.topFull(x, z) < top + 3 || nearDoor(x, z)) continue;
-                for (Dir d : Dir.values()) {
-                    if (!c.interior(x + d.dx, z + d.dz) && c.body(x + d.dx, z + d.dz)) {
-                        return new Stairs(x, z, d.opposite(), d.opposite(), true);
+            for (int pass = 0; pass < 2; pass++) {
+                for (int o = 0; o < n; o++) {
+                    int i = (o + rot) % n, x = c.minX + i % (c.maxX - c.minX + 1), z = c.minZ + i / (c.maxX - c.minX + 1);
+                    if (!c.interior(x, z) || c.topFull(x, z) < top + 3 || nearDoor(x, z)) continue;
+                    for (Dir d : Dir.values()) {
+                        int bx = x + d.dx, bz = z + d.dz;
+                        boolean back = pass == 0 ? !c.interior(bx, bz) && c.body(bx, bz) : c.interior(bx, bz);
+                        Dir exit = back ? exit(x, z, d, top) : null;
+                        if (exit != null) return new Stairs(x, z, d.opposite(), exit, true);
                     }
                 }
+            }
+            return null;
+        }
+
+        /** Side to leave a ladder at (x, z) leaning towards back: an interior cell with floor on every storey. */
+        Dir exit(int x, int z, Dir back, int top) {
+            for (Dir e : new Dir[]{back.opposite(), back.cw(), back.cw().cw().cw()}) {
+                int ex = x + e.dx, ez = z + e.dz;
+                if (c.interior(ex, ez) && c.lo(ex, ez) <= floors.get(1) && c.topFull(ex, ez) >= top + 3) return e;
             }
             return null;
         }

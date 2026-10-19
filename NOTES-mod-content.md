@@ -22,7 +22,17 @@
   run). Like `CellCache.load` it treats an existing file as the cell; the manifest-entry readiness rule from docs/dev.md
   is not applied by mod-core's loader either. `Buildings.near` scans the cells under the margin-grown box, not just the chunk corners.
 - **Storey height** from the BTBL height span and GASTW: `round(h / (GASTW + 0.7))`, clamped to 3..4 blocks;
-  4 without GASTW. Halls (church, barn, industrial incl. greenhouse, plain = tank/large wall/covered bridge) get one floor.
+  4 without GASTW. Halls (church, barn, industrial, greenhouse, tank, large wall, covered bridge) get one floor.
+- **Reachability**: every floor above the ground floor must be reached by the stair core or a ladder. Ladder
+  fallback: against a facade wall, else against an interior cell that becomes a support pillar (partition block),
+  with an exit cell that has floor on every storey. If neither fits, the top floors are dropped until one does
+  (the top storey gets taller; windows repeat per storey above the last floor). `BuildingPlan.reachable()` checks
+  landing/exit floors; asserted in `BuildingPlanTest` and the real-cell sweep.
+- **Special OBJEKTART shells**: 7 Lagertank = ellipse inscribed in the bbox, concrete ring wall, flat smooth-stone
+  top, hollow, no windows; 8 Treibhaus = glass walls and flat glass roof on a stone-brick base, coarse-dirt floor,
+  one hall with storage loot; 9 Mauer gross = solid stone/cobble/stone-brick; 10 Bruecke gedeckt = spruce deck and
+  walls, open portals at both ends of the long axis, fence windows, foundation only where the deck is ≤ 3 blocks above
+  ground. 7, 9, 10 (`Style.empty()`) have no door, stairs, rooms, props or loot.
 - **Roof** from the column tops: a column whose top is above a lower neighbour of the same building gets a stair
   facing uphill; odd half-metre tops get a bottom slab; columns of part=1 (eave/overhang) become thin slabs.
   roofFlags bit0 marks the topmost span per building in a column; that span is the one rendered as roof.
@@ -68,11 +78,20 @@ with a ridge, glowstone, beds, chest with `swissworld:chests/workshop`, barrel w
 After the neighbour/cache changes: 147 chunks force-loaded (chalet, the 4-storey block, and the cell's west border
 x -912..-880 where the neighbour cell is missing) in 16 s without errors; fixture acceptance probes unchanged.
 
-Planner sweep (ad-hoc test, not committed; re-run on the final code, 0.8 s) over all 959 real buildings: 959 planned,
-0 failures, every room with a light and a container; 10354 rooms,
-41351 eave columns in 926 buildings (part=1 is common), 5200 columns with several spans, 247 single-floor,
-514 with a ladder core, 43 multi-floor buildings with neither stairs nor ladder. Styles: TOWN_HOUSE 405,
-INDUSTRIAL 140, OLD_TOWN 133, MODERN 84, CHALET 80, BARN 55, COMMERCIAL 32, HOTEL 20, CHURCH 7, PLAIN 3.
+Planner sweep `BuildingSweepTest` (committed; skipped unless `SWISSWORLD_SWEEP_CELL=/tmp/swissworld-mod-content-real/cells/2632_1170.swd`)
+over all 959 real buildings: 0 failures, every multi-floor building reachable, every room with a light and a
+container; 700 multi-floor, 10248 rooms, 545 ladder cores (27 on pillars). Styles: TOWN_HOUSE 405, INDUSTRIAL 140,
+OLD_TOWN 133, MODERN 84, CHALET 80, BARN 55, COMMERCIAL 32, HOTEL 20, CHURCH 7, WALL 3 (real cell has OBJEKTART
+1/3/4/9 only). Before the fix 43 multi-floor buildings had neither stairs nor ladder.
+In game (real store): pillar ladder at (-371,-1434..-1419,-132), partition pillar at z -133, exit floors at z -131
+on every storey.
+
+Special types in game: private store `/tmp/swissworld-mod-content-special` = fixture plus four copies of its
+building with OBJEKTART 7/8/9/10 at dz +20/40/60/80 (bridge lifted 60 m), written with sidecar `swd.py`
+(read-only use). Slices: tank hollow with light-gray concrete ring, smooth-stone top, rounded corners
+((-800,-1386,-280) air); greenhouse glass walls/roof, stone-brick base, coarse dirt, chest `swissworld:chests/storage`
+at (-798,-1389,-254); wall solid cobblestone with stone-brick top; bridge spruce deck/walls, stair roof, open
+portals at both ends, fence window row, no foundation. No exceptions.
 
 ## Known limitations / follow-ups
 - **Cross-cell buildings**: neighbours are now read from the store (see Decisions). A neighbour cell built
@@ -81,13 +100,13 @@ INDUSTRIAL 140, OLD_TOWN 133, MODERN 84, CHALET 80, BARN 55, COMMERCIAL 32, HOTE
   Suggestion for mod-core, not required: preload neighbour cells in GenContext so the fallback rarely reads.
 - The plan cache is static; switching stores in one JVM (integrated client) could reuse a
   stale plan. Fine on a dedicated server.
-- 43 of 959 real multi-floor buildings get neither stairs nor ladder (no free 1-wide run); their upper floors are
-  unreachable.
+- Buildings whose upper floors cannot be reached lose those floors (taller top storey) rather than getting a
+  bigger stair; tanks/greenhouses/covered bridges are absent from the real test cell, so only synthetic copies were
+  seen in game.
 - Lootr path compiled but untested (Lootr not in the dev run).
 - Real data has no entranceSide yet; door side is hashed. Stair cores in large real buildings often fall back to
   ladders; a U-shaped stair would fit better.
-- Windows are a per-style grid; no shutters or balconies yet. Special OBJEKTART (7 tank, 9 wall, 10 covered bridge)
-  are windowless one-floor PLAIN halls; a wall or bridge deserves its own shape.
+- Windows are a per-style grid; no shutters or balconies yet. A tank uses its bbox ellipse, not the real outline.
 
 ## Contract proposals
 None. No contract file was changed.
@@ -95,4 +114,4 @@ None. No contract file was changed.
 ## Files outside owned paths
 - `mod/src/main/resources/data/swissworld/tags/item/loot_denylist.json`: the datapack-extendable denylist tag for
   auto-mixed loot (the brief asks for a denylist; a tag lives under `tags/`, not `loot_table/`).
-- `mod/src/test/java/ch/bissbert/swissworld/gen/building/BuildingPlanTest.java`: tests for the planner.
+- `mod/src/test/java/ch/bissbert/swissworld/gen/building/BuildingPlanTest.java`, `BuildingSweepTest.java`: tests.

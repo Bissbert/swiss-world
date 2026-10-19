@@ -4,11 +4,16 @@ import ch.bissbert.swissworld.cell.SwdCell;
 
 /** Building archetype (PLAN §8), chosen from GWR class/period, OBJEKTART and altitude, deterministic per gid. */
 public enum Style {
-    CHALET, TOWN_HOUSE, OLD_TOWN, MODERN, BARN, CHURCH, INDUSTRIAL, HOTEL, COMMERCIAL, PLAIN;
+    CHALET, TOWN_HOUSE, OLD_TOWN, MODERN, BARN, CHURCH, INDUSTRIAL, HOTEL, COMMERCIAL, TANK, GREENHOUSE, WALL, BRIDGE;
 
-    /** One open hall per building instead of storeys and rooms. */
+    /** One open hall (or none) per building instead of storeys and rooms. */
     public boolean hall() {
-        return this == BARN || this == CHURCH || this == INDUSTRIAL || this == PLAIN;
+        return this == BARN || this == CHURCH || this == INDUSTRIAL || this == GREENHOUSE || empty();
+    }
+
+    /** Structures without door, interior or loot: tank (hollow), large wall (solid), covered bridge (walk-through). */
+    public boolean empty() {
+        return this == TANK || this == WALL || this == BRIDGE;
     }
 
     public boolean residential() {
@@ -24,8 +29,13 @@ public enum Style {
         int k = b.gwrClass(), period = b.gwrPeriod();
         long gid = b.gid();
         if (b.objektart() == 3 || k == 1272) return CHURCH;
-        if (b.objektart() == 7 || b.objektart() == 9 || b.objektart() == 10) return PLAIN;
-        if (b.objektart() == 8) return INDUSTRIAL;
+        switch (b.objektart()) {
+            case 7: return TANK;
+            case 8: return GREENHOUSE;
+            case 9: return WALL;
+            case 10: return BRIDGE;
+            default: break;
+        }
         if (k == 1271) return BARN;
         if (k == 1241 || k == 1242 || k == 1251 || k == 1252) return INDUSTRIAL;
         if (k == 1211 || k == 1212) return HOTEL;

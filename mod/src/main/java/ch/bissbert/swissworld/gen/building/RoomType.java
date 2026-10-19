@@ -46,7 +46,7 @@ public enum RoomType {
             case CHURCH -> CHURCH;
             case BARN -> BARN;
             case INDUSTRIAL -> WORKSHOP;
-            case PLAIN -> STORAGE;
+            case GREENHOUSE, TANK, WALL, BRIDGE -> STORAGE;
             case COMMERCIAL -> floor == 0 ? SHOP : OFFICE;
             case HOTEL -> floor > 0 ? HOTEL : idx == 0 ? LIVING : KITCHEN;
             default -> {

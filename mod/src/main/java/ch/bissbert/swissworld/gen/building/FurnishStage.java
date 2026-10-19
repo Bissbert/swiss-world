@@ -45,7 +45,11 @@ public final class FurnishStage implements GenStage {
         int f = p.floors().size();
         if (s.ladder()) {
             BlockState ladder = Blocks.LADDER.defaultBlockState().setValue(LadderBlock.FACING, Put.mc(s.dir()));
-            for (int y = p.floorY(0) + 1; y <= p.floorY(f - 1); y++) put.set(s.x(), y, s.z(), ladder);
+            int bx = s.x() - s.dir().dx, bz = s.z() - s.dir().dz;
+            for (int y = p.floorY(0) + 1; y <= p.floorY(f - 1); y++) {
+                put.set(s.x(), y, s.z(), ladder);
+                if (p.pillar(bx, bz)) put.set(bx, y, bz, pal.partition().defaultBlockState());
+            }
             return;
         }
         BlockState step = Put.with(pal.chair().defaultBlockState(), StairBlock.FACING, Put.mc(s.dir()));

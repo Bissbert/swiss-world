@@ -36,7 +36,7 @@ public record Palette(Block wall, Block base, Block foundation, Block floor, Blo
                     Blocks.POLISHED_ANDESITE_STAIRS, Blocks.SMOOTH_STONE_SLAB, Blocks.GRAY_CONCRETE,
                     Blocks.GLASS_PANE, Blocks.BIRCH_DOOR, Blocks.WHITE_CONCRETE, Blocks.POLISHED_ANDESITE_STAIRS,
                     Blocks.BIRCH_STAIRS, Blocks.BIRCH_FENCE, Blocks.SMOOTH_STONE_SLAB, bed);
-            case BARN, PLAIN -> new Palette(v == 0 ? Blocks.DARK_OAK_PLANKS : Blocks.SPRUCE_PLANKS,
+            case BARN -> new Palette(v == 0 ? Blocks.DARK_OAK_PLANKS : Blocks.SPRUCE_PLANKS,
                     Blocks.COBBLESTONE, Blocks.COBBLESTONE, Blocks.COARSE_DIRT, Blocks.SPRUCE_STAIRS,
                     Blocks.SPRUCE_SLAB, Blocks.SPRUCE_PLANKS, Blocks.SPRUCE_FENCE, Blocks.SPRUCE_DOOR,
                     Blocks.SPRUCE_PLANKS, Blocks.COBBLESTONE_STAIRS, Blocks.SPRUCE_STAIRS, Blocks.SPRUCE_FENCE,
@@ -50,6 +50,25 @@ public record Palette(Block wall, Block base, Block foundation, Block floor, Blo
                     Blocks.STONE, Blocks.SMOOTH_STONE, Blocks.POLISHED_ANDESITE_STAIRS, Blocks.SMOOTH_STONE_SLAB,
                     Blocks.POLISHED_ANDESITE, Blocks.GLASS_PANE, Blocks.SPRUCE_DOOR, Blocks.GRAY_CONCRETE,
                     Blocks.STONE_STAIRS, Blocks.SPRUCE_STAIRS, Blocks.SPRUCE_FENCE, Blocks.SMOOTH_STONE_SLAB, bed);
+            case TANK -> new Palette(v == 0 ? Blocks.LIGHT_GRAY_CONCRETE : Blocks.WHITE_CONCRETE, Blocks.GRAY_CONCRETE,
+                    Blocks.STONE, Blocks.SMOOTH_STONE, Blocks.STONE_STAIRS, Blocks.SMOOTH_STONE_SLAB, Blocks.SMOOTH_STONE,
+                    Blocks.GLASS_PANE, Blocks.IRON_DOOR, Blocks.GRAY_CONCRETE, Blocks.STONE_STAIRS, Blocks.STONE_STAIRS,
+                    Blocks.IRON_BARS, Blocks.SMOOTH_STONE_SLAB, bed);
+            case GREENHOUSE -> new Palette(Blocks.GLASS, Blocks.STONE_BRICKS, Blocks.STONE_BRICKS, Blocks.COARSE_DIRT,
+                    Blocks.STONE_BRICK_STAIRS, Blocks.SMOOTH_STONE_SLAB, Blocks.GLASS, Blocks.GLASS_PANE,
+                    Blocks.BIRCH_DOOR, Blocks.SPRUCE_PLANKS, Blocks.STONE_BRICK_STAIRS, Blocks.SPRUCE_STAIRS,
+                    Blocks.SPRUCE_FENCE, Blocks.SPRUCE_SLAB, bed);
+            case WALL -> new Palette(v == 0 ? Blocks.STONE_BRICKS : v == 1 ? Blocks.COBBLESTONE : Blocks.STONE,
+                    Blocks.STONE_BRICKS, Blocks.COBBLESTONE, Blocks.STONE_BRICKS, Blocks.STONE_BRICK_STAIRS,
+                    Blocks.STONE_BRICK_SLAB, Blocks.STONE_BRICKS, Blocks.GLASS_PANE, Blocks.OAK_DOOR,
+                    Blocks.STONE_BRICKS, Blocks.STONE_BRICK_STAIRS, Blocks.STONE_BRICK_STAIRS, Blocks.COBBLESTONE_WALL,
+                    Blocks.STONE_BRICK_SLAB, bed);
+            case BRIDGE -> new Palette(Blocks.SPRUCE_PLANKS, Blocks.STRIPPED_SPRUCE_LOG, Blocks.COBBLESTONE,
+                    Blocks.SPRUCE_PLANKS, v == 0 ? Blocks.DARK_OAK_STAIRS : Blocks.SPRUCE_STAIRS,
+                    v == 0 ? Blocks.DARK_OAK_SLAB : Blocks.SPRUCE_SLAB,
+                    v == 0 ? Blocks.DARK_OAK_PLANKS : Blocks.SPRUCE_PLANKS, Blocks.SPRUCE_FENCE, Blocks.SPRUCE_DOOR,
+                    Blocks.SPRUCE_PLANKS, Blocks.SPRUCE_STAIRS, Blocks.SPRUCE_STAIRS, Blocks.SPRUCE_FENCE,
+                    Blocks.SPRUCE_SLAB, bed);
             case COMMERCIAL -> new Palette(v == 0 ? Blocks.LIGHT_GRAY_CONCRETE : Blocks.SMOOTH_SANDSTONE,
                     Blocks.POLISHED_ANDESITE, Blocks.STONE_BRICKS, Blocks.POLISHED_ANDESITE, Blocks.GRANITE_STAIRS,
                     Blocks.GRANITE_SLAB, Blocks.POLISHED_GRANITE, Blocks.GLASS_PANE, Blocks.BIRCH_DOOR,
