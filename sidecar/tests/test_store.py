@@ -64,3 +64,34 @@ def test_dev_area_includes_origin_column():
     from swissdata import stac
 
     assert stac.in_dev_area(2626, 1170) and not stac.in_dev_area(2626, 1163) and not stac.in_dev_area(2700, 1170)
+
+
+def test_write_many_records_all_with_one_manifest_rewrite(tmp_path, monkeypatch):
+    store = Store(cfg_for(tmp_path))
+    rewrites = []
+    update = store.manifest.file.update
+    monkeypatch.setattr(store.manifest.file, "update", lambda: rewrites.append(1) or update())
+    store.write_many([(1, 1, b"a" * 3, {"alti": "a"}), (2, 2, b"b" * 4, {"alti": "b"})])
+    assert rewrites == [1]
+    assert store.is_ready(1, 1) and store.manifest.entry(2, 2)["bytes"] == 4 and store.bytes == 7
+
+
+def test_lru_json_is_debounced_until_flush(tmp_path):
+    import json
+
+    store = Store(cfg_for(tmp_path))
+    store.write(1, 1, b"x", {})  # first write persists
+    store.write(2, 2, b"x", {})  # within LRU_FLUSH_S: not yet
+    lru = lambda: json.loads((tmp_path / "store" / "lru.json").read_text())["access"]  # noqa: E731
+    assert set(lru()) == {"1_1"}
+    store.flush()
+    assert set(lru()) == {"1_1", "2_2"}
+
+
+def test_write_without_touch_keeps_access_time(tmp_path):
+    store = Store(cfg_for(tmp_path, cap=20))
+    store.write(1, 1, b"x" * 10, {})
+    store.write(2, 2, b"x" * 10, {})
+    store.write_many([(1, 1, b"y" * 10, {})], touch=False)  # a rebuild: (1, 1) stays the oldest
+    store.write(3, 3, b"x" * 10, {})
+    assert not store.is_ready(1, 1) and store.is_ready(2, 2)

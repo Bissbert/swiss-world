@@ -1,4 +1,4 @@
-# NOTES — sidecar-core (Milestone 1)
+# NOTES — sidecar-core (Milestone 1, rebuild)
 
 Decisions made autonomously, deviations from the brief, and contract proposals. Nothing in a contract file
 was changed.
@@ -127,6 +127,8 @@ Production stores start empty, so this is dev-only. The fix is the reset describ
   `SWISSDATA_STORE_CAP_BYTES`.
 - `sidecar/pyproject.toml`: pytest markers `network`/`slow`, with `-m 'not network'` by default.
 - `sidecar/.dockerignore`: new.
+- `sidecar/swissdata/buildings.py`, `gwr.py` (sidecar-buildings): the cache temp file name carries pid and
+  thread id, since parallel rebuild workers may write the same sheet/GWR cache at once. No logic change.
 
 ## Shared store
 
@@ -153,3 +155,50 @@ Production stores start empty, so this is dev-only. The fix is the reset describ
   556.5–4,273.5 m, with no NaN.
 - **No border cells** in the test bbox, so no INSD was emitted there. The INSD path is covered by the
   network test on 2610_1269 (Basel/Allschwil).
+
+## Rebuild (`python -m swissdata.rebuild`)
+
+`python -m swissdata.rebuild (--bbox E0 N0 E1 N1 | --all) [--workers N] [--dry-run]`, run from `sidecar/`.
+
+- **Selection:** live manifest entries only. Evicted cells are rebuilt on demand by the server from their
+  kept sources. The bbox is inclusive in km. With the dev guard on, a cell outside the dev area is logged and
+  skipped, never written. Order: mod-core's origin area (2626–2640 × 1164–1176) first, then the rest by key.
+- **Pins:** each cell is assembled with its manifest `sources` as `pinned`. `build.merge_sources(old, new)`
+  keeps every old key, adds new ones (`tlm`, `bathy`, `buildings`, `gwr`), which pins them, and raises
+  `PinChanged` if a builder returns a different value for an existing key. Such a cell fails and is left
+  untouched. The server's `build_cell` uses the same merge, so a rebuild of an evicted cell cannot drop keys.
+- **Atomicity:** worker *processes* assemble and encode (voxelising and GDAL are CPU-bound; threads mostly
+  serialised on the GIL). Only the main process writes:
+  - each file goes to a unique temp name in `cells/`, is fsynced and then renamed over the old one, so the mod
+    sees the old or the new cell, never a partial one;
+  - the manifest entry is replaced in batches (25 cells or 5 s). Until its batch lands, a cell is still ready
+    with its old entry; `bytes` in that entry may briefly be stale.
+  - The first cell is built in the main process, so on-disk caches (GWR table, sheets) are warm before the
+    pool starts. The temp names of those caches (buildings, gwr) now carry pid and thread id, because
+    workers may race to write the same cache (files outside owned paths, see below).
+- **LRU:** a rebuild writes with `touch=False`, so access times and the `/generated` marks stay as they were
+  (otherwise origin-first order would make the origin area the first eviction victims).
+- **Do not run it next to a server that builds the same cells.** Nothing breaks (the last manifest write
+  wins per cell, both entries are valid), but work is wasted, and the server's in-memory LRU state would
+  overwrite lru.json on its next flush.
+
+### Batched writes (task 3)
+
+- `Manifest.record_many` / `Store.write_many`: one locked rewrite of `manifest.json` per batch instead of one
+  per cell. The server still records per cell, because readiness needs the entry.
+- `lru.json` is advisory and is now written at most every `LRU_FLUSH_S` = 10 s, plus on eviction,
+  `/generated`, server shutdown and `Store.flush()`. A crash loses at most 10 s of access times.
+
+### GWR pin
+
+The pinned `gwr` snapshot (`gwr_be_<date>`) stays reproducible only while the parsed table in
+`scratch/gwr/be.v1.npz` or `raw/public.madd.bfs.admin.ch/be.zip` is kept: upstream publishes a new snapshot
+daily and old ones cannot be re-downloaded. `BuildingsBuilder` does not check a pinned `gwr` against the table
+it loaded (sidecar-buildings' code; flagged, not changed).
+
+### TLM extract margin
+
+The TLM extract (`tlm.EXTRACT_BBOX` = 2626–2674 × 1152–1183 km) covers every store cell, but there is no
+margin west of E2626. Features lying entirely west of 2626 000 are missing for a builder that looks beyond
+the cell edge of column E2626. Features that cross into the cell are complete (bbox filter keeps whole
+features).

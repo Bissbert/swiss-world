@@ -72,3 +72,17 @@ def assemble(e_km: int, n_km: int, cfg: Config, pinned: dict[str, object] | None
         acc.sources.update(r.sources)
     cell = swd.Cell(e_km, n_km, layers=acc.layers, buildings=acc.buildings, spans=acc.spans)
     return cell, acc.sources
+
+
+class PinChanged(RuntimeError):
+    pass
+
+
+def merge_sources(pinned: dict[str, object] | None, new: dict[str, object]) -> dict[str, object]:
+    """Manifest sources after a rebuild: the old pins stay (a builder must not change one), new keys are added
+    and thereby pinned. Keys no builder re-emits (e.g. a former builder's) are kept as well."""
+    old = pinned or {}
+    changed = sorted(k for k in old.keys() & new.keys() if old[k] != new[k])
+    if changed:
+        raise PinChanged(f"builders changed pinned sources {changed}")
+    return {**old, **new}

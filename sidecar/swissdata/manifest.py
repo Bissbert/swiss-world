@@ -87,13 +87,19 @@ class Manifest:
         return e["sources"] if e else None
 
     def record(self, e_km: int, n_km: int, sources: dict, size: int) -> None:
+        self.record_many([(e_km, n_km, sources, size)])
+
+    def record_many(self, entries: list[tuple[int, int, dict, int]]) -> None:
+        """One locked rewrite for many cells (the file is rewritten whole, so batching is what keeps it cheap)."""
+        created = now_iso()
         with self.file.update() as m:
-            m["cells"][cell_key(e_km, n_km)] = {
-                "processor": f"swissdata {__version__}",
-                "created": now_iso(),
-                "sources": sources,
-                "bytes": size,
-            }
+            for e_km, n_km, sources, size in entries:
+                m["cells"][cell_key(e_km, n_km)] = {
+                    "processor": f"swissdata {__version__}",
+                    "created": created,
+                    "sources": sources,
+                    "bytes": size,
+                }
 
     def mark_evicted(self, keys: list[str]) -> None:
         with self.file.update() as m:

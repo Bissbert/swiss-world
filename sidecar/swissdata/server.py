@@ -179,7 +179,7 @@ class BuildQueue:
     def build_cell(self, e_km: int, n_km: int) -> None:
         pinned = self.store.manifest.sources(e_km, n_km)
         cell, sources = build.assemble(e_km, n_km, self.cfg, pinned, self.builders)
-        self.store.write(e_km, n_km, swd.encode(cell), sources)
+        self.store.write(e_km, n_km, swd.encode(cell), build.merge_sources(pinned, sources))
 
 
 # --- prefetch geometry ------------------------------------------------------------------------
@@ -256,6 +256,7 @@ def create_app(cfg: Config | None = None, builders=None, grid: np.ndarray | None
         log.info("swissdata %s: store %s (%d cells), %d workers", __version__, cfg.store, store.count, cfg.max_downloads)
         yield
         q.stop()
+        store.flush()
 
     app = FastAPI(title="swissdata", version=__version__, lifespan=lifespan)
 

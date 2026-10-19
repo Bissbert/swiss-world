@@ -11,6 +11,7 @@ from __future__ import annotations
 import csv
 import io
 import os
+import threading
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -88,7 +89,7 @@ def load_canton(cfg: Config, canton: str) -> GwrTable:
     with zipfile.ZipFile(fetch(cfg, URL.format(canton=canton))) as zf, zf.open(CSV_NAME) as f:
         table = parse_csv(io.TextIOWrapper(f, encoding="utf-8", newline=""))
     cache.parent.mkdir(parents=True, exist_ok=True)
-    tmp = cache.with_name(cache.name + ".tmp.npz")
+    tmp = cache.with_name(f"{cache.name}.{os.getpid()}-{threading.get_ident()}.tmp.npz")  # workers may race
     np.savez(tmp, egid=table.egid, category=table.category, klass=table.klass, period=table.period,
              floors=table.floors, snapshot=np.array(table.snapshot))
     os.replace(tmp, cache)

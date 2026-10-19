@@ -16,6 +16,7 @@ import os
 import re
 import struct
 import sys
+import threading
 import time
 import zlib
 from dataclasses import dataclass
@@ -240,7 +241,7 @@ def load_sheet(cfg: Config, item: str) -> Sheet:
     zip_path = fetch(cfg, ASSET_URL.format(item=item))
     sheet = parse_sheet(gdb_path(zip_path, item), item)
     cache.parent.mkdir(parents=True, exist_ok=True)
-    tmp = cache.with_name(cache.name + ".tmp.npz")
+    tmp = cache.with_name(f"{cache.name}.{os.getpid()}-{threading.get_ident()}.tmp.npz")  # workers may race
     np.savez(tmp, **{a: getattr(sheet, a) for a in Sheet._ARRAYS},
              odd_columns=sheet.odd_columns, orphan_roofs=sheet.orphan_roofs)
     os.replace(tmp, cache)
