@@ -1,7 +1,8 @@
 """OCLS/OELV/OFLG from swissTLM3D roads, railways, dams and traffic areas (docs/swd-format.md §5). Owner: sidecar-tlm.
 
 Every feature is buffered to its width and burnt once, in priority order (later wins): tunnels, areas,
-roads from minor to major, railways, dams, bridges. Bridges, tunnels and roads over dams carry their
+roads from minor to major, rail tunnel parts kept from areas and roads over them (`kept_rail_tunnels`), railways,
+dams, bridges. Bridges, tunnels and roads over dams carry their
 deck/floor height from the TLM line Z in OELV; dams carry their crest (highest Z) and the dam-body flag.
 Where a road bridge spans a ground-level railway, the column keeps the road deck (OCLS, OELV, bit0) and
 also the rail-centre bit2, which then means a rail on the terrain under the deck (see NOTES-sidecar-tlm.md).
@@ -52,6 +53,7 @@ PLATFORM_KIND, HARD_RUNWAYS = 4, (3, 6)  # TLM_VERKEHRSBAUTE_PLY: Perron; Hartbe
 MIN_HALF_WIDTH = 0.71  # keeps 1 m ways 8-connected when burnt at column centres
 EDGE_CLASSES = (MOTORWAY, MAIN, SECONDARY, MINOR, TRACK)
 MARGIN = 20.0
+ROAD_ALONG = 8.0  # m of a rail tunnel's centre line a road may cover; longer than the mod bores (TransportPlan.BORE_GAP)
 
 
 @dataclass
@@ -160,7 +162,34 @@ def collect(cfg, e_km: int, n_km: int) -> list[Feature]:
         elif p["OBJEKTART"] in HARD_RUNWAYS:
             areas.append(Feature(shapely.force_2d(g), RUNWAY))
 
-    return tunnels + areas + roads + rails + dams + bridges
+    return tunnels + areas + roads + kept_rail_tunnels(tunnels, areas, roads) + rails + dams + bridges
+
+
+def kept_rail_tunnels(tunnels: list[Feature], areas: list[Feature], roads: list[Feature]) -> list[Feature]:
+    """The parts of rail tunnels that later areas and roads would burn away, burnt again after them.
+
+    A tunnel lies under whatever is on the surface, so the burn order (tunnels first) lets a pitch, a car park or a
+    road over it take its columns, rail-centre bit and tunnel flag included, and the track breaks (Brienz station:
+    212 of 997 centre columns). The rail tunnel wins back its footprint under every area, footpath and flight of steps.
+    Under another road it wins back only its centre line (MIN_HALF_WIDTH), and only where the road covers more than
+    ROAD_ALONG metres of it: a shorter crossing keeps its deck, and the mod bores under it (TransportPlan.gap). The
+    decision is geometric (whole TLM features), so neighbouring cells agree on it.
+    """
+    out = []
+    for t in tunnels:
+        if t.rail_line is None:
+            continue
+        centre = shapely.force_2d(t.rail_line)
+        over = [f.geom for f in areas + roads if f.ocls in (FOOTPATH, STEPS) or f.ocls > STEPS]
+        long = [r.geom for r in roads if r.ocls < FOOTPATH and shapely.intersection(centre, r.geom).length > ROAD_ALONG]
+        if long:
+            over.append(shapely.intersection(shapely.union_all(long), centre.buffer(MIN_HALF_WIDTH, cap_style="flat")))
+        if not over:
+            continue
+        geom = shapely.intersection(t.geom, shapely.union_all(over))
+        if not geom.is_empty:
+            out.append(Feature(geom, t.ocls, t.flags, line=t.line, rail_line=t.rail_line))
+    return out
 
 
 def rasterise(feats: list[Feature], e_km: int, n_km: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
