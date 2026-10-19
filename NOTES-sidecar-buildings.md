@@ -100,6 +100,42 @@ No contract file was edited.
 - `sidecar/swissdata/build.py`: import of `BuildingsBuilder` and its registration in `BUILDERS` (required by the
   brief). `buildings.py` imports `LayerResult` lazily inside `build()` to avoid the circular import.
 
+## Round 2 (coordinator tasks after M1 merge)
+
+- **Rebased on main 0fa1630.** Reviewed sidecar-core's f5412de (2020-schema sheets: no GEBAEUDEEINHEIT, roofs
+  linked by UUID via `p.get("GEBAEUDEEINHEIT", p["UUID"])`): correct for both schemas (2021 roofs with an empty GE
+  still fall through to their own UUID / orphan path); no cache bump needed since 2020 sheets crashed before.
+- **Free-standing roofs are emitted** (task 3): roof skins whose unit has no Building_solid are grouped per unit
+  (GE, or the roof UUID on 2020 sheets) into one BTBL row: uuid/gid = smallest roof UUID of the unit, EGID = max
+  of the pieces, OBJEKTART from that roof, base/top from the skin; spans = the skin, **all part 1 (overhang)** —
+  a roof without walls, so the mod does not build walls under carports. Sheet cache bumped to v3.
+  - Over all 120 cached sheets: 476 such skins — Offenes Gebaeude 419, Gebaeude Einzelhaus 23, Flugdach 19,
+    none 15. Interlaken cell: +10 BTBL rows (969).
+  - **Contract proposal (swd-format.md, objektart table):** append `11 Offenes Gebaeude`, `12 Flugdach` (already
+    used by `buildings.OBJEKTART`; append-only, so existing cells stay valid).
+- **Soft GWR pin** (task 2): `gwr.load_pinned(cfg, pinned)` archives every snapshot it uses as
+  `<store>/gwr/<source id>.npz` (~7 MB, never deleted; the store only manages `cells/`). A pinned id whose
+  archive exists is used as is (no be.zip/scratch access); a missing one falls back to the newest archived
+  snapshot, logs a warning and returns the new id. `build.SOFT_PINS = {"gwr"}`: `merge_sources` lets the builder
+  replace such a key instead of raising `PinChanged` (file owned by sidecar-core, changed at the coordinator's
+  request). Tests: `test_gwr.py::test_soft_pin`, `::test_merge_sources_soft_gwr_pin`.
+  - **Proposal, swd-format.md §7 (after the `altiNeighbours` bullet):**
+    > - `sources.gwr`: the GWR snapshot used for the BTBL attributes, `gwr_<cantons>_<export date>`. This pin is
+    >   **soft**: upstream keeps no old snapshots, so the sidecar archives each one it uses under
+    >   `<store>/gwr/<id>.npz`. A rebuild uses the pinned snapshot while that archive exists; otherwise it uses
+    >   the newest archived snapshot and records its id. Only GWR attributes (gwrCategory, gwrClass, gwrPeriod,
+    >   floors) can change that way; geometry never does.
+    And in the store layout: `gwr/` — archived GWR snapshots; never evicted, must be kept with the store.
+
+## Orphan roofs (first analysis; superseded by round 2: now emitted)
+
+Roof_solid pieces whose GEBAEUDEEINHEIT matches no Building_solid: 37 on sheet 1208-43, 31 on 1228-21 (all have a
+GE; none of those GEs exists in any of the 4 neighbouring sheets either). Checked whether a cheap footprint match
+would recover them: only 3/37 and 3/31 intersect any body footprint, none overlaps a body by more than 50 %, and
+the median distance to the nearest body is 7.1 m / 3.9 m (max 44.5 m), median roof area 41–56 m².
+So these are **free-standing roofs without a body** (carports, shelters, canopies), not roofs of buildings that
+now get flat tops — no footprint match was added.
+
 ## Left for later
 
 - part 2 (annex), entranceSide (could come from the GWR entrance table `eingang_entree_entrata.csv`, which has

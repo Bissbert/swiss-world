@@ -4,12 +4,17 @@ Source: https://public.madd.bfs.admin.ch/<canton>.zip (housing-stat.ch "GWR publ
 regenerated daily. Licence: free use incl. commercial, attribution required
 ("Bundesamt für Statistik; Eidg. Gebäude- und Wohnungsregister").
 The zip is reduced once to a sorted EGID table (GKAT, GKLAS, GBAUP, GASTW) cached in scratch.
+
+Old snapshots cannot be re-downloaded, so every snapshot used is archived for good as
+`<store>/gwr/<source id>.npz` (~7 MB per canton). The manifest pin `gwr` is soft: a pinned snapshot is used while its
+archive exists; otherwise the newest archived snapshot is used and re-pinned, with a warning (`load_pinned`).
 """
 
 from __future__ import annotations
 
 import csv
 import io
+import logging
 import os
 import threading
 import zipfile
@@ -25,6 +30,9 @@ URL = "https://public.madd.bfs.admin.ch/{canton}.zip"
 CSV_NAME = "gebaeude_batiment_edificio.csv"
 CANTONS = ("be",)  # the test bbox lies in canton BE; extend (or switch to ch.zip) for the whole country
 _CACHE_VERSION = 1
+
+log = logging.getLogger(__name__)
+_SNAPSHOTS: dict[Path, GwrTable] = {}  # archived snapshots never change, so one read per process
 
 
 @dataclass
@@ -81,18 +89,26 @@ def _cache_path(cfg: Config, canton: str) -> Path:
     return cfg.scratch / "gwr" / f"{canton}.v{_CACHE_VERSION}.npz"
 
 
+def _read(path: Path) -> GwrTable:
+    z = np.load(path)
+    return GwrTable(z["egid"], z["category"], z["klass"], z["period"], z["floors"], str(z["snapshot"]))
+
+
+def _write(path: Path, table: GwrTable) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f"{path.name}.{os.getpid()}-{threading.get_ident()}.tmp.npz")  # workers may race
+    np.savez(tmp, egid=table.egid, category=table.category, klass=table.klass, period=table.period,
+             floors=table.floors, snapshot=np.array(table.snapshot))
+    os.replace(tmp, path)
+
+
 def load_canton(cfg: Config, canton: str) -> GwrTable:
     cache = _cache_path(cfg, canton)
     if cache.exists():
-        z = np.load(cache)
-        return GwrTable(z["egid"], z["category"], z["klass"], z["period"], z["floors"], str(z["snapshot"]))
+        return _read(cache)
     with zipfile.ZipFile(fetch(cfg, URL.format(canton=canton))) as zf, zf.open(CSV_NAME) as f:
         table = parse_csv(io.TextIOWrapper(f, encoding="utf-8", newline=""))
-    cache.parent.mkdir(parents=True, exist_ok=True)
-    tmp = cache.with_name(f"{cache.name}.{os.getpid()}-{threading.get_ident()}.tmp.npz")  # workers may race
-    np.savez(tmp, egid=table.egid, category=table.category, klass=table.klass, period=table.period,
-             floors=table.floors, snapshot=np.array(table.snapshot))
-    os.replace(tmp, cache)
+    _write(cache, table)
     return table
 
 
@@ -111,3 +127,34 @@ def load(cfg: Config, cantons: tuple[str, ...] = CANTONS) -> GwrTable:
 
 def source_id(table: GwrTable, cantons: tuple[str, ...] = CANTONS) -> str:
     return f"gwr_{'+'.join(cantons)}_{table.snapshot}"
+
+
+def snapshot_path(cfg: Config, sid: str) -> Path:
+    return cfg.store / "gwr" / f"{sid}.npz"
+
+
+def snapshots(cfg: Config, cantons: tuple[str, ...] = CANTONS) -> list[str]:
+    """Archived snapshot ids of `cantons`, oldest first (the ids end in the ISO export date)."""
+    prefix = f"gwr_{'+'.join(cantons)}_"
+    return sorted(p.stem for p in (cfg.store / "gwr").glob(f"{prefix}*.npz") if p.stem[len(prefix):][:1].isdigit())
+
+
+def _snapshot(cfg: Config, sid: str) -> GwrTable:
+    path = snapshot_path(cfg, sid)
+    if path not in _SNAPSHOTS:
+        _SNAPSHOTS[path] = _read(path)
+    return _SNAPSHOTS[path]
+
+
+def load_pinned(cfg: Config, pinned: str | None = None, cantons: tuple[str, ...] = CANTONS) -> tuple[GwrTable, str]:
+    """-> (table, source id). Soft pin: the pinned snapshot while its archive exists, else the newest one."""
+    if pinned and snapshot_path(cfg, pinned).exists():
+        return _snapshot(cfg, pinned), pinned
+    current = load(cfg, cantons)
+    sid = source_id(current, cantons)
+    if not snapshot_path(cfg, sid).exists():
+        _write(snapshot_path(cfg, sid), current)
+    newest = snapshots(cfg, cantons)[-1]
+    if pinned:
+        log.warning("GWR snapshot %s is not archived; using %s and re-pinning", pinned, newest)
+    return _snapshot(cfg, newest), newest

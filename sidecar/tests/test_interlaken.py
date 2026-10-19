@@ -1,6 +1,8 @@
 """Acceptance on real data: cell 2632_1170 (Interlaken). Skipped when the raw files are not cached; never
 touches the network (sheets are pinned, GWR comes from the cached be.zip)."""
 
+import dataclasses
+
 import numpy as np
 import pytest
 import shapely
@@ -23,7 +25,10 @@ pytestmark = pytest.mark.skipif(bool(_missing), reason=f"raw data not cached: {_
 
 
 @pytest.fixture(scope="module")
-def result():
+def result(tmp_path_factory):
+    # private store: the GWR snapshot archive lands there, not in the shared store
+    global cfg
+    cfg = dataclasses.replace(cfg, store=tmp_path_factory.mktemp("store"))
     r = buildings.BuildingsBuilder().build(E_KM, N_KM, cfg, build.LayerResult(), {"buildings": ITEMS})
     return r, [buildings.load_sheet(cfg, i) for i in ITEMS]
 
