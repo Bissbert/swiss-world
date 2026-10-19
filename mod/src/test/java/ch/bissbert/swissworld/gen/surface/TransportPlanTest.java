@@ -80,6 +80,40 @@ class TransportPlanTest {
         return v.y0 - 1;
     }
 
+    /** Playtest 17.12.05: a sloped T junction of class-1 roads had uneven slab steps and kerb walls beside it. */
+    @Test
+    void sloppedJunctionHasHalfStepsAndNoKerbWalls() {
+        SwdCell c = Cells.flat(600);
+        Voxels.terrain(c, (x, z) -> 600 - 0.1 * z + 0.15 * x);
+        for (int z = -40; z <= 40; z++) {
+            for (int x = 0; x <= 5; x++) Cells.overlay(c, x, z, 1, x == 0 || x == 5 ? ColumnGrid.EDGE : 0, Double.NaN);
+        }
+        for (int x = 6; x <= 40; x++) {
+            for (int z = 0; z <= 5; z++) Cells.overlay(c, x, z, 1, z == 0 || z == 5 ? ColumnGrid.EDGE : 0, Double.NaN);
+        }
+        Voxels v = new Voxels(c, -8, -30, 34, 30, -1440, -1370);
+        List<String> bad = new ArrayList<>();
+        for (int x = -8; x <= 34; x++) {
+            for (int z = -30; z <= 30; z++) {
+                int col = v.col(x, z);
+                if (!v.wayCol[col]) continue;
+                for (int y = (int) Math.ceil(v.walk(x, z)); y < -1370; y++) {
+                    if (v.at(x, y, z) != B.AIR) bad.add("on the road at " + x + "," + y + "," + z + ": " + v.at(x, y, z));
+                }
+                for (int[] d : new int[][] {{1, 0}, {-1, 0}, {0, 1}, {0, -1}}) {
+                    int nx = x + d[0], nz = z + d[1];
+                    if (!v.in(nx, v.y0, nz)) continue;
+                    if (v.wayCol[v.col(nx, nz)]) {
+                        if (Math.abs(v.walk(x, z) - v.walk(nx, nz)) > 0.5) bad.add("step " + x + "," + z + " -> " + nx + "," + nz);
+                    } else if (topSolid(v, nx, nz) >= v.walk(x, z) + 0.5) {
+                        bad.add("kerb wall beside " + x + "," + z + " at " + nx + "," + nz);
+                    }
+                }
+            }
+        }
+        assertTrue(bad.isEmpty(), () -> "junction faults: " + bad);
+    }
+
     @Test
     void roadCrossesAStreamOnACulvert() {
         SwdCell c = Cells.flat(600);

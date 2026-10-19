@@ -137,4 +137,34 @@ class WaterPlanTest {
         assertTrue(stones.isEmpty(), () -> "stone in the river: " + stones);
         assertTrue(unstable.isEmpty(), () -> "water that would move: " + unstable);
     }
+
+    /** Playtest 17.16.32: a 1-wide stream in a wide stone bed showed staircase banks. */
+    @Test
+    void streamInAWideBedHasFlatShoresAndNoTerraces() {
+        SwdCell c = Cells.flat(600);
+        for (int z = -30; z <= 30; z++) {
+            for (int x = -4; x <= 4; x++) Cells.ground(c, x, z, Math.abs(x) <= 3 ? 596 : 598);
+            Cells.ground(c, 0, z, 595.5);
+            Cells.water(c, 0, z, 597.2, 3);
+        }
+        Voxels v = new Voxels(c, -10, -10, 10, 10, -1430, -1380);
+        for (int z = -8; z <= 8; z++) {
+            int surface = top(v, 0, z);
+            assertTrue(Voxels.water(v.at(0, surface, z)), "water at 0," + z);
+            // across the bed (the fixture's own 2 m bank beyond it is terrain, not water work)
+            for (int x = -4; x <= 3; x++) {
+                int a = top(v, x, z), b = top(v, x + 1, z);
+                assertTrue(Math.abs(a - b) <= 1, "terrace between " + x + " and " + (x + 1) + " at z " + z + ": " + a + " vs " + b);
+            }
+            // the shore beside the stream is level with it: no pit, no wall
+            for (int x : new int[] {-2, -1, 1, 2}) assertEquals(surface, top(v, x, z), "shore " + x + "," + z);
+        }
+        assertTrue(v.stonesInWater(1).isEmpty());
+        assertTrue(v.unstableWater(1).isEmpty(), () -> "water that would move: " + v.unstableWater(1));
+    }
+
+    private static int top(Voxels v, int x, int z) {
+        for (int y = v.y0 + v.ny - 1; y >= v.y0; y--) if (v.at(x, y, z) != Voxels.B.AIR) return y;
+        return v.y0 - 1;
+    }
 }
