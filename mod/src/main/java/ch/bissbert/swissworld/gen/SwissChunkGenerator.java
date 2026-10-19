@@ -13,12 +13,11 @@ import ch.bissbert.swissworld.gen.surface.VegetationStage;
 import ch.bissbert.swissworld.gen.surface.WaterStage;
 import com.mojang.serialization.MapCodec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import net.minecraft.Util;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.WorldGenRegion;
 import net.minecraft.world.level.LevelHeightAccessor;
@@ -26,6 +25,7 @@ import net.minecraft.world.level.NoiseColumn;
 import net.minecraft.world.level.StructureManager;
 import net.minecraft.world.level.biome.BiomeManager;
 import net.minecraft.world.level.biome.BiomeSource;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.ChunkGenerator;
@@ -36,9 +36,13 @@ import net.minecraft.world.level.levelgen.blending.Blender;
 
 /**
  * Generates the Switzerland dimension from .swd cells. Owner: mod-core.
- * Skeleton: loads the chunk's cells that already exist in the store (async), then runs the pipeline.
- * Missing cells generate as ocean. M1 (mod-core) asks the sidecar for missing cells and waits for them instead,
- * so a placeholder is never generated or saved inside coverage.
+ *
+ * <p>{@link #fillFromNoise} returns a future that completes only when every cell the chunk touches is loaded or known
+ * to be ocean ({@link CellCache}); a missing cell is requested from the sidecar and the chunk simply stays pending.
+ * Nothing blocks a thread meanwhile, and the pipeline then runs on the worldgen background executor, never on the
+ * cache's I/O threads. Biomes are filled here too, from the same cells (the BIOMES step is a no-op), so they are
+ * never baked from a guess. At shutdown pending chunks complete empty and are downgraded on save
+ * ({@link ch.bissbert.swissworld.world.AbortedChunks}).
  */
 public final class SwissChunkGenerator extends ChunkGenerator {
     public static final MapCodec<SwissChunkGenerator> CODEC = RecordCodecBuilder.mapCodec(i -> i.group(
@@ -68,27 +72,49 @@ public final class SwissChunkGenerator extends ChunkGenerator {
     }
 
     @Override
+    public CompletableFuture<ChunkAccess> createBiomes(RandomState randomState, Blender blender, StructureManager structureManager, ChunkAccess chunk) {
+        // filled in fillFromNoise once the cells are there
+        return CompletableFuture.completedFuture(chunk);
+    }
+
+    @Override
     public CompletableFuture<ChunkAccess> fillFromNoise(Blender blender, RandomState randomState, StructureManager structureManager, ChunkAccess chunk) {
-        SwissCoords coords = SwissRuntime.coords();
+        // lock before reading the origin, so no chunk can be generated with an origin that changes afterwards
+        SwissCoords coords = SwissRuntime.lockOrigin();
         CellCache cache = SwissRuntime.cells();
         int x0 = chunk.getPos().getMinBlockX(), z0 = chunk.getPos().getMinBlockZ();
-        Map<Long, CompletableFuture<Optional<SwdCell>>> needed = new HashMap<>();
+        Map<Long, CompletableFuture<CellCache.Result>> needed = new HashMap<>();
         for (int x : new int[] {x0, x0 + 15}) {
             for (int z : new int[] {z0, z0 + 15}) {
                 int e = SwissCoords.cellKm(coords.east(x)), n = SwissCoords.cellKm(coords.north(z));
                 needed.computeIfAbsent(CellCache.key(e, n), k -> cache.get(e, n));
             }
         }
-        List<CompletableFuture<Optional<SwdCell>>> futures = new ArrayList<>(needed.values());
-        return CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new)).thenApply(v -> {
+        CompletableFuture<Void> all = CompletableFuture.allOf(needed.values().toArray(CompletableFuture[]::new));
+        boolean waits = !all.isDone();
+        if (waits) SwissRuntime.PENDING_CHUNKS.incrementAndGet();
+        return all.thenApplyAsync(v -> {
+            if (waits) SwissRuntime.PENDING_CHUNKS.decrementAndGet();
             Map<Long, SwdCell> cells = new HashMap<>();
-            for (var f : needed.entrySet()) f.getValue().join().ifPresent(c -> cells.put(f.getKey(), c));
+            for (var f : needed.entrySet()) {
+                CellCache.Result r = f.getValue().join();
+                if (r.status() == CellCache.Status.ABORTED) {
+                    SwissRuntime.markAborted(chunk.getPos());
+                    return chunk;
+                }
+                if (r.cell() != null) cells.put(f.getKey(), r.cell());
+            }
+            long t0 = System.nanoTime();
             GenContext ctx = new GenContext(chunk, coords, (e, n) -> cells.get(CellCache.key(e, n)));
+            if (getBiomeSource() instanceof SwissBiomeSource biomes) {
+                chunk.fillBiomesFromNoise(biomes.resolver(ctx), randomState.sampler());
+            }
             for (GenStage stage : PIPELINE) {
                 stage.apply(ctx);
             }
+            SwissRuntime.recordChunk(System.nanoTime() - t0);
             return chunk;
-        });
+        }, Util.backgroundExecutor());
     }
 
     @Override
@@ -119,22 +145,45 @@ public final class SwissChunkGenerator extends ChunkGenerator {
         return -2032;
     }
 
+    /** Non-blocking: from the cell if it is in memory, else ocean (coverage outside, or not loaded yet). */
     @Override
     public int getBaseHeight(int x, int z, Heightmap.Types type, LevelHeightAccessor level, RandomState random) {
-        // non-blocking: only cells already in memory; mod-core refines this (water, overlays)
         SwissCoords c = SwissRuntime.coords();
         long e = c.east(x), n = c.north(z);
         SwdCell cell = SwissRuntime.cells().getIfPresent(SwissCoords.cellKm(e), SwissCoords.cellKm(n));
-        if (cell == null || !cell.inside(SwissCoords.dx(e), SwissCoords.dz(n))) return SEA_LEVEL_Y + 1;
-        return (int) Math.floor(SwissCoords.toY(cell.terrain(SwissCoords.dx(e) + 0.5, SwissCoords.dz(n) + 0.5))) + 1;
+        TerrainStage.Column col = TerrainStage.column(cell, SwissCoords.dx(e), SwissCoords.dz(n));
+        if (type == Heightmap.Types.OCEAN_FLOOR || type == Heightmap.Types.OCEAN_FLOOR_WG) return col.top() + 1;
+        return Math.max(col.highest(), waterTop(cell, SwissCoords.dx(e), SwissCoords.dz(n))) + 1;
     }
 
     @Override
     public NoiseColumn getBaseColumn(int x, int z, LevelHeightAccessor height, RandomState random) {
-        return new NoiseColumn(height.getMinBuildHeight(), new BlockState[0]);
+        SwissCoords c = SwissRuntime.coords();
+        long e = c.east(x), n = c.north(z);
+        int dx = SwissCoords.dx(e), dz = SwissCoords.dz(n);
+        SwdCell cell = SwissRuntime.cells().getIfPresent(SwissCoords.cellKm(e), SwissCoords.cellKm(n));
+        TerrainStage.Column col = TerrainStage.column(cell, dx, dz);
+        int minY = height.getMinBuildHeight();
+        int top = Math.min(height.getMaxBuildHeight() - 1, Math.max(col.highest(), waterTop(cell, dx, dz)));
+        BlockState[] states = new BlockState[Math.max(0, top - minY + 1)];
+        BlockState water = Blocks.WATER.defaultBlockState();
+        for (int y = minY; y <= top; y++) {
+            BlockState s = y == minY ? Blocks.BEDROCK.defaultBlockState() : col.at(y);
+            states[y - minY] = s != null ? s : water;
+        }
+        return new NoiseColumn(minY, states);
+    }
+
+    /** Top water block from WLVL (placed by WaterStage), or Integer.MIN_VALUE. */
+    private static int waterTop(SwdCell cell, int dx, int dz) {
+        if (cell == null) return Integer.MIN_VALUE;
+        double w = cell.water(dx, dz);
+        return Double.isNaN(w) ? Integer.MIN_VALUE : (int) Math.floor(SwissCoords.toY(w));
     }
 
     @Override
     public void addDebugScreenInfo(List<String> info, RandomState random, BlockPos pos) {
+        SwissCoords c = SwissRuntime.coords();
+        info.add("Swiss: E " + c.east(pos.getX()) + " N " + c.north(pos.getZ()) + " h " + Math.round(SwissCoords.toMetres(pos.getY())) + " m");
     }
 }

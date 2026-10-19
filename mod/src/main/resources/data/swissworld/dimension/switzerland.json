@@ -3,8 +3,7 @@
   "generator": {
     "type": "swissworld:swiss",
     "biome_source": {
-      "type": "swissworld:swiss",
-      "default_biome": "minecraft:plains"
+      "type": "swissworld:swiss"
     }
   }
 }
