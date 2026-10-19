@@ -13,13 +13,14 @@ class ArrivalTest {
     void keepsWaitingWhileProgressing() {
         int start = 1000;
         // two minutes in, but cells arrived a moment ago: no timeout (the old fixed 120 s limit would have fired)
-        assertFalse(Arrival.givesUp(start + 2 * 60 * 20 + 1, start, start + 2 * 60 * 20 - 100, false));
+        assertNull(Arrival.givesUp(start + 2 * 60 * 20 + 1, start, start + 2 * 60 * 20 - 100, false));
         // 60 s without anything: give up
-        assertTrue(Arrival.givesUp(start + Arrival.NO_PROGRESS_TICKS + 1, start, start, false));
+        assertEquals("no progress for 60 s", Arrival.givesUp(start + Arrival.NO_PROGRESS_TICKS + 1, start, start, false));
         // ... unless the sidecar still reports a build in progress
-        assertFalse(Arrival.givesUp(start + Arrival.NO_PROGRESS_TICKS + 1, start, start, true));
-        // but never beyond the hard cap
-        assertTrue(Arrival.givesUp(start + Arrival.HARD_CAP_TICKS + 1, start, start + Arrival.HARD_CAP_TICKS, true));
+        assertNull(Arrival.givesUp(start + Arrival.NO_PROGRESS_TICKS + 1, start, start, true));
+        // but never beyond the hard cap, with its own reason
+        assertEquals("still not ready after 10 min",
+                Arrival.givesUp(start + Arrival.HARD_CAP_TICKS + 1, start, start + Arrival.HARD_CAP_TICKS, true));
     }
 
     @Test

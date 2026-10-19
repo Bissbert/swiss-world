@@ -214,7 +214,7 @@ None. The real cells copied from the shared store (layers TERR/SURF/WLVL/WKND/OC
 
 - `/swiss`, `goto E N` and `goto <place>` share `travel`/`tick`. No fixed timeout any more (`Arrival`): the wait goes
   on while cells for the 3x3 target chunks arrive, chunks generate, or the sidecar's `/status` counters move or show a
-  build in progress (polled every 5 s); it gives up after 60 s without any of that, after 10 min in all, on
+  build in progress (polled every 5 s); it gives up after 60 s without any of that, after 10 min in all (own message; a cap because the signals are global, other players and prefetches move them too), on
   `/swiss back`, or when the player changes dimension. Action bar: "Building terrain… 1/4 cells", then "Generating
   terrain… 6/9 chunks".
 - Landing: the target column is open ground only if no building span covers it, the top (MOTION_BLOCKING_NO_LEAVES)

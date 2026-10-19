@@ -293,7 +293,8 @@ public final class SwissCommands {
                 t.lastProgressTick = now;
             }
             boolean moved = p != null && p.level().dimension() != t.from;
-            boolean timeout = Arrival.givesUp(now, t.startTick, t.lastProgressTick, sidecarBusy);
+            String why = Arrival.givesUp(now, t.startTick, t.lastProgressTick, sidecarBusy);
+            boolean timeout = why != null;
             if (p == null || chunk != null || timeout || moved || swiss == null) {
                 it.remove();
                 if (swiss != null) swiss.getChunkSource().removeRegionTicket(ENTER_TICKET, t.chunk, 1, t.chunk);
@@ -317,8 +318,7 @@ public final class SwissCommands {
                 p.displayClientMessage(Component.empty(), true);
                 p.sendSystemMessage(Component.literal(arriving ? "Welcome to Switzerland. " : "").append(whereText(p)));
             } else if (timeout) {
-                p.sendSystemMessage(Component.literal("The terrain there is not ready yet: no progress for "
-                        + Arrival.NO_PROGRESS_TICKS / 20 + " s"
+                p.sendSystemMessage(Component.literal("The terrain there is not ready yet: " + why
                         + (SwissRuntime.cells().sidecarDown() ? " (the data sidecar is not reachable)" : "")
                         + ". Try again in a while.").withStyle(ChatFormatting.RED));
             } else if ((now - t.startTick) % Arrival.BAR_TICKS == 0) {

@@ -27,9 +27,13 @@ final class Arrival {
         boolean test(int x, int z);
     }
 
-    static boolean givesUp(int now, int start, int lastProgress, boolean sidecarBusy) {
-        if (now - start > HARD_CAP_TICKS) return true;
-        return now - lastProgress > NO_PROGRESS_TICKS && !sidecarBusy;
+    /**
+     * Why the wait ends now ("no progress for 60 s", "still not ready after 10 min"), or null to keep waiting. The cap
+     * exists because the progress signals are global: other players' chunks and prefetches move them too.
+     */
+    static String givesUp(int now, int start, int lastProgress, boolean sidecarBusy) {
+        if (now - start > HARD_CAP_TICKS) return "still not ready after " + HARD_CAP_TICKS / 1200 + " min";
+        return now - lastProgress > NO_PROGRESS_TICKS && !sidecarBusy ? "no progress for " + NO_PROGRESS_TICKS / 20 + " s" : null;
     }
 
     /** "Building terrain… 1/4 cells", then "Generating terrain… 6/9 chunks". */
