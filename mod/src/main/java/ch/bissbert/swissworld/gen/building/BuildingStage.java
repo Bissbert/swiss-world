@@ -279,6 +279,17 @@ public final class BuildingStage implements GenStage {
                 }
             }
         }
+        // and around the landing itself (a door in the corner of a stepped outline stands in a ring of eaves)
+        for (int dz = -2; dz <= 2; dz++) {
+            for (int dx = -2; dx <= 2; dx++) {
+                if (Math.abs(dx) + Math.abs(dz) == 4) continue;
+                int x = d.x() + d.out().dx + dx, z = d.z() + d.out().dz + dz;
+                double h = view.terrain(x, z);
+                if (Double.isNaN(h) || p.cols().state(x, z) != Columns.EAVE || view.foreign(x, z, p.gid())) continue;
+                int g = Math.max((int) Math.floor(SwissCoords.toY(h)), ys.length > 0 ? ys[0] : y0);
+                for (int a = g + 1; a <= g + 3; a++) put.set(x, a, z, AIR);
+            }
+        }
         // low eave slabs over the natural ground where the path ends would block the way out: clear a three wide lane
         for (int i = ys.length; i < ys.length + 12; i++) {
             for (int w = -1; w <= 1; w++) {

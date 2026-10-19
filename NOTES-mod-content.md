@@ -155,3 +155,10 @@ None. No contract file was changed.
 - findDoor now scores every side at levels 0/1: landing sunk by <= 1 against terrain within 3 blocks (BuildingPlan.sunk) is accepted at once, the side facing the nearest road/track/path (CellView.way, overlay classes 2-7 on the ground, reach 14) wins ties, deeper landings are used only if nothing else works. Lift bound is ceiling-3 (was -4).
 - BuildingStage.steps: where the way out is cut into higher ground it is 3 wide with a retaining wall (foundation block) at +-2; the low-eave clearing is 3 wide and 12 long (was 1 wide, 5 long; a 1-wide lane under an eave dead-ended).
 - Sweep metric (BuildingRender.entrance, BuildingSweepTest): "entrances: N bad (P 1-wide pits, S sunken > 1 below terrain within 3 and narrow)". Before/after: origin 6 cells 1022 -> 112, next store 11 -> 0, Innertkirchen 2660_1172 99 -> 19. Remaining pits are mostly doors in notches of irregular footprints with the building's own wall/eave beside them. Low 1-storey houses still sit 1 below the ground (3-wide shallow approach).
+
+### Building entrances, round 3
+- Lift of the ground floor (up to 3 towards the ground around) is now bounded by `ceiling-3` for single-storey and `ceiling-4` for multi-storey buildings, and by `roofRoom` (30th percentile of the roof cover over the interior minus 3); small footprints with floating parts (body bottom > base+3) are not lifted (that leaked under the overhang). Low cottages now stand at ground level.
+- findDoor: a door in a notch (own wall or neighbour right beside the landing cell) costs 8 extra path blocks and loses ties, so straight facade runs win.
+- steps(): EAVE cells within 2 of the landing are cleared (3 high) so eaves no longer hem the approach.
+- Tall buildings (8+) without stairs get a ladder (`findLadder`, headroom 3, fallback 2); ladder top is clamped under the cover.
+- Sweep (entrances bad / bad doors / nocore): origin 6 cells 112/0/0 -> 2/0/0, next 0/0/0, Innertkirchen 2660_1172 19/1/2 -> 0/0/0.

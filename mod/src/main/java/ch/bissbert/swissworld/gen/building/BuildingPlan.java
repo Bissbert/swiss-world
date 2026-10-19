@@ -165,7 +165,11 @@ public record BuildingPlan(long gid, Style style, Columns cols, int storey, List
             this.topY = topY;
             this.ceiling = ceiling;
             this.flat = y0;
-            this.lift = Math.max(0, Math.min(Math.min(3, groundAround(terrain) - y0), ceiling - 4 - y0));
+            boolean big = (c.maxX - c.minX + 1) * (c.maxZ - c.minZ + 1) > 2500, floating = false; // big complexes keep their lift; a part hovering above the base (overhang, bridge) leaves the walls under it to the ground floor: no lifting
+            for (int z = c.minZ; z <= c.maxZ && !floating && !big; z++) {
+                for (int x = c.minX; x <= c.maxX; x++) if (c.body(x, z) && c.lo(x, z) > c.baseY + 3) { floating = true; break; }
+            }
+            this.lift = floating ? 0 : Math.max(0, Math.min(Math.min(3, groundAround(terrain) - y0), Math.min(ceiling - (ceiling - y0 >= 6 ? 4 : 3), roofRoom(ceiling)) - y0));
             layFloors(y0 + lift);
         }
 
@@ -180,6 +184,18 @@ public record BuildingPlan(long gid, Style style, Columns cols, int storey, List
                     && (b.floors() <= 0 || k <= b.floors())); k++) {
                 floors.add(y0 + k * s);
             }
+        }
+
+        /** Highest floor level that still leaves two blocks of air under the roof over most of the interior. */
+        private int roofRoom(int ceiling) {
+            int[] cv = new int[(c.maxX - c.minX + 1) * (c.maxZ - c.minZ + 1)];
+            int n = 0;
+            for (int z = c.minZ; z <= c.maxZ; z++) {
+                for (int x = c.minX; x <= c.maxX; x++) if (c.interior(x, z)) cv[n++] = c.cover(x, z);
+            }
+            if (n == 0) return ceiling - 4;
+            Arrays.sort(cv, 0, n);
+            return cv[n * 3 / 10] - 3;
         }
 
         /** Median terrain level of the cells touching the footprint from outside. */
@@ -213,7 +229,8 @@ public record BuildingPlan(long gid, Style style, Columns cols, int storey, List
                 // upper floors no stair or ladder reaches are dropped, leaving a taller top storey
                 while (floors.size() > 1 && (stairs = findStairs()) == null) floors.remove(floors.size() - 1);
             }
-            if (!style.empty() && floors.size() == 1 && stairs == null && height() >= 8) stairs = findLadder(floors.get(0));
+            if (!style.empty() && floors.size() == 1 && stairs == null && height() >= 8) stairs = findLadder(floors.get(0), 3);
+            if (!style.empty() && floors.size() == 1 && stairs == null && height() >= 8) stairs = findLadder(floors.get(0), 2); // low roof: a stub of a ladder
             view = new BuildingPlan(gid, style, c, s, List.copyOf(floors), door, stairs, rooms, walls, props, lights, 1);
             if (!style.empty()) for (int k = 0; k < floors.size(); k++) layoutFloor(k);
             return new BuildingPlan(gid, style, c, s, List.copyOf(floors), door, stairs, List.copyOf(rooms),
@@ -292,10 +309,12 @@ public record BuildingPlan(long gid, Style style, Columns cols, int storey, List
                     int sideLen = Integer.MAX_VALUE;
                     for (Door d : cands) {
                         int[] t = BuildingStage.trace(c, d, y0 + d.up(), terrain);
-                        boolean ok = t != null && t.length < sideLen && escapes(d, t);
+                        // a door in a notch (its own wall or a neighbour right beside the landing) costs 8 blocks of path
+                        int cost = t == null ? 0 : t.length + (notch(d) ? 8 : 0);
+                        boolean ok = t != null && cost < sideLen && escapes(d, t);
                         if (ok) {
                             sideBest = d;
-                            sideLen = t.length;
+                            sideLen = cost;
                             if (sideLen <= SHORT_PATH) break;
                         } else if (level == 3) { // the inside cell is a wall itself: only if nothing else works
                             if (lastResort == null) lastResort = d;
@@ -314,14 +333,15 @@ public record BuildingPlan(long gid, Style style, Columns cols, int storey, List
                     // across the sides: a landing level with the ground around it first, then the side facing the nearest
                     // road or path, then the order of sides (the mapped entrance side, else a hash of the building)
                     int depth = Math.max(1, sunk(sideBest, y0 + sideBest.up));
-                    if (best == null || depth < bestDepth || depth == bestDepth && road[si] < bestRoad) {
+                    int score = (depth <= 1 ? 0 : depth) * 2 + (notch(sideBest) ? 1 : 0);
+                    if (best == null || score < bestDepth || score == bestDepth && road[si] < bestRoad) {
                         best = sideBest;
-                        bestDepth = depth;
+                        bestDepth = score;
                         bestRoad = road[si];
                     }
                 }
                 if (best != null) {
-                    if (bestDepth <= 1 || level >= 2) return best;
+                    if (bestDepth == 0 || level >= 2) return best;
                     if (bestDepth < sunkenDepth) {
                         sunkenBest = best;
                         sunkenDepth = bestDepth;
@@ -346,6 +366,17 @@ public record BuildingPlan(long gid, Style style, Columns cols, int storey, List
                 }
             }
             return worst;
+        }
+
+        /** True if the cell outside the door has a wall of this building or a neighbour on either side: a pit rather than a forecourt. */
+        boolean notch(Door d) {
+            int ox = d.x + d.out.dx, oz = d.z + d.out.dz;
+            Dir side = d.out.cw();
+            for (int w = -1; w <= 1; w += 2) {
+                int x = ox + side.dx * w, z = oz + side.dz * w;
+                if (c.state(x, z) == Columns.BODY || terrain.foreign(x, z, gid)) return true;
+            }
+            return false;
         }
 
         static final int ROAD_REACH = 14;
@@ -453,20 +484,20 @@ public record BuildingPlan(long gid, Style style, Columns cols, int storey, List
                     }
                 }
             }
-            return findLadder(top);
+            return findLadder(top, 3);
         }
 
         /** A ladder on an interior wall or a pillar, with a free exit cell beside it. */
-        Stairs findLadder(int top) {
+        Stairs findLadder(int top, int clear) {
             int n = (c.maxX - c.minX + 1) * (c.maxZ - c.minZ + 1), rot = Hash.pick(gid, 6, n);
             for (int pass = 0; pass < 2; pass++) {
                 for (int o = 0; o < n; o++) {
                     int i = (o + rot) % n, x = c.minX + i % (c.maxX - c.minX + 1), z = c.minZ + i / (c.maxX - c.minX + 1);
-                    if (!c.interior(x, z) || c.cover(x, z) < top + 3 || nearDoor(x, z)) continue;
+                    if (!c.interior(x, z) || c.cover(x, z) < top + clear || nearDoor(x, z)) continue;
                     for (Dir d : Dir.values()) {
                         int bx = x + d.dx, bz = z + d.dz;
                         boolean back = pass == 0 ? !c.interior(bx, bz) && c.body(bx, bz) : c.interior(bx, bz);
-                        Dir exit = back ? exit(x, z, d, top) : null;
+                        Dir exit = back ? exit(x, z, d, top, clear) : null;
                         if (exit != null) return new Stairs(x, z, d.opposite(), exit, true);
                     }
                 }
@@ -475,10 +506,10 @@ public record BuildingPlan(long gid, Style style, Columns cols, int storey, List
         }
 
         /** Side to leave a ladder at (x, z) leaning towards back: an interior cell with floor on every storey. */
-        Dir exit(int x, int z, Dir back, int top) {
+        Dir exit(int x, int z, Dir back, int top, int clear) {
             for (Dir e : new Dir[]{back.opposite(), back.cw(), back.cw().cw().cw()}) {
                 int ex = x + e.dx, ez = z + e.dz;
-                if (c.interior(ex, ez) && c.lo(ex, ez) <= floors.get(Math.min(1, floors.size() - 1)) && c.cover(ex, ez) >= top + 3) return e;
+                if (c.interior(ex, ez) && c.lo(ex, ez) <= floors.get(Math.min(1, floors.size() - 1)) && c.cover(ex, ez) >= top + clear) return e;
             }
             return null;
         }
