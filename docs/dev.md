@@ -41,8 +41,14 @@ cd mod && ./gradlew build        # first run in a fresh worktree: ~2 min NeoForg
 
 **Fixture world:**
 
-1. `mkdir -p $SWISSDATA_STORE/cells && cp fixtures/synthetic_2632_1170.swd $SWISSDATA_STORE/cells/2632_1170.swd`.
-2. Use a **private store** (`SWISSWORLD_STORE=/tmp/...`) if you must not see other agents' real cells.
+**Never put fixture or test cells into the shared store** (`$SWISSDATA_STORE`). Cell 2632_1170 is the real origin cell. Always use a private store per branch:
+
+```sh
+export SWISSWORLD_STORE=/tmp/swissworld-<branch>      # private; overrides the shared store for runServer
+mkdir -p $SWISSWORLD_STORE/cells && cp fixtures/synthetic_2632_1170.swd $SWISSWORLD_STORE/cells/2632_1170.swd
+```
+
+Only sidecar-core writes to the shared store. A cell counts as built only if `manifest.json` has an entry for it, not merely because the file exists.
 
 **Smoke test over RCON.** Gradle does not forward stdin, so use RCON. In `mod/run/server.properties`:
 
