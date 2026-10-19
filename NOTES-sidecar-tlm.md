@@ -76,7 +76,8 @@ Total is about 3.2 GB, over the ~2 GB guideline only because of the TLM file the
 
 - **Burn order** (later wins): tunnels < areas < roads (minor → major) < rail < dams < bridges.
   - Under a surface road, a tunnel is hidden.
-  - Under a road bridge, the rail-centre bit breaks for the bridge's width.
+  - Under a road bridge, the column keeps the road deck and also gets the rail-centre bit (contract proposal 1).
+  - Buffers use round caps; flat caps left notches at the joints between TLM segments (10 rail-centre gaps in Interlaken).
 - **Road classes and widths** are in the `ROADS` table in `overlay.py`. 4 m/3 m roads with a natural surface become tracks (5).
 - **OELV** comes from the line Z at the nearest point for bridges, tunnels and roads/rail on dams. Dams use their crest (max Z).
 - **Rail:**
@@ -99,7 +100,18 @@ Total is about 3.2 GB, over the ~2 GB guideline only because of the TLM file the
 
 ## Contract proposals
 
-None needed for Milestone 1.
+### 1. Rail-centre bit under road bridges (needed for the rail fix; not applied to docs/swd-format.md)
+
+The sidecar now emits it. It is backward compatible: today's mod ignores bit2 on columns that are not class 8.
+
+Proposed replacement for the sentence under §5:
+
+> Rail blocks are placed where `OFLG.bit2` is set. On a class-8 column the rail sits on the overlay surface (`OELV`, or the terrain when `OELV` is `0xFFFF`). On a column with `bit0` (bridge) whose `OCLS` is a road class (1–7), the road deck is at `OELV` and the rail lies on the **terrain** under it, on a rail bed. The mod derives the rail shape from the neighbouring rail-centre columns.
+
+- **Why not a separate rail layer:** one bit plus a rule covers every real case in the bbox (13 road-bridge/rail crossings).
+  - Under the deck the ground is otherwise plain terrain, and the deck is 6–8 m above it.
+  - A new layer would cost a contract bump in SwdReader/SwdCell for no extra information.
+- **Not covered:** a rail tunnel under a surface road. The road wins OCLS, and bit1 on that column would describe the road. Inside the bbox the rail is simply absent for those few columns. That would need either a rule "bit1+bit2 on a road column = rail in tunnel at the TLM tunnel floor", which has no height channel, or a separate layer. I'm leaving it until a real case matters.
 
 ## Previews
 
@@ -120,6 +132,5 @@ Regenerate with `uv run --group dev python -I -m swissdata.tlm_preview 2646 1178
 
 - A tiled river-level table for areas beyond the dev bbox.
 - Farmland.
-- Rail continuity under road bridges.
 - Lake-shore beaches are only the gravel fallback.
 - Seam consistency across neighbouring cells is checked by design, not by a test with two real cells.

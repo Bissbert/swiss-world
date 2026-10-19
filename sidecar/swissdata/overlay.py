@@ -3,6 +3,8 @@
 Every feature is buffered to its width and burnt once, in priority order (later wins): tunnels, areas,
 roads from minor to major, railways, dams, bridges. Bridges, tunnels and roads over dams carry their
 deck/floor height from the TLM line Z in OELV; dams carry their crest (highest Z) and the dam-body flag.
+Where a road bridge spans a ground-level railway, the column keeps the road deck (OCLS, OELV, bit0) and
+also the rail-centre bit2, which then means a rail on the terrain under the deck (see NOTES-sidecar-tlm.md).
 Everything else follows the terrain. The grid is burnt one column wider on every side so the edge flag
 (a road column next to a non-overlay column) agrees across cell seams.
 """
@@ -91,7 +93,8 @@ def rail_class(p: dict) -> int:
 
 
 def _buffer(line, width: float):
-    return shapely.force_2d(line).buffer(max(width / 2, MIN_HALF_WIDTH), cap_style="flat")
+    # Round caps: consecutive TLM segments meet at angles, and flat caps would leave a notch at every joint.
+    return shapely.force_2d(line).buffer(max(width / 2, MIN_HALF_WIDTH))
 
 
 def collect(cfg, e_km: int, n_km: int) -> list[Feature]:
@@ -194,9 +197,15 @@ def rasterise(feats: list[Feature], e_km: int, n_km: int) -> tuple[np.ndarray, n
         if f.rail_line is None:
             continue
         for dz_, dx_ in grid_path(f.rail_line, e_km, n_km):
-            if idx[dz_, dx_] == i + 1 or ocls[dz_, dx_] == RAIL:
+            if (idx[dz_, dx_] == i + 1 or ocls[dz_, dx_] == RAIL
+                    or (f.flags == 0 and under_road_bridge(ocls[dz_, dx_], oflg[dz_, dx_]))):
                 oflg[dz_, dx_] |= swd.OFLG_RAIL
     return ocls, swd.encode_height(elev), oflg
+
+
+def under_road_bridge(ocls: int, oflg: int) -> bool:
+    """A road deck (OCLS/OELV of the column) spans a ground-level rail: bit2 stays set for the rail below."""
+    return bool(oflg & swd.OFLG_BRIDGE) and ocls not in (RAIL, RACK)
 
 
 def grid_path(line, e_km: int, n_km: int) -> list[tuple[int, int]]:
