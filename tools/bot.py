@@ -8,6 +8,10 @@ Needs an offline-mode server with network-compression-threshold=-1. Op the bot w
     cmd:<command>        send a chat command (no leading slash)
     wait:<seconds>       keep the connection alive and print chat
     walk:<dx>,<dz>,<v>   fly in a straight line at v m/s (spectator mode recommended), one move packet per tick
+    fall:<seconds>       survival physics without collision: vanilla gravity while the bot's chunk is loaded (like the
+                         real client, which freezes in unloaded chunks); the server's "moved wrongly" correction acts as
+                         the ground. Prints the y once a second, health changes, the action bar and death
+    respawn              request a respawn after death
 
 Chat is printed as "chat: ..."; URLs in click events are printed as "link: ...". Login and respawn packets print
 "spawn: <dimension> flat=<isFlat>" (the client's sky horizon depends on isFlat).
@@ -17,6 +21,7 @@ from __future__ import annotations
 
 import hashlib
 import socket
+import math
 import struct
 import sys
 import threading
@@ -102,6 +107,11 @@ class Bot:
         self.lock = threading.Lock()
         self.pos = None
         self.alive = True
+        self.chunks: set[tuple[int, int]] = set()
+        self.vy = 0.0
+        self.health = None
+        self.actionbar = None
+        self.dead = False
         self.name = name
         self.send(0x00, varint(PROTOCOL) + string("127.0.0.1") + struct.pack(">H", port) + varint(2))
         self.send(0x00, string(name) + uuid.UUID(bytes=hashlib.md5(b"OfflinePlayer:" + name.encode()).digest(), version=3).bytes)
@@ -182,10 +192,36 @@ class Bot:
                     px, py, pz = self.pos
                     x, y, z = (px + x if flags & 1 else x), (py + y if flags & 2 else y), (pz + z if flags & 4 else z)
                 self.pos = (x, y, z)
+                if not flags & 2:
+                    self.vy = 0.0  # the client zeroes the velocity of each absolute axis
                 self.send(0x00, varint(tid))
                 self.send(0x1B, struct.pack(">dddff?", x, y, z, 0.0, 0.0, False))
                 print(f"position: {x:.1f} {y:.1f} {z:.1f}", flush=True)
+            elif pid == 0x27:  # chunk data: x, z
+                c = b.unpack("ii")
+                if c in self.chunks:
+                    print(f"chunk resent: {c[0]} {c[1]}", flush=True)
+                self.chunks.add(c)
+            elif pid == 0x21:  # forget chunk: ChunkPos.toLong
+                v = b.unpack("q")[0]
+                x, z = v & 0xFFFFFFFF, (v >> 32) & 0xFFFFFFFF
+                self.chunks.discard((x - (1 << 32) if x >= 1 << 31 else x, z - (1 << 32) if z >= 1 << 31 else z))
+            elif pid == 0x5D:
+                h = round(b.unpack("f")[0], 1)
+                if h != self.health:
+                    print(f"health: {h}", flush=True)
+                self.health = h
+            elif pid == 0x3C:
+                b.varint()
+                print("died:", component(b)[0], flush=True)
+                self.dead = True
+            elif pid == 0x4C:
+                text = component(b)[0]
+                if text != self.actionbar:
+                    print("actionbar:", text, flush=True)
+                self.actionbar = text
             elif pid in (0x2B, 0x47):  # login / respawn: CommonPlayerSpawnInfo
+                self.chunks.clear()
                 if pid == 0x2B:
                     b.take(5)
                     for _ in range(b.varint()):
@@ -205,6 +241,20 @@ class Bot:
 
     def command(self, cmd: str) -> None:
         self.send(0x04, string(cmd))
+
+    def fall(self, seconds: float) -> None:
+        start = time.time()
+        for t in range(1, int(seconds * 20) + 1):
+            if self.pos is not None and not self.dead:
+                x, y, z = self.pos
+                if (math.floor(x) >> 4, math.floor(z) >> 4) in self.chunks:
+                    y += self.vy
+                    self.vy = (self.vy - 0.08) * 0.98
+                    self.pos = (x, y, z)
+                    self.send(0x1A, struct.pack(">ddd?", x, y, z, False))
+            if t % 20 == 0 and self.pos is not None:
+                print(f"t={t // 20}s y={self.pos[1]:.1f}", flush=True)
+            time.sleep(max(0.0, start + t / 20 - time.time()))
 
     def walk(self, dx: float, dz: float, speed: float) -> None:
         x0, y, z0 = self.pos
@@ -234,6 +284,12 @@ def main() -> None:
             time.sleep(0.5)
         elif kind == "wait":
             time.sleep(float(arg))
+        elif kind == "fall":
+            bot.fall(float(arg))
+        elif kind == "respawn":
+            bot.send(0x09, varint(0))
+            bot.dead = False
+            time.sleep(1)
         elif kind == "walk":
             dx, dz, v = (float(a) for a in arg.split(","))
             bot.walk(dx, dz, v)

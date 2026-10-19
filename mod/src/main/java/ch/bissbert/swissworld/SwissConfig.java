@@ -36,9 +36,15 @@ public final class SwissConfig {
             .defineInRange("prefetchIntervalSeconds", 5, 1, 300);
     public static final ModConfigSpec.IntValue STALL_ABORT_S = B
             .comment("If the server thread waits this long for a chunk whose cells are still missing (e.g. forceload",
-                    "while the sidecar is down), pending chunks are given up: they stay empty until reloaded and are",
-                    "never saved as generated. Keep it below max-tick-time (60 s). 0 disables")
+                    "while the sidecar is down), pending chunks are given up: they become empty placeholders that are",
+                    "never saved and are regenerated in place once their cells arrive. Keep it below max-tick-time",
+                    "(60 s). 0 disables")
             .defineInRange("stallAbortSeconds", 20, 0, 600);
+    public static final ModConfigSpec.DoubleValue PLAYER_STALL_ABORT_S = B
+            .comment("The same for a chunk a player or entity needs (/tp, ender pearl, elytra, login, a player's own",
+                    "tick): give up after this many seconds. Players in a placeholder are held in place until its terrain is there. Shorter means",
+                    "shorter freezes but more placeholders. 0: use stallAbortSeconds")
+            .defineInRange("playerStallAbortSeconds", 2.0, 0.0, 600.0);
 
     public static final ModConfigSpec SPEC = B.build();
 

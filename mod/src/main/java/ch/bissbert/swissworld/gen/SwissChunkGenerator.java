@@ -20,6 +20,7 @@ import java.util.concurrent.CompletableFuture;
 import net.minecraft.Util;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.WorldGenRegion;
+import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.LevelHeightAccessor;
 import net.minecraft.world.level.NoiseColumn;
 import net.minecraft.world.level.StructureManager;
@@ -43,7 +44,8 @@ import net.minecraft.world.level.levelgen.blending.Blender;
  * cache's I/O threads. Biomes are filled here too, from the same cells (the BIOMES step is a no-op), so they are
  * never baked from a guess. At shutdown, or when the server thread is stuck loading a pending chunk
  * ({@link ch.bissbert.swissworld.world.StallGuard}), pending chunks complete empty and are downgraded on save
- * ({@link ch.bissbert.swissworld.world.AbortedChunks}).
+ * ({@link ch.bissbert.swissworld.world.AbortedChunks}); while loaded, such a placeholder is regenerated in place once
+ * its cells arrive ({@link ch.bissbert.swissworld.world.PlaceholderRepair}).
  */
 public final class SwissChunkGenerator extends ChunkGenerator {
     public static final MapCodec<SwissChunkGenerator> CODEC = RecordCodecBuilder.mapCodec(i -> i.group(
@@ -89,8 +91,27 @@ public final class SwissChunkGenerator extends ChunkGenerator {
     public CompletableFuture<ChunkAccess> fillFromNoise(Blender blender, RandomState randomState, StructureManager structureManager, ChunkAccess chunk) {
         // lock before reading the origin, so no chunk can be generated with an origin that changes afterwards
         SwissCoords coords = SwissRuntime.lockOrigin();
-        CellCache cache = SwissRuntime.cells();
-        int x0 = chunk.getPos().getMinBlockX(), z0 = chunk.getPos().getMinBlockZ();
+        Map<Long, CompletableFuture<CellCache.Result>> needed = requestCells(SwissRuntime.cells(), coords, chunk.getPos());
+        CompletableFuture<Void> all = CompletableFuture.allOf(needed.values().toArray(CompletableFuture[]::new));
+        boolean waits = !all.isDone();
+        if (waits) SwissRuntime.PENDING_CHUNKS.incrementAndGet();
+        return all.thenApplyAsync(v -> {
+            if (waits) SwissRuntime.PENDING_CHUNKS.decrementAndGet();
+            Map<Long, SwdCell> cells = loadedCells(needed);
+            if (cells == null) {
+                // an empty placeholder: kept off disk (AbortedChunks), replaced once loaded (PlaceholderRepair)
+                SwissRuntime.markAborted(chunk.getPos());
+                return chunk;
+            }
+            SwissRuntime.clearAborted(chunk.getPos());
+            fill(chunk, coords, cells, randomState);
+            return chunk;
+        }, Util.backgroundExecutor());
+    }
+
+    /** Requests every cell the chunk touches, including {@link #CELL_MARGIN}; keyed by {@link CellCache#key}. */
+    public static Map<Long, CompletableFuture<CellCache.Result>> requestCells(CellCache cache, SwissCoords coords, ChunkPos pos) {
+        int x0 = pos.getMinBlockX(), z0 = pos.getMinBlockZ();
         Map<Long, CompletableFuture<CellCache.Result>> needed = new HashMap<>();
         for (int x : new int[] {x0 - CELL_MARGIN, x0 + 15 + CELL_MARGIN}) {
             for (int z : new int[] {z0 - CELL_MARGIN, z0 + 15 + CELL_MARGIN}) {
@@ -98,32 +119,31 @@ public final class SwissChunkGenerator extends ChunkGenerator {
                 needed.computeIfAbsent(CellCache.key(e, n), k -> cache.get(e, n));
             }
         }
-        CompletableFuture<Void> all = CompletableFuture.allOf(needed.values().toArray(CompletableFuture[]::new));
-        boolean waits = !all.isDone();
-        if (waits) SwissRuntime.PENDING_CHUNKS.incrementAndGet();
-        return all.thenApplyAsync(v -> {
-            if (waits) SwissRuntime.PENDING_CHUNKS.decrementAndGet();
-            Map<Long, SwdCell> cells = new HashMap<>();
-            for (var f : needed.entrySet()) {
-                CellCache.Result r = f.getValue().join();
-                if (r.status() == CellCache.Status.ABORTED) {
-                    SwissRuntime.markAborted(chunk.getPos());
-                    return chunk;
-                }
-                if (r.cell() != null) cells.put(f.getKey(), r.cell());
-            }
-            SwissRuntime.clearAborted(chunk.getPos());
-            long t0 = System.nanoTime();
-            GenContext ctx = new GenContext(chunk, coords, (e, n) -> cells.get(CellCache.key(e, n)));
-            if (getBiomeSource() instanceof SwissBiomeSource biomes) {
-                chunk.fillBiomesFromNoise(biomes.resolver(ctx), randomState.sampler());
-            }
-            for (GenStage stage : PIPELINE) {
-                stage.apply(ctx);
-            }
-            SwissRuntime.recordChunk(System.nanoTime() - t0);
-            return chunk;
-        }, Util.backgroundExecutor());
+        return needed;
+    }
+
+    /** The cells of completed requests (ocean ones are absent), or null if any was aborted. */
+    public static Map<Long, SwdCell> loadedCells(Map<Long, CompletableFuture<CellCache.Result>> done) {
+        Map<Long, SwdCell> cells = new HashMap<>();
+        for (var f : done.entrySet()) {
+            CellCache.Result r = f.getValue().join();
+            if (r.status() == CellCache.Status.ABORTED) return null;
+            if (r.cell() != null) cells.put(f.getKey(), r.cell());
+        }
+        return cells;
+    }
+
+    /** Biomes and the whole {@link #PIPELINE} for one chunk whose cells are loaded. Any thread. */
+    public void fill(ChunkAccess chunk, SwissCoords coords, Map<Long, SwdCell> cells, RandomState randomState) {
+        long t0 = System.nanoTime();
+        GenContext ctx = new GenContext(chunk, coords, (e, n) -> cells.get(CellCache.key(e, n)));
+        if (getBiomeSource() instanceof SwissBiomeSource biomes) {
+            chunk.fillBiomesFromNoise(biomes.resolver(ctx), randomState.sampler());
+        }
+        for (GenStage stage : PIPELINE) {
+            stage.apply(ctx);
+        }
+        SwissRuntime.recordChunk(System.nanoTime() - t0);
     }
 
     @Override

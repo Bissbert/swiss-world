@@ -150,6 +150,35 @@ None. The real cells copied from the shared store (layers TERR/SURF/WLVL/WKND/OC
 - Evidence: `FlatHorizonTest` (Switzerland gets the flag with every other field kept; overworld/nether/end returned as is). Live check with the fake sidecar: `tools/bot.py` now prints `spawn: <dim> flat=<isFlat>` from the login/respawn packets. Overworld login `flat=False`; `/swiss` → `swissworld:switzerland flat=True`; reconnecting inside Switzerland → `flat=True`; `/swiss back` → `minecraft:overworld flat=False`. The death-respawn path was not exercised live (the bot can't respawn); it builds the same record.
 - **To check visually (real client):** in Switzerland, in the valley (~y −1430) and on a peak, the sky below the horizon is sky-coloured, not black, and the fog matches the overworld at the same time of day; the same after `/swiss` → `/swiss back` → `/swiss` and after dying and respawning there. The overworld sky is unchanged. If the void fog now looks too bright near the bottom, that is the vanilla flat-world behaviour.
 
+## Missing terrain: no void deaths, placeholders filled in (2026-10-19)
+
+- Bug (playtest): a vanilla `/tp` into cells the sidecar refused or was slow on froze the server for 20 s (StallGuard), the chunks completed as empty placeholders, and the player fell below min y and died ("fell out of the world"). The same happens with the sidecar down: tp, ender pearl, elytra, login.
+- **Shorter stall for players.** `StallGuard` now checks every 250 ms and classifies the stack. If the frame that called `ServerChunkCache.getChunk` is in `net.minecraft.world.entity.*`, `ServerPlayer`, `ServerGamePacketListenerImpl` or `PlayerList`, it gives up after `playerStallAbortSeconds` (default 2, 0 = use `stallAbortSeconds`). Otherwise it keeps waiting `stallAbortSeconds` (20). jstack showed the cross-dimension tp stall in `ServerPlayer.doTick → baseTick → updateFluidHeight → getChunk`, not only in `setPosRaw`, so this matches by caller class. `/swiss` and `/swiss goto` stay non-blocking (ticket wait).
+  - Trade-off: an abort gives up **all** pending cells of that tick, so other chunks generating then also become placeholders. They are filled in while loaded (below) or regenerate when reloaded. Elytra flight into pending terrain can still freeze up to 2 s per chunk.
+- **`world/TerrainHold`.** Every 4 ticks, for survival and adventure players in Switzerland. If the player's chunk is not loaded, is a placeholder or is still being filled in, or has not reached the client yet, the player is held:
+  - a transient gravity modifier ×0 (synced, so the client stops falling and the floating kick stays off);
+  - fall distance and the floating counter are reset, and the position is pinned (absolute teleport if the player drifts > 0.5);
+  - the action bar shows "Terrain still loading…".
+  - A move of more than 8 blocks (a /tp) re-holds the player there.
+  - On release, a player below the ground (`MOTION_BLOCKING_NO_LEAVES`) is put on it, then lifted out of blocks (max 48). A player above the ground is left there and falls normally, so a /tp high into the air can still mean fall damage, as in vanilla.
+  - `EntityInvulnerabilityCheckEvent`: in Switzerland, no `fell_out_of_world` damage at all; no `in_wall` or `fall` damage while held.
+  - Creative and spectator players are left alone.
+  - Death, logout, dimension change and game-mode change drop the hold and the modifier.
+- **`world/PlaceholderRepair`.** Each loaded placeholder with all 8 neighbours loaded asks for its cells again (scan every second, max 256 jobs, retry 2 s). Once they are there, it generates off-thread into a `ProtoChunk` with the same `fill` as `fillFromNoise`. On the server thread, max 2 per tick, it swaps in:
+  - sections, block entities and post-processing;
+  - heightmaps (the worldgen ones too, plus the neighbours' worldgen ones, so decoration does not log "Unprimed heightmap"), then biome decoration (ores, snow) and the POI check.
+  - It then relights the chunk like a new one and, once light is done, resends `ClientboundLevelChunkWithLightPacket` to players that already have it. The hold releases only after that (`settled`).
+  - Not saved while empty: `AbortedChunks` downgrades placeholders on save (checked on disk: status `minecraft:biomes`, no sections or heightmaps). Repaired chunks are saved full.
+  - Simplifications:
+    - Light that crossed into neighbours from the empty chunk is not recomputed there.
+    - A placeholder at the edge of the loaded area waits until its neighbours load.
+    - Ore scatter differs from a normally generated chunk, because neighbours decorate in a different order. Compared on disk: blocks other than ores are identical, as are all 4 heightmaps.
+- Evidence: `StallGuardTest` (tp stack, player-tick stack, forceload, no stall, limits) and `TerrainHoldTest` (ground y). Headless, private sidecar on 8095 with the dev bbox:
+  - Old code: two 20 s stalls, then "Bot fell out of the world".
+  - New code, each tp stalled ~2.1 s and the bot was held with the action bar; no kick, no damage. Covered: login into a placeholder, overworld → Switzerland tp, same-dimension tp, out-of-bbox tp, tp below the world (held at −2031), allow-flight on and off.
+  - Sidecar killed mid-session: held. Cell copied in, or sidecar restarted: chunks filled in within ~1 s, chunk resent, bot put on the ground at −1148.
+- Bot harness (`tools/bot.py`): no collision, ignores the gravity attribute, doesn't swim. So it drifts a few blocks between pins, and it drowned after a release 325 blocks above Lake Geneva; a real client would swim.
+
 ## M2 notes
 
 - Sea and ocean fish spawns at y −1807.

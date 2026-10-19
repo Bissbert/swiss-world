@@ -154,7 +154,10 @@ public final class SwissRuntime {
         ABORTED.add(pos.toLong());
     }
 
-    /** The chunk generated for real (it was unloaded and loaded again), so it may be saved as generated again. */
+    /**
+     * The chunk generated for real (it was unloaded and loaded again, or {@link
+     * ch.bissbert.swissworld.world.PlaceholderRepair} filled it in place), so it may be saved as generated again.
+     */
     public static void clearAborted(ChunkPos pos) {
         ABORTED.remove(pos.toLong());
     }
@@ -165,5 +168,10 @@ public final class SwissRuntime {
 
     public static int abortedCount() {
         return ABORTED.size();
+    }
+
+    /** Positions ({@link ChunkPos#toLong}) of the empty placeholders; a live, thread-safe view. */
+    public static Set<Long> abortedChunks() {
+        return java.util.Collections.unmodifiableSet(ABORTED);
     }
 }

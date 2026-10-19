@@ -4,8 +4,10 @@ import ch.bissbert.swissworld.cell.SwissCoords;
 import ch.bissbert.swissworld.command.SwissCommands;
 import ch.bissbert.swissworld.net.PlayerPrefetch;
 import ch.bissbert.swissworld.world.AbortedChunks;
+import ch.bissbert.swissworld.world.PlaceholderRepair;
 import ch.bissbert.swissworld.world.StallGuard;
 import ch.bissbert.swissworld.world.SwissOrigin;
+import ch.bissbert.swissworld.world.TerrainHold;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -13,10 +15,12 @@ import java.util.Comparator;
 import java.util.stream.Stream;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.dimension.DimensionType;
 import net.minecraft.world.level.storage.LevelResource;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
+import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.event.level.ChunkDataEvent;
 import net.neoforged.neoforge.event.level.LevelEvent;
 import net.neoforged.neoforge.event.server.ServerAboutToStartEvent;
@@ -24,7 +28,10 @@ import net.neoforged.neoforge.event.server.ServerStoppedEvent;
 import net.neoforged.neoforge.event.server.ServerStoppingEvent;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
 
-/** Game-bus wiring: runtime lifecycle, origin, stall guard, shutdown downgrade, commands, ticks. Owner: mod-core. */
+/**
+ * Game-bus wiring: runtime lifecycle, origin, stall guard, shutdown downgrade, placeholder repair, terrain hold,
+ * commands, ticks. Owner: mod-core.
+ */
 final class SwissEvents {
     private SwissEvents() {}
 
@@ -39,6 +46,8 @@ final class SwissEvents {
         });
         bus.addListener((ServerStoppedEvent e) -> {
             StallGuard.stop();
+            TerrainHold.clear();
+            PlaceholderRepair.clear();
             SwissRuntime.stopped();
         });
         bus.addListener((RegisterCommandsEvent e) -> SwissCommands.register(e.getDispatcher()));
@@ -46,6 +55,13 @@ final class SwissEvents {
             StallGuard.tickEnded();
             SwissCommands.tick(e.getServer());
             PlayerPrefetch.tick(e.getServer());
+            ServerLevel swiss = e.getServer().getLevel(SwissRegistries.SWITZERLAND);
+            if (swiss != null) PlaceholderRepair.tick(swiss);
+            TerrainHold.tick(e.getServer());
+        });
+        bus.addListener(TerrainHold::invulnerabilityCheck);
+        bus.addListener((PlayerEvent.PlayerLoggedOutEvent e) -> {
+            if (e.getEntity() instanceof ServerPlayer p) TerrainHold.loggedOut(p);
         });
     }
 
