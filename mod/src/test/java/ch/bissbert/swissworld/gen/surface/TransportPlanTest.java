@@ -261,6 +261,19 @@ class TransportPlanTest {
     }
 
     @Test
+    void shortTrackPiecesWhereTracksMergeAreDropped() {
+        SwdCell c = Cells.flat(600);
+        for (int x = -20; x <= 20; x++) Cells.overlay(c, x, 0, OverlayPlan.RAIL_BED, RAIL, Double.NaN);
+        // a three-node piece left over beside the track, and a four-node one
+        for (int x = 0; x < 3; x++) Cells.overlay(c, x, 4, OverlayPlan.RAIL_BED, RAIL, Double.NaN);
+        for (int x = 0; x < 4; x++) Cells.overlay(c, x, 8, OverlayPlan.RAIL_BED, RAIL, Double.NaN);
+        TransportPlan t = new TransportPlan(Cells.grid(c, 0, 0, TransportPlan.MARGIN));
+        for (int x = -10; x <= 10; x++) assertTrue(t.rail(x, 0), "main track at " + x);
+        for (int x = 0; x < 3; x++) assertFalse(t.rail(x, 4), "short piece at " + x);
+        for (int x = 0; x < 4; x++) assertTrue(t.rail(x, 8), "four-node piece at " + x);
+    }
+
+    @Test
     void railBesideAStreamAndOverItStaysDry() {
         SwdCell c = Cells.flat(600);
         for (int z = -40; z <= 40; z++) railBand(c, 0, z, 2);
@@ -315,17 +328,18 @@ class TransportPlanTest {
                 int col = v.col(x, z);
                 assertTrue(v.tunnelWay[col], "tunnel way " + x + "," + z);
                 int floor = v.deck[col];
-                // headroom: 6 blocks above the floor (5 when a rail lies on it)
-                for (int y = floor + 1; y <= floor + 6; y++) {
+                // headroom: 6 blocks above the floor; 3 under the saddle stream, whose bed is lower than a full bore
+                int head = z >= 12 && z <= 16 ? 3 : 6;
+                for (int y = floor + 1; y <= floor + head; y++) {
                     B b = v.at(x, y, z);
                     if (b != B.AIR && b != B.RAIL && b != B.LANTERN) bad.add(x + "," + y + "," + z + " blocked: " + b);
                 }
                 // no sky: something solid above the air
                 boolean roof = false;
-                for (int y = floor + 7; y < v.y0 + v.ny; y++) roof |= v.at(x, y, z) == B.SOLID;
+                for (int y = floor + head + 1; y < v.y0 + v.ny; y++) roof |= v.at(x, y, z) == B.SOLID;
                 if (!roof) bad.add(x + "," + z + " open to the sky");
                 // no water beside any air block of the tunnel
-                for (int y = floor + 1; y <= floor + 6; y++) {
+                for (int y = floor + 1; y <= floor + head; y++) {
                     for (int[] d : new int[][] {{1, 0, 0}, {-1, 0, 0}, {0, 0, 1}, {0, 0, -1}, {0, 1, 0}}) {
                         if (Voxels.water(v.at(x + d[0], y + d[1], z + d[2]))) bad.add(x + "," + y + "," + z + " water beside");
                     }
@@ -333,7 +347,7 @@ class TransportPlanTest {
             }
             // walls left and right of the 5-wide profile
             int floor = v.deck[v.col(0, z)];
-            for (int y = floor + 1; y <= floor + 6; y++) {
+            for (int y = floor + 1; y <= floor + (z >= 12 && z <= 16 ? 3 : 6); y++) {
                 if (v.at(-3, y, z) != B.SOLID || v.at(3, y, z) != B.SOLID) bad.add("wall missing at " + z + "," + y);
             }
         }
@@ -343,6 +357,12 @@ class TransportPlanTest {
         assertTrue(bad.isEmpty(), () -> "tunnel faults: " + bad);
         // the hill above stays: the stream on the hill still runs there
         assertEquals(B.SOURCE, v.at(0, -1386, 0));
+        // the saddle stream runs on over the tunnel: its water is not replaced by the lining
+        for (int x = -6; x <= 6; x++) {
+            int bed = v.originalTop[v.col(x, 14)];
+            for (int y = bed + 1; y <= -1395; y++) assertTrue(Voxels.water(v.at(x, y, 14)), "saddle stream at " + x + "," + y);
+            assertEquals(B.SOLID, v.at(x, bed, 14), "bed under the saddle stream at " + x);
+        }
     }
 
     @Test

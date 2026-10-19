@@ -248,14 +248,40 @@ public final class TransportPlan {
         return deg <= 2;
     }
 
-    /** A rail block goes here: a rail centre with at least one track neighbour, at most two. */
+    /** Shortest track kept: where tracks merge, the thinning leaves short pieces that lead nowhere. */
+    static final int MIN_RUN = 4;
+
+    /** A rail block goes here: a rail centre on a run of at least {@link #MIN_RUN} track nodes, at most two neighbours. */
     public boolean rail(int x, int z) {
         int k = g.index(x, z);
-        if (railNode[k] == UNSET) {
-            boolean r = c2(x, z) && (c2(x, z - 1) || c2(x, z + 1) || c2(x + 1, z) || c2(x - 1, z));
-            railNode[k] = r ? 1 : 0;
-        }
+        if (railNode[k] == UNSET) railNode[k] = c2(x, z) && run(x, z) >= MIN_RUN ? 1 : 0;
         return railNode[k] == 1;
+    }
+
+    /** Nodes in the run of {@code c2} nodes through (x, z), counted up to {@link #MIN_RUN} (each has at most two). */
+    private int run(int x, int z) {
+        int n = 1;
+        for (int d = 0; d < 4 && n < MIN_RUN; d++) {
+            int px = x, pz = z, cx = x + DIRS[d][0], cz = z + DIRS[d][1];
+            while (n < MIN_RUN && c2(cx, cz)) {
+                if (cx == x && cz == z) return MIN_RUN; // a loop
+                n++;
+                int nx = NONE, nz = NONE;
+                for (int[] e : DIRS) {
+                    int qx = cx + e[0], qz = cz + e[1];
+                    if ((qx != px || qz != pz) && c2(qx, qz)) {
+                        nx = qx;
+                        nz = qz;
+                    }
+                }
+                if (nx == NONE) break;
+                px = cx;
+                pz = cz;
+                cx = nx;
+                cz = nz;
+            }
+        }
+        return n;
     }
 
     private static final int[][] DIRS = {{0, -1}, {0, 1}, {1, 0}, {-1, 0}}; // N S E W
@@ -439,12 +465,26 @@ public final class TransportPlan {
         return f;
     }
 
-    /** The highest air block of the profile here. */
+    /** Least headroom under a watercourse: a cart and its rider, or a walker, still pass. */
+    static final int MIN_HEADROOM = 3;
+
+    /**
+     * The highest air block of the profile here. Under a watercourse it stays one below the bed of every wet column
+     * within 2, so the lining (up to the highest ceiling beside it) ends at the bed and the water keeps running above.
+     */
     public int tunnelAirTop(int x, int z) {
         int f = tunnelFloor(x, z);
         if (f == NONE) return NONE;
         boolean rail = (floor[g.index(x, z)] & 1) != 0;
-        return f + (rail ? RAIL_TUNNEL_HEIGHT : ROAD_TUNNEL_HEIGHT);
+        int a = f + (rail ? RAIL_TUNNEL_HEIGHT : ROAD_TUNNEL_HEIGHT);
+        for (int j = -2; j <= 2; j++) {
+            for (int i = -2; i <= 2; i++) {
+                if (g.present(x + i, z + j) && wetTop(x + i, z + j) != NONE) {
+                    a = Math.min(a, Math.max(f + MIN_HEADROOM, g.ground(x + i, z + j) - 1));
+                }
+            }
+        }
+        return a;
     }
 
     /** The ceiling of the profile here: above the highest air of every profile column beside it. */
@@ -600,7 +640,8 @@ public final class TransportPlan {
                 if (road && roadSlab(x, z)) out.set(floor + 1, Part.SLAB);
                 if (rail(x, z)) out.set(floor + 1, Part.RAIL);
                 boolean centre = rail(x, z) || road && !g.flag(x, z, ColumnGrid.EDGE);
-                if (centre && Math.floorMod(g.east(x) + g.north(z), LIGHT_SPACING) == 0) out.set(ceil - 1, Part.LANTERN);
+                boolean lit = Math.floorMod(g.east(x) + g.north(z), LIGHT_SPACING) == 0 && ceil - 1 > floor + MIN_HEADROOM;
+                if (centre && lit) out.set(ceil - 1, Part.LANTERN);
             } else {
                 out.set(floor, Part.LINING);
             }
