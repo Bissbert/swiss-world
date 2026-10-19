@@ -20,6 +20,7 @@ from the same item. A rebuild uses the cell's manifest sources `alti` + `altiNei
 from __future__ import annotations
 
 import logging
+import os
 import threading
 from collections.abc import Callable
 from pathlib import Path
@@ -121,7 +122,7 @@ class TileSource:
     def _save_edges(self, item: str, a: np.ndarray) -> dict[str, np.ndarray]:
         e = {"n": a[0].copy(), "s": a[-1].copy(), "w": a[:, 0].copy(), "e": a[:, -1].copy()}
         self._edges_dir.mkdir(parents=True, exist_ok=True)
-        tmp = self._edges_dir / f"{item}.tmp.npz"
+        tmp = self._edges_dir / f"{item}.{os.getpid()}-{threading.get_ident()}.tmp.npz"  # workers may race
         np.savez(tmp, **e)
         tmp.replace(self._edges_dir / f"{item}.npz")
         return e

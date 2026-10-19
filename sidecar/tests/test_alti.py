@@ -104,3 +104,25 @@ def test_fill_nodata_closes_large_holes():
     out = alti.fill_nodata(a, mask)
     assert np.isfinite(out).all() and np.array_equal(out[~mask], a[~mask])
     assert out[mask].min() >= a[~mask].min() and out[mask].max() <= a[~mask].max()
+
+
+def test_concurrent_edge_writes_do_not_collide(world):
+    import threading
+
+    cfg, builder, paths = world
+    src = builder._tiles
+    errors = []
+
+    def run():
+        try:
+            for _ in range(5):
+                src._save_edges("swissalti3d_2025_2631-1170", np.zeros((500, 500)))
+        except Exception as ex:  # noqa: BLE001
+            errors.append(ex)
+
+    threads = [threading.Thread(target=run) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert errors == []
