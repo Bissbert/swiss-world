@@ -1,12 +1,21 @@
 package ch.bissbert.swissworld.gen.building;
 
 import ch.bissbert.swissworld.cell.SwdCell;
+import ch.bissbert.swissworld.cell.SwdReader;
 import ch.bissbert.swissworld.cell.SwissCoords;
+import ch.bissbert.swissworld.SwissRuntime;
+import ch.bissbert.swissworld.cell.CellCache;
 import ch.bissbert.swissworld.gen.GenContext;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Optional;
 
 /**
- * Building spans addressed by absolute block columns. Only the cells the generator loaded for the chunk are visible;
- * a column in any other cell reads as unknown ({@link #cell} returns null).
+ * Building spans addressed by absolute block columns. A column in a cell that does not exist (yet) reads as unknown
+ * ({@link #cell} returns null).
  */
 public record CellView(SwissCoords coords, GenContext.CellLookup cells) {
 
@@ -16,8 +25,37 @@ public record CellView(SwissCoords coords, GenContext.CellLookup cells) {
         SwdCell at(int x, int z);
     }
 
+    /** The chunk's cells, plus any neighbour a building reaches (see {@link #neighbour}). */
     public static CellView of(GenContext ctx) {
-        return ofColumns(ctx.coords, ctx::cellAt);
+        CellCache cache = SwissRuntime.cells();
+        return ofColumns(ctx.coords, ctx::cellAt).orElse((e, n) -> neighbour(cache, e, n));
+    }
+
+    /**
+     * A cell from memory, else read on this thread: stages may run on the cache's own IO threads, so waiting for
+     * {@link CellCache#get} could deadlock. The async load is still started to warm the cache for later chunks.
+     */
+    static SwdCell neighbour(CellCache cache, int e, int n) {
+        SwdCell c = cache.getIfPresent(e, n);
+        if (c != null) return c;
+        Path f = cache.cellFile(e, n);
+        if (!Files.isRegularFile(f)) return null;
+        cache.get(e, n);
+        try {
+            return SwdReader.read(f);
+        } catch (IOException ex) {
+            return null;
+        }
+    }
+
+    /** This view, asking {@code more} for the cells it lacks; each answer (null included) is remembered. Not thread-safe. */
+    public CellView orElse(GenContext.CellLookup more) {
+        Map<Long, Optional<SwdCell>> memo = new HashMap<>();
+        return new CellView(coords, (e, n) -> {
+            SwdCell c = cells.get(e, n);
+            return c != null ? c : memo.computeIfAbsent(((long) e << 32) | (n & 0xFFFFFFFFL),
+                    k -> Optional.ofNullable(more.get(e, n))).orElse(null);
+        });
     }
 
     /** Adapts a block-column lookup: each cell is addressed by its NW corner column. */

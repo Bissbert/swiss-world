@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ch.bissbert.swissworld.cell.SwdCell;
 import ch.bissbert.swissworld.cell.SwdReader;
 import ch.bissbert.swissworld.cell.SwissCoords;
+import ch.bissbert.swissworld.gen.GenContext;
 import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.List;
@@ -122,6 +123,33 @@ class BuildingPlanTest {
         assertSame(fromWest, fromEast);
         assertEquals(plan.floors(), fromWest.floors());
         assertEquals(plan.rooms().size(), fromWest.rooms().size());
+    }
+
+    /** In game each chunk starts with its own cell only; the fallback must supply the neighbour, once. */
+    @Test
+    void neighbourCellFromFallback() {
+        SwdCell.Building b = cell.buildings().get(0);
+        Map<Integer, SwdCell.Span[]> wSpans = new HashMap<>(), eSpans = new HashMap<>();
+        for (int dz = b.minZ(); dz <= b.maxZ(); dz++) {
+            for (int dx = b.minX(); dx <= b.maxX(); dx++) {
+                SwdCell.Span[] s = cell.spansAt(dx, dz);
+                if (s == null) continue;
+                if (dx + 895 < 1000) wSpans.put(SwdCell.key(dx + 895, dz), s);
+                else eSpans.put(SwdCell.key(dx + 895 - 1000, dz), s);
+            }
+        }
+        SwdCell west = copy(cell, cell.eKm(), shifted(b, 895), wSpans);
+        SwdCell east = copy(cell, cell.eKm() + 1, shifted(b, -105), eSpans);
+        int[] asked = {0};
+        GenContext.CellLookup store = (e, n) -> {
+            asked[0]++;
+            return e == west.eKm() && n == west.nKm() ? west : e == east.eKm() && n == east.nKm() ? east : null;
+        };
+        BuildingPlan fromWest = BuildingPlan.of(view(west).orElse(store), west, west.buildings().get(0));
+        BuildingPlan fromEast = BuildingPlan.of(view(east).orElse(store), east, east.buildings().get(0));
+        assertSame(fromWest, fromEast);
+        assertSame(fromWest, BuildingPlan.of(view(west, east), west, west.buildings().get(0)));
+        assertTrue(asked[0] <= 4, "memoised fallback, asked " + asked[0]);
     }
 
     static void assertSame(BuildingPlan a, BuildingPlan b) {

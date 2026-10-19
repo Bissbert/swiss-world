@@ -222,7 +222,7 @@ public record BuildingPlan(long gid, Style style, Columns cols, int storey, List
             if (style.hall()) rects.add(new int[]{c.minX + 1, c.minZ + 1, c.maxX - 1, c.maxZ - 1});
             else split(k, c.minX + 1, c.minZ + 1, c.maxX - 1, c.maxZ - 1, 0, rects);
             List<int[]> live = new ArrayList<>();
-            for (int[] r : rects) if (anyUsable(k, r)) live.add(r);
+            for (int[] r : rects) if (usableCells(k, r) >= 2) live.add(r);
             if (k == 0 && door != null) {
                 int ix = door.x - door.out.dx, iz = door.z - door.out.dz;
                 live.sort(Comparator.comparingInt(r -> Math.abs((r[0] + r[2]) / 2 - ix) + Math.abs((r[1] + r[3]) / 2 - iz)));
@@ -231,14 +231,17 @@ public record BuildingPlan(long gid, Style style, Columns cols, int storey, List
                 int[] r = live.get(i);
                 Room room = new Room(k, r[0], r[1], r[2], r[3], RoomType.of(style, k, i, live.size(), c.baseH));
                 rooms.add(room);
-                light(room);
+                light(room, true);
                 furnish(room, walls);
+                light(room, false);
             }
         }
 
-        boolean anyUsable(int k, int[] r) {
-            for (int z = r[1]; z <= r[3]; z++) for (int x = r[0]; x <= r[2]; x++) if (usable(k, x, z)) return true;
-            return false;
+        /** Rooms need two usable cells (a standing light and a container); smaller nooks stay empty. */
+        int usableCells(int k, int[] r) {
+            int n = 0;
+            for (int z = r[1]; z <= r[3]; z++) for (int x = r[0]; x <= r[2]; x++) if (usable(k, x, z)) n++;
+            return n;
         }
 
         /** BSP: split the longer side with a partition at a hashed position, keeping rooms at least 3 wide. */
@@ -292,12 +295,16 @@ public record BuildingPlan(long gid, Style style, Columns cols, int storey, List
                     && !nearGap(r.floor, x, z, ws);
         }
 
-        /** Lights at the room centre (and on a grid in big rooms): glowstone in the slab above, else a lantern. */
-        void light(Room r) {
+        /**
+         * Lights on a grid (one per ~8 blocks): glowstone in the slab above, else a lantern. The first grid point is
+         * placed before the props so every room keeps one; the rest after, on what the props left free.
+         */
+        void light(Room r, boolean first) {
             int k = r.floor, lx = r.x1 - r.x0 + 1, lz = r.z1 - r.z0 + 1;
             int nx = Math.max(1, Math.round(lx / 8f)), nz = Math.max(1, Math.round(lz / 8f));
             for (int i = 0; i < nx; i++) {
                 for (int j = 0; j < nz; j++) {
+                    if ((i == 0 && j == 0) != first) continue;
                     int cx = r.x0 + (2 * i + 1) * lx / (2 * nx), cz = r.z0 + (2 * j + 1) * lz / (2 * nz);
                     int[] p = nearestFree(r, cx, cz);
                     if (p == null) continue;
@@ -314,11 +321,18 @@ public record BuildingPlan(long gid, Style style, Columns cols, int storey, List
             }
         }
 
+        /** The usable, unused cell nearest (cx, cz): first within 4 blocks, else anywhere in the room. */
         int[] nearestFree(Room r, int cx, int cz) {
+            int[] p = nearestFree(r, cx, cz, Math.max(r.x0, cx - 4), Math.max(r.z0, cz - 4),
+                    Math.min(r.x1, cx + 4), Math.min(r.z1, cz + 4));
+            return p != null ? p : nearestFree(r, cx, cz, r.x0, r.z0, r.x1, r.z1);
+        }
+
+        int[] nearestFree(Room r, int cx, int cz, int x0, int z0, int x1, int z1) {
             int best = Integer.MAX_VALUE;
             int[] p = null;
-            for (int z = r.z0; z <= r.z1; z++) {
-                for (int x = r.x0; x <= r.x1; x++) {
+            for (int z = z0; z <= z1; z++) {
+                for (int x = x0; x <= x1; x++) {
                     int d = Math.abs(x - cx) + Math.abs(z - cz);
                     if (d < best && usable(r.floor, x, z) && !used.contains(key(r.floor, x, z))) {
                         best = d;
@@ -355,12 +369,25 @@ public record BuildingPlan(long gid, Style style, Columns cols, int storey, List
                 }
             }
             if (!container) {
-                int[] p = nearestFree(r, r.x0, r.z0);
-                if (p != null && free(r, p[0], p[1], ws)) {
+                int[] p = anyCell(r, ws, true);
+                if (p == null) p = anyCell(r, ws, false);
+                if (p != null) {
                     props.add(new Prop(p[0], y, p[1], r.type.props.get(0), Dir.S, r.type));
                     used.add(key(r.floor, p[0], p[1]));
                 }
             }
+        }
+
+        /** First cell of the room that is free, or (not strict) merely usable and unused; a chest can be stepped over. */
+        int[] anyCell(Room r, List<Partition> ws, boolean strict) {
+            for (int z = r.z0; z <= r.z1; z++) {
+                for (int x = r.x0; x <= r.x1; x++) {
+                    if (strict ? free(r, x, z, ws) : usable(r.floor, x, z) && !used.contains(key(r.floor, x, z))) {
+                        return new int[]{x, z};
+                    }
+                }
+            }
+            return null;
         }
     }
 }
