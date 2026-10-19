@@ -167,6 +167,11 @@ public final class ColumnGrid {
         return top[k];
     }
 
+    /** OELV is set: the overlay has its own height (bridge, tunnel, embankment, dam crest). */
+    public boolean elevated(int x, int z) {
+        return oelv[k(x, z)] != NONE;
+    }
+
     /** The overlay's surface block: OELV, else the (banked) terrain top. */
     public int deck(int x, int z) {
         int o = oelv[k(x, z)];
