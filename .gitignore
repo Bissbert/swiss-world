@@ -1,0 +1,25 @@
+# shared download cache / local data (never commit)
+.data-cache/
+store/
+*.swd
+!fixtures/*.swd
+
+# Gradle / IDE
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+.idea/
+*.iml
+out/
+.vscode/
+.DS_Store
+mod/run/
+mod/runs/
+mod/repo/
+mod/src/generated/**/.cache/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/

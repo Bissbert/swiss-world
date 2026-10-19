@@ -1,0 +1,10 @@
+{
+  "type": "swissworld:swiss_tall",
+  "generator": {
+    "type": "swissworld:swiss",
+    "biome_source": {
+      "type": "swissworld:swiss",
+      "default_biome": "minecraft:plains"
+    }
+  }
+}

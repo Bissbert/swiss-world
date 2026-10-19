@@ -1,0 +1,110 @@
+{
+  "eKm": 2632,
+  "nKm": 1170,
+  "border": true,
+  "terrNodes": [
+    {
+      "i": 0,
+      "j": 0,
+      "h": 600.0
+    },
+    {
+      "i": 500,
+      "j": 0,
+      "h": 650.0
+    },
+    {
+      "i": 0,
+      "j": 500,
+      "h": 550.0
+    },
+    {
+      "i": 250,
+      "j": 100,
+      "h": 630.0
+    },
+    {
+      "i": 50,
+      "j": 450,
+      "h": 550.0
+    }
+  ],
+  "columns": [
+    {
+      "dx": 10,
+      "dz": 900,
+      "surf": 7,
+      "wlvl": 564.0,
+      "wknd": 1,
+      "ocls": 0,
+      "oflg": 0,
+      "insd": 1
+    },
+    {
+      "dx": 550,
+      "dz": 10,
+      "surf": 2,
+      "wlvl": null,
+      "wknd": 0,
+      "ocls": 0,
+      "oflg": 0,
+      "insd": 1
+    },
+    {
+      "dx": 550,
+      "dz": 300,
+      "surf": 2,
+      "wlvl": null,
+      "wknd": 0,
+      "ocls": 3,
+      "oflg": 1,
+      "oelv": 640.0,
+      "insd": 1
+    },
+    {
+      "dx": 700,
+      "dz": 10,
+      "surf": 0,
+      "wlvl": null,
+      "wknd": 0,
+      "ocls": 8,
+      "oflg": 4,
+      "insd": 1
+    },
+    {
+      "dx": 995,
+      "dz": 10,
+      "surf": 0,
+      "wlvl": null,
+      "wknd": 0,
+      "ocls": 0,
+      "oflg": 0,
+      "insd": 0
+    }
+  ],
+  "buildings": [
+    {
+      "gid": "2482401348636912483",
+      "egid": 123456,
+      "gwrClass": 1110,
+      "floors": 2,
+      "bbox": [
+        100,
+        100,
+        109,
+        107
+      ],
+      "baseH": 610.0,
+      "topH": 619.5
+    }
+  ],
+  "spanColumns": 80,
+  "spanProbe": {
+    "dx": 105,
+    "dz": 103,
+    "bottom": 610.0,
+    "top": 619.2,
+    "buildingIdx": 0,
+    "roofFlags": 1
+  }
+}

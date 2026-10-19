@@ -1,0 +1,27 @@
+[project]
+name = "swissdata"
+version = "0.1.0"
+description = "On-demand swisstopo -> .swd cell builder for the swissworld Minecraft mod"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "numpy>=2.0",
+    "fiona>=1.10",
+    "rasterio>=1.4",
+    "shapely>=2.0",
+    "httpx>=0.27",
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+]
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["swissdata"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

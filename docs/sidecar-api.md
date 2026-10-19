@@ -1,0 +1,88 @@
+# swissdata sidecar HTTP API, v1 (contract)
+
+**Base URL:** configurable in the mod (`sidecarUrl`). Default `http://swissdata:8080` in compose, `http://127.0.0.1:8080` in dev.
+
+**Format:** all bodies are JSON (UTF-8). Cells are `[eKm, nKm]` (see `swd-format.md` §1).
+
+**The mod never downloads data through this API.** It reads `cells/*.swd` and `coverage.bin` directly from the **shared store directory**:
+
+- dev: `<repo>/store`;
+- compose: a volume mounted at `/store` in the sidecar and wherever the mod's config points.
+
+The API is only the control plane.
+
+## Endpoints
+
+### `GET /health`
+`200 {"ok": true, "version": "0.1.0", "formatVersion": 1}`
+
+### `POST /request`
+Ask for cells to be built. The call is idempotent and returns immediately.
+
+```json
+{"cells": [[2631,1170],[2632,1170]], "priority": "now"}
+```
+
+- `priority`: `"now"` (a chunk is waiting) or `"prefetch"`.
+
+Response:
+
+```json
+{"cells": [
+  {"cell":[2631,1170], "state":"ready"},
+  {"cell":[2632,1170], "state":"queued", "position": 3},
+  {"cell":[2700,1300], "state":"outside"},
+  {"cell":[2633,1170], "state":"error", "error":"upstream 503", "retryAfterS": 30}
+]}
+```
+
+| State | Meaning |
+|---|---|
+| `ready` | The file exists in the store |
+| `queued` / `building` | In progress |
+| `outside` | Coverage = 0; no file will ever exist |
+| `error` | Failed after retries. The mod keeps the chunk pending and asks again after `retryAfterS`. |
+
+### `GET /wait?cell=2631,1170&timeoutMs=20000`
+Long-poll until the cell is `ready`, `outside` or `error`. Returns the same entry shape as `/request`.
+
+The mod may use this, or simply watch the store directory.
+
+### `POST /prefetch`
+```json
+{"e": 2633662.0, "n": 1170427.0, "radiusM": 2000, "headingDeg": 90.0, "speedMps": 30.0}
+```
+
+- Enqueues cells in the radius at prefetch priority.
+- If `speedMps > 0`, it also enqueues a corridor of length `max(500, 60·speed)` m along the heading.
+
+`202 {"queued": 12}`
+
+### `POST /generated`
+The mod reports cells whose chunks are all generated. These are evicted first when the cache is over budget.
+
+`{"cells": [[2631,1170]]}` → `204`
+
+### `GET /status`
+```json
+{"queue": {"now": 0, "prefetch": 12, "building": 2},
+ "store": {"cells": 431, "bytes": 182000000, "capBytes": 12000000000},
+ "scratch": {"bytes": 0, "capBytes": 2000000000},
+ "upstream": {"requests": 5021, "errors": 3, "lastError": null},
+ "versions": {"tlm": "swisstlm3d_2026-02", "boundaries": "swissboundaries3d_2026-01"}}
+```
+
+### `GET /place?q=Grimsel&limit=10`
+Gazetteer lookup (swissNAMES3D), used for `/swiss goto` and its tab completion.
+
+`{"results":[{"name":"Grimselpass","kind":"Pass","e":2668880,"n":1157032,"h":2164}]}`
+
+## Behaviour rules
+
+- **Upstream politeness:**
+  - at most 2 concurrent downloads (configurable, hard maximum 4);
+  - User-Agent `swissdata/<ver> (+contact)`;
+  - exponential backoff;
+  - **every upstream asset is downloaded at most once** into the shared raw cache, then deleted after processing unless `keepRaw` is set (dev).
+- Cell building is deterministic: the same `sources` give byte-identical layers.
+- `sources` for a cell are chosen once (the newest available item), then pinned in `manifest.json` forever.
