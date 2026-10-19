@@ -1222,10 +1222,11 @@ public final class TransportPlan {
 
     /**
      * A bridge railing on this column: none where the track runs, since a diagonal track's staircase touches the edges
-     * of a narrow rail bridge, and a wall there would cut the line.
+     * of a narrow rail bridge, and a wall there would cut the line. None on a {@link #lowBridge} either: on an
+     * embankment a block or two high the wall read as a long retaining wall (playtest 00.07, 28980,-1255,49).
      */
     public boolean railing(int x, int z) {
-        return OverlayPlan.railing(g, x, z) && !(railWay(x, z) && trackOnDeck(x, z));
+        return OverlayPlan.railing(g, x, z) && !(railWay(x, z) && trackOnDeck(x, z)) && !lowBridge(x, z);
     }
 
     /** Most air between the terrain and the beam of a bridge that is built as a low embankment instead. */
@@ -1273,7 +1274,7 @@ public final class TransportPlan {
         out.set(deck, road ? Part.SURFACE : Part.BALLAST);
         if (trackOnDeck(x, z)) {
             out.set(deck + 1, Part.RAIL);
-        } else if (OverlayPlan.railing(g, x, z)) {
+        } else if (railing(x, z)) {
             out.set(deck + 1, Part.RAILING);
         } else if (road && roadSlab(x, z)) {
             out.set(deck + 1, Part.SLAB);

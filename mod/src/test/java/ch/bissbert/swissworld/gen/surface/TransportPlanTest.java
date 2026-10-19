@@ -116,10 +116,13 @@ class TransportPlanTest {
                 for (int y = top + 1; y < deck; y++) {
                     assertEquals(TransportPlan.Part.SOIL, v.part(x, y, z), "low bridge " + x + "," + y + "," + z);
                 }
+                // no railing along an embankment: it read as a long retaining wall
+                assertNotEquals(TransportPlan.Part.RAILING, v.part(x, deck + 1, z), "railing on low bridge " + x + "," + z);
             }
             // a high bridge keeps its beam, with air or a pier under it
             int deck = v.deck[v.col(11, z)];
             assertEquals(TransportPlan.Part.BEAM, v.part(11, deck - 1, z));
+            assertEquals(TransportPlan.Part.RAILING, v.part(10, deck + 1, z), "railing on the high bridge at " + z);
             assertTrue(v.at(11, deck - 2, z) == B.AIR || v.part(11, deck - 2, z) == TransportPlan.Part.BEAM, "air or pier under the beam at " + z);
         }
     }
