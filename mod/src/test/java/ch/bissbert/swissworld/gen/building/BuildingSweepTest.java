@@ -230,6 +230,7 @@ class BuildingSweepTest {
             }
             sb.append('\n');
         }
+        sb.append("props: ").append(p.props()).append("\nrooms: ").append(p.rooms()).append("\nwalls: ").append(p.walls()).append('\n');
         sb.append("\nmap (B body, e eave, F other building, D door, o outside cell, . free):\n");
         for (int z = c.minZ - 8; z <= c.maxZ + 8; z++) {
             for (int x = c.minX - 8; x <= c.maxX + 8; x++) {

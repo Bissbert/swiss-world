@@ -589,7 +589,8 @@ public record BuildingPlan(long gid, Style style, Columns cols, int storey, List
         int[] anyCell(Room r, List<Partition> ws, boolean strict) {
             for (int z = r.z0; z <= r.z1; z++) {
                 for (int x = r.x0; x <= r.x1; x++) {
-                    if (strict ? free(r, x, z, ws) : usable(r.floor, x, z) && !used.contains(key(r.floor, x, z))) {
+                    boolean inside = r.floor == 0 && door != null && x == door.x - door.out.dx && z == door.z - door.out.dz;
+                    if (strict ? free(r, x, z, ws) : !inside && usable(r.floor, x, z) && !used.contains(key(r.floor, x, z))) {
                         return new int[]{x, z};
                     }
                 }
