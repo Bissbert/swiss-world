@@ -111,11 +111,15 @@ class SwdReaderTest {
     }
 
     @Test
-    void fixtureWithoutCanopyHasNoTrees() throws Exception {
+    void fixtureCanopyAndTreesMatchSidecar() throws Exception {
         SwdCell cell = SwdReader.read(FIX.resolve("synthetic_2632_1170.swd"));
-        assertFalse(cell.hasTrees());
-        assertTrue(cell.trees().isEmpty());
-        assertEquals(0, cell.canopy(0, 0));
+        assertTrue(cell.hasCanopy());
+        assertTrue(cell.hasTrees());
+        assertEquals(18, cell.canopy(550, 10));
+        assertEquals(0, cell.canopy(10, 900));
+        assertEquals(java.util.Set.of(new SwdCell.Tree(520, 40, 31, 35, SwdCell.Tree.CONIFER),
+                new SwdCell.Tree(575, 12, 24, 28, SwdCell.Tree.BROADLEAF),
+                new SwdCell.Tree(590, 600, 2, 0, SwdCell.Tree.UNKNOWN)), java.util.Set.copyOf(cell.trees()));
     }
 
     /** A minimal .swd: layers given as tag, bytes pairs; even layers zlib, odd ones raw, so both codecs are read. */
