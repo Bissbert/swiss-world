@@ -1202,6 +1202,18 @@ public final class TransportPlan {
         return OverlayPlan.railing(g, x, z) && !(railWay(x, z) && trackOnDeck(x, z));
     }
 
+    /** Most air between the terrain and the beam of a bridge that is built as a low embankment instead. */
+    static final int LOW_BRIDGE = 2;
+
+    /**
+     * A bridge column with at most {@link #LOW_BRIDGE} blocks of air between dry terrain and its beam: no water, no rail and
+     * no headroom under it. Playtest 00.07 (28980,-1255,49): such a deck showed as a long stone-brick wall on a slope.
+     */
+    boolean lowBridge(int x, int z) {
+        if (OverlayPlan.railUnderBridge(g, x, z) || wetTop(x, z) != NONE || g.source(x, z) != NONE) return false;
+        return deck(x, z) - 2 - g.top(x, z) <= LOW_BRIDGE; // air between terrain and beam
+    }
+
     /** A road or rail column outside a tunnel: embankment or cut, culvert roof over water, deck, slab or rail. */
     private void wayColumn(int x, int z, int bottom, Sink out) {
         boolean bridge = g.flag(x, z, ColumnGrid.BRIDGE);
@@ -1209,7 +1221,10 @@ public final class TransportPlan {
         int top = g.top(x, z), deck = deck(x, z);
         int wet = wetTop(x, z);
         boolean road = road(x, z);
-        if (bridge) {
+        if (bridge && lowBridge(x, z)) {
+            // a deck a block or two over dry ground: a low embankment of soil, not a beam standing on the grass
+            for (int y = Math.max(top + 1, bottom); y < deck; y++) out.set(y, Part.SOIL);
+        } else if (bridge) {
             out.set(deck - 1, Part.BEAM);
             if (OverlayPlan.pier(g, x, z)) {
                 for (int y = g.ground(x, z) + 1; y <= deck - 2; y++) out.set(y, Part.BEAM);

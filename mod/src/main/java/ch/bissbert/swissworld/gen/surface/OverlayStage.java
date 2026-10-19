@@ -37,6 +37,7 @@ public final class OverlayStage implements GenStage {
     private static final BlockState BALLAST_EDGE = Blocks.ANDESITE.defaultBlockState();
     private static final BlockState DAM_BODY = Blocks.LIGHT_GRAY_CONCRETE.defaultBlockState();
     private static final BlockState SMOOTH = Blocks.SMOOTH_STONE.defaultBlockState();
+    private static final BlockState FOOTBRIDGE = Blocks.SPRUCE_PLANKS.defaultBlockState();
     private static final BlockState LANTERN = Blocks.LANTERN.defaultBlockState().setValue(LanternBlock.HANGING, true);
     private static final int NONE = ColumnGrid.NONE;
 
@@ -68,7 +69,8 @@ public final class OverlayStage implements GenStage {
             case LINING -> LINING;
             case COVER -> COVER;
             case BALLAST -> g.flag(x, z, ColumnGrid.EDGE) ? BALLAST_EDGE : BALLAST;
-            case SURFACE -> surface(g, x, z, cls, y);
+            // a footpath's bridge is a plank deck, not a strip of trodden earth in the air (playtest 00.07, 27820,-1853)
+            case SURFACE -> cls == 6 && g.flag(x, z, ColumnGrid.BRIDGE) && !t.lowBridge(x, z) ? FOOTBRIDGE : surface(g, x, z, cls, y);
             case FLOOR -> floor(t, x, z, y);
             case SLAB -> slab(cls);
             case RAIL -> rail(t, x, z);

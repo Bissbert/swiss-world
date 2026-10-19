@@ -100,6 +100,30 @@ class TransportPlanTest {
         assertTrue(walls.isEmpty(), () -> "bare or high steps above the road: " + walls);
     }
 
+    /** Playtest 00.07 (28980,-1255,49): a road bridge a block over a slope showed as a long stone-brick wall. */
+    @Test
+    void lowBridgeOverDryGroundIsAnEmbankment() {
+        SwdCell c = Cells.flat(600);
+        for (int z = -30; z <= 30; z++) {
+            for (int x = 0; x <= 3; x++) Cells.overlay(c, x, z, 3, ColumnGrid.BRIDGE, 602);
+            for (int x = 10; x <= 13; x++) Cells.overlay(c, x, z, 3, ColumnGrid.BRIDGE, 608);
+        }
+        Voxels v = new Voxels(c, -4, -10, 16, 10, -1440, -1380);
+        for (int z = -5; z <= 5; z++) {
+            for (int x = 0; x <= 3; x++) {
+                int deck = v.deck[v.col(x, z)], top = v.originalTop[v.col(x, z)];
+                assertTrue(deck - 2 - top <= TransportPlan.LOW_BRIDGE, "low deck " + deck + " over " + top);
+                for (int y = top + 1; y < deck; y++) {
+                    assertEquals(TransportPlan.Part.SOIL, v.part(x, y, z), "low bridge " + x + "," + y + "," + z);
+                }
+            }
+            // a high bridge keeps its beam, with air or a pier under it
+            int deck = v.deck[v.col(11, z)];
+            assertEquals(TransportPlan.Part.BEAM, v.part(11, deck - 1, z));
+            assertTrue(v.at(11, deck - 2, z) == B.AIR || v.part(11, deck - 2, z) == TransportPlan.Part.BEAM, "air or pier under the beam at " + z);
+        }
+    }
+
     @Test
     void roadShoulderIsGradedToTheDeck() {
         Voxels v = new Voxels(slopedRoad(), -8, -40, 14, 40, -1440, -1370);
