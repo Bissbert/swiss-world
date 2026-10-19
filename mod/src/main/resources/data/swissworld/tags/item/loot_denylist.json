@@ -9,6 +9,10 @@
     "minecraft:heavy_core",
     "minecraft:trial_key",
     "minecraft:ominous_trial_key",
-    "minecraft:ominous_bottle"
+    "minecraft:ominous_bottle",
+    "minecraft:netherite_ingot",
+    "minecraft:netherite_scrap",
+    "minecraft:ancient_debris",
+    "minecraft:netherite_upgrade_smithing_template"
   ]
 }

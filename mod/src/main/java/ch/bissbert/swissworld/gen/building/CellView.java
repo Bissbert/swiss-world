@@ -10,11 +10,22 @@ import ch.bissbert.swissworld.gen.GenContext;
  */
 public record CellView(SwissCoords coords, GenContext.CellLookup cells) {
 
-    public static CellView of(GenContext ctx) {
-        return new CellView(ctx.coords, (e, n) -> ctx.cellAt(e, n));
+    /** Lookup by block column, as {@link GenContext#cellAt}. */
+    @FunctionalInterface
+    public interface ColumnLookup {
+        SwdCell at(int x, int z);
     }
 
-    /** The cell holding block column (x, z), or null. Note: unlike GenContext, this takes block coordinates. */
+    public static CellView of(GenContext ctx) {
+        return ofColumns(ctx.coords, ctx::cellAt);
+    }
+
+    /** Adapts a block-column lookup: each cell is addressed by its NW corner column. */
+    public static CellView ofColumns(SwissCoords c, ColumnLookup l) {
+        return new CellView(c, (e, n) -> l.at((int) ((long) e * 1000 - c.e0()), (int) (c.n0() - (long) n * 1000 - 1000)));
+    }
+
+    /** The cell holding block column (x, z), or null. */
     public SwdCell cell(int x, int z) {
         return cells.get(SwissCoords.cellKm(coords.east(x)), SwissCoords.cellKm(coords.north(z)));
     }

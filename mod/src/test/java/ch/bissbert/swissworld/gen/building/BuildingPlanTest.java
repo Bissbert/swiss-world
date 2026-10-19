@@ -84,6 +84,15 @@ class BuildingPlanTest {
         assertTrue(plan.floorAt(1, lx, lz) && !plan.cut(1, lx, lz));
     }
 
+    /** CellView over a block-column lookup (as GenContext.cellAt) must find the same cell as a km lookup. */
+    @Test
+    void cellViewFromColumns() {
+        CellView v = CellView.ofColumns(ORIGIN, (x, z) -> SwissCoords.cellKm(ORIGIN.east(x)) == cell.eKm()
+                && SwissCoords.cellKm(ORIGIN.north(z)) == cell.nKm() ? cell : null);
+        assertTrue(v.cell(-800, -300) == cell);
+        assertEquals(1, Buildings.near(v, -800, -304).size());
+    }
+
     @Test
     void deterministic() {
         BuildingPlan again = BuildingPlan.of(view(cell), cell, cell.buildings().get(0));
