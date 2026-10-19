@@ -58,3 +58,9 @@ def test_pins_resolve_once(tmp_path):
     assert Pins(tmp_path).pin("alti", "1-1", lambda: "v2") == "v1"
     assert pins.pin("alti", "9-9", lambda: None) is None and Pins(tmp_path).get("alti", "9-9") == (True, None)
     assert calls == [1]
+
+
+def test_dev_area_includes_origin_column():
+    from swissdata import stac
+
+    assert stac.in_dev_area(2626, 1170) and not stac.in_dev_area(2626, 1163) and not stac.in_dev_area(2700, 1170)

@@ -88,16 +88,30 @@ tolerance is ±0.1 m (`tests/test_network.py`).
 ## Dev bbox guard
 
 `SWISSDATA_DEV_BBOX=1` (default in dev; the Dockerfile sets 0) limits the sidecar to tiles that
-intersect the WGS84 test bbox **or** lie in the LV95 range E 2628–2672 × N 1154–1181. Results:
+intersect the WGS84 test bbox **or** lie in one of two LV95 ranges:
 
-- **mod-core's origin area, 2626–2640 × 1164–1176: column E2626 is outside both**, so those 13 cells
-  come back as `error` ("outside the dev test bbox"). E2627 is inside the WGS84 box. If mod-core
-  needs E2626, widen the guard.
-- Neighbours beyond the guard (E2673 and N1153 for the bbox edge cells) are treated as missing tiles, so
-  edge nodes use only the pixels inside the bbox.
-  - *Caveat:* if those cells are later built for real (guard off), their edge with the dev area is
-    computed from the full pixel set and **differs** (sub-decimetre) from what the dev cells stored.
-    Production stores start empty, so this is dev-only.
+- the plan's test range, E 2628–2672 × N 1154–1181;
+- mod-core's origin area, 2626–2640 × 1164–1176.
+
+**Downloads outside the WGS84 box: 103 ALTI tiles**, ~115 MB:
+
+- 90 in rows N1154–1155 (the brief's LV95 range reaches south of the WGS84 box);
+- 13 in column E2626 (the origin area).
+
+Tiles beyond the guard (E2673, N1153, and E2626 outside N1164–1176) are treated as missing, so edge
+nodes there use only the pixels inside.
+
+*Caveat:* if those cells are later built for real (guard off), their shared edge with the dev area is
+computed from the full pixel set and **differs** (sub-decimetre) from what the dev cells stored.
+Production stores start empty, so this is dev-only. The fix is the reset described next.
+
+**Reset done once:**
+
+- The first bulk run had the guard without the origin range, so E2626 was refused and the 13 cells
+  2627_1164…1176 were pinned with `"2626-…": null` neighbours.
+- After the guard was widened, those 13 cells were **rebuilt unpinned** (their manifest `sources`
+  replaced; the only time sources were rewritten), then E2626 was built.
+- To find stale entries again: any `altiNeighbours` value of null whose tile is now in the guard.
 
 ## Raw files
 
@@ -127,11 +141,15 @@ intersect the WGS84 test bbox **or** lie in the LV95 range E 2628–2672 × N 11
 - Bulk run through the queue, scripted as a client in the session scratchpad:
   - origin area 2626–2640 × 1164–1176 at `now`, then E 2628–2672 × N 1154–1181 at `prefetch`;
   - **origin area done after 61 s, everything after 301 s**;
-  - **1,273 cells ready.** The 13 errors are exactly the E2626 column (dev guard).
-- **Store:** 388,178,091 bytes, i.e. **≈ 305 KB per cell** (374 MB on disk).
-- **Downloads:** 1,267 COGs, 1.44 GB. Upstream errors: 1, a transient DNS failure that the fetch retry
+  - **1,273 cells ready.** The 13 errors are exactly the E2626 column (dev guard). After the guard was
+    widened and the E2627 column reset (see *Dev bbox guard*), a second pass built the 13 missing cells
+    in 31 s. The final store holds **1,286 cells**: the whole origin area and the whole test range.
+- **Store:** 391,372,546 bytes for 1,286 cells, i.e. **≈ 304 KB per cell**.
+- **Downloads:** 1,267 COGs, 1.44 GB in the first pass. ALTI in raw totals 1.4 GB for 1,345
+  tiles; total new downloads are ≈ 1.46 GB, including boundaries (19 MB) and one xyz (1 MB). Upstream errors: 1, a transient DNS failure that the fetch retry
   absorbed. Scratch (edge cache): 22.6 MB.
-- **Seams:** all 2,472 shared edges between adjacent cells are byte-identical. Heights run
+- **Seams:** all 2,497 shared edges between adjacent cells are byte-identical, including the 13 at
+  E2626/2627. Heights run
   556.5–4,273.5 m, with no NaN.
 - **No border cells** in the test bbox, so no INSD was emitted there. The INSD path is covered by the
   network test on 2610_1269 (Basel/Allschwil).

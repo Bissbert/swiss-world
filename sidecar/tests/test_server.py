@@ -141,3 +141,15 @@ def test_prefetch_corridor_follows_compass_heading():
     still = server.prefetch_cells(2631_500, 1170_500, 400, 0, 0)
     assert still == [(2631, 1170)]
     assert east[0] == (2631, 1170)  # nearest first
+
+
+def test_wait_requeues_error_after_retry(setup):
+    _, terr, app = setup()
+    terr.fail.add((E, N))
+    terr.gate.set()
+    with TestClient(app) as client:
+        assert client.get("/wait", params={"cell": f"{E},{N}", "timeoutMs": 5000}).json()["state"] == "error"
+        app.state.queue._states[(E, N)].retry_at = 0  # retry time has passed
+        terr.fail.clear()
+        assert client.get("/wait", params={"cell": f"{E},{N}", "timeoutMs": 5000}).json()["state"] == "ready"
+    assert terr.order == [(E, N), (E, N)]

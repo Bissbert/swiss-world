@@ -2,7 +2,7 @@
 # Wheels only (rasterio/fiona/shapely ship their own GDAL/GEOS/PROJ); no system GDAL.
 FROM python:3.12-slim
 
-COPY --from=ghcr.io/astral-sh/uv:0.5 /uv /usr/local/bin/uv
+COPY --from=ghcr.io/astral-sh/uv:0.12.18 /uv /usr/local/bin/uv
 
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \

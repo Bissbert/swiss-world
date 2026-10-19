@@ -21,7 +21,8 @@ BOUNDARIES = "ch.swisstopo.swissboundaries3d"
 # Test bbox (WGS84) that dev runs must stay inside, plus the LV95 test range the plan names
 # (PLAN.md §5: E 2628–2672, N 1154–1181 km, whose southern rows fall just outside the WGS84 box).
 DEV_BBOX_WGS84 = (7.80, 46.56, 8.39, 46.80)
-DEV_RANGE_LV95 = (2628, 1154, 2672, 1181)  # inclusive km
+# inclusive km: the plan's test range and mod-core's origin area (which reaches one column further west)
+DEV_RANGES_LV95 = [(2628, 1154, 2672, 1181), (2626, 1164, 2640, 1176)]
 
 _ALTI_ID = re.compile(r"^swissalti3d_(\d{4})_(\d{4})-(\d{4})$")
 _BLOCK = 8  # km; one STAC query resolves an aligned 8×8 km block of ALTI tiles
@@ -34,9 +35,8 @@ def lv95_to_wgs84_bbox(e0: float, n0: float, e1: float, n1: float) -> tuple[floa
 
 
 def in_dev_area(e_km: int, n_km: int) -> bool:
-    """True if the 1 km tile intersects the dev test bbox or lies in the plan's LV95 test range."""
-    e0, n0, e1, n1 = DEV_RANGE_LV95
-    if e0 <= e_km <= e1 and n0 <= n_km <= n1:
+    """True if the 1 km tile intersects the dev test bbox or lies in one of the LV95 dev ranges."""
+    if any(e0 <= e_km <= e1 and n0 <= n_km <= n1 for e0, n0, e1, n1 in DEV_RANGES_LV95):
         return True
     lon0, lat0, lon1, lat1 = lv95_to_wgs84_bbox(e_km * 1000, n_km * 1000, e_km * 1000 + 1000, n_km * 1000 + 1000)
     b = DEV_BBOX_WGS84

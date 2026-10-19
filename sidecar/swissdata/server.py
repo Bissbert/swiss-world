@@ -76,8 +76,7 @@ class BuildQueue:
         """Long-polls until ready/outside/error. A cell nobody requested yet is queued at "now" first."""
         deadline = time.monotonic() + timeout_s
         with self._cv:
-            if cell not in self._states:
-                self._enqueue(cell, PRIORITIES["now"])
+            self._enqueue(cell, PRIORITIES["now"])  # no-op unless unknown or an error whose retry time has passed
             while True:
                 e = self._entry(cell)
                 left = deadline - time.monotonic()
