@@ -66,6 +66,8 @@ neoForge {
             programArgument '--nogui'
             // shared store: SWISSWORLD_STORE (absolute) if set, else <repo>/store
             systemProperty 'swissworld.store', System.getenv('SWISSWORLD_STORE') ?: rootProject.file('../store').absolutePath
+            // A/B checks of the pack fast path (world/SectionPacking)
+            systemProperty 'swissworld.vanillaPack', System.getenv('SWISSWORLD_VANILLA_PACK') ?: 'false'
             systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
         }
 
@@ -111,6 +113,9 @@ neoForge {
         }
     }
 }
+
+// Minecraft on the plain JUnit classpath (no FML launch, so no mixins: tests see vanilla behaviour)
+neoForge.addModdingDependenciesTo(sourceSets.test)
 
 // Sets up a dependency configuration called 'localRuntime'.
 // This configuration should be used instead of 'runtimeOnly' to declare
