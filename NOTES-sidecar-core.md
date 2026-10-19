@@ -132,8 +132,13 @@ Production stores start empty, so this is dev-only. The fix is the reset describ
 - `sidecar/swissdata/buildings.py` `sheet_from_solids` (sidecar-buildings): sheets of the **2020 schema**
   (e.g. `…_2020_1249-24`, `…_2020_1250-13`, `…_2020_1251-11`, south-east of the test range) have no
   `GEBAEUDEEINHEIT` column, which raised `KeyError` and failed 49 cells. When the column is absent, a roof
-  skin is linked by UUID, which in that schema equals its body's UUID (checked on 1250-13). Sheets with
-  the column behave exactly as before. Test: `test_sheet_of_2020_schema_links_roofs_by_uuid`.
+  skin is linked by UUID, which in that schema usually equals its body's UUID. Sheets with the column behave
+  exactly as before. Test: `test_sheet_of_2020_schema_links_roofs_by_uuid`.
+  - Measured on the 7 cached 2020 sheets: 44 orphan (dropped) roof skins of ≈ 810, i.e. ≈ 5 %.
+    1250-24 accounts for 40 of 718.
+  - The 2021 Interlaken sheet 1208-43 has 37 of 5,918 (0.6 %).
+  - So some 2020 roofs do not share their body's UUID. Those bodies keep their flat body top; the cells are valid.
+  - A better link (e.g. spatial or EGID) is sidecar-buildings' call.
 
 ## Shared store
 
@@ -200,6 +205,15 @@ The pinned `gwr` snapshot (`gwr_be_<date>`) stays reproducible only while the pa
 `scratch/gwr/be.v1.npz` or `raw/public.madd.bfs.admin.ch/be.zip` is kept: upstream publishes a new snapshot
 daily and old ones cannot be re-downloaded. `BuildingsBuilder` does not check a pinned `gwr` against the table
 it loaded (sidecar-buildings' code; flagged, not changed).
+
+**Consequence since `merge_sources`:**
+- If that table changes (be.zip re-fetched after scratch and raw were wiped, or the cache version bumps), the
+  builder emits a new `gwr` id for every cell.
+- `build.merge_sources` then raises `PinChanged`. Both the rebuild and the server's `build_cell` (including
+  rebuilds of evicted cells) would fail such cells permanently with `error`/`retryAfterS` 30.
+- That is consistent with `tlm.check_pinned`, which already fails hard, but the mod would see permanent errors.
+- **Fix needed (sidecar-buildings, via coordinator):** honour a pinned `gwr` by keeping each snapshot's table
+  under its id, or decide that `gwr` is advisory and exempt it from the pin check.
 
 ### TLM extract margin
 
