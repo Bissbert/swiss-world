@@ -17,11 +17,14 @@ public final class Columns {
 
     public final int minX, minZ, maxX, maxZ, baseY;
     public final double baseH;
+    /** The building these columns belong to. */
+    public final long gid;
     private final int w;
     private final byte[] state;
     private final int[] lo, top2, eave2;
 
-    private Columns(int minX, int minZ, int maxX, int maxZ, double baseH) {
+    private Columns(long gid, int minX, int minZ, int maxX, int maxZ, double baseH) {
+        this.gid = gid;
         this.minX = minX;
         this.minZ = minZ;
         this.maxX = maxX;
@@ -38,7 +41,7 @@ public final class Columns {
 
     /** Collects the columns of {@code b} (an entry of {@code home}) from every loaded cell. */
     public static Columns of(CellView view, SwdCell home, SwdCell.Building b) {
-        Columns c = new Columns(view.blockX(home, b.minX()), view.blockZ(home, b.minZ()),
+        Columns c = new Columns(b.gid(), view.blockX(home, b.minX()), view.blockZ(home, b.minZ()),
                 view.blockX(home, b.maxX()), view.blockZ(home, b.maxZ()), Heights.toMetres(b.baseH()));
         Map<SwdCell, Integer> idx = new IdentityHashMap<>();
         for (int z = c.minZ; z <= c.maxZ; z++) {

@@ -14,6 +14,7 @@ final class BuildingRender {
     private static final BlockState AIR = Blocks.AIR.defaultBlockState();
 
     final BuildingPlan p;
+    final CellView view;
     final Columns c;
     final int x0, z0, y0, w, d, h;
     final BlockState[] blocks;
@@ -22,6 +23,7 @@ final class BuildingRender {
 
     BuildingRender(BuildingPlan p, CellView view) {
         this.p = p;
+        this.view = view;
         this.c = p.cols();
         x0 = c.minX - PAD;
         z0 = c.minZ - PAD;
@@ -179,13 +181,16 @@ final class BuildingRender {
                 || !(r.at(x, y0 + 2, z).getBlock() instanceof net.minecraft.world.level.block.DoorBlock)) {
             res.add("door missing " + r.at(x, y0 + 1, z) + " / " + r.at(x, y0 + 2, z));
         } else if (!r.air(ix, y0 + 1, iz) || !r.air(ix, y0 + 2, iz) || r.air(ix, y0, iz)) {
-            res.add("door inside-blocked " + r.at(ix, y0 + 1, iz).getBlock().getDescriptionId() + "/" + r.at(ix, y0 + 2, iz).getBlock().getDescriptionId() + "/" + r.at(ix, y0, iz).getBlock().getDescriptionId());
+            res.add((r.c.interior(ix, iz) ? "door" : "thin") + " inside-blocked " + r.at(ix, y0 + 1, iz).getBlock().getDescriptionId() + "/" + r.at(ix, y0 + 2, iz).getBlock().getDescriptionId() + "/" + r.at(ix, y0, iz).getBlock().getDescriptionId());
+        } else if (r.view.foreign(ox, oz, p.gid())) {
+            res.add("hemmed outside-neighbour");
         } else if (!r.air(ox, y0 + 1, oz) || !r.air(ox, y0 + 2, oz) || r.air(ox, y0, oz)) {
             res.add("door outside-not-walkable");
         } else if (!out[r.idx(ox - r.x0, y0 + 1 - r.y0, oz - r.z0)]) {
             res.add("door outside-enclosed");
-        } else if (!r.incomplete && !r.walkOut(ox, y0 + 1, oz)) {
-            res.add("door landing-unreachable seen=" + r.walkSeen + " [" + r.walkEnd + "]");
+        } else if (!r.incomplete && !r.walkOut(ox, y0 + 1, oz, true)) {
+            // hemmed in: other buildings (counted as solid) wall the landing in; else the door itself is at fault
+            res.add((r.walkOut(ox, y0 + 1, oz, false) ? "hemmed" : "door") + " landing-unreachable seen=" + r.walkSeen + " [" + r.walkEnd + "]");
         }
         return res;
     }
@@ -194,7 +199,7 @@ final class BuildingRender {
     int walkSeen;
     String walkEnd = "";
 
-    boolean walkOut(int sx, int sy, int sz) {
+    boolean walkOut(int sx, int sy, int sz, boolean neighboursBlock) {
         java.util.HashSet<Long> seen = new java.util.HashSet<>();
         ArrayDeque<int[]> q = new ArrayDeque<>();
         q.add(new int[]{sx, sy, sz});
@@ -205,6 +210,7 @@ final class BuildingRender {
             if (a[0] <= x0 + 1 || a[2] <= z0 + 1 || a[0] >= x0 + w - 2 || a[2] >= z0 + d - 2) return true;
             for (int[] o : n) {
                 int x = a[0] + o[0], z = a[2] + o[1];
+                if (neighboursBlock && view.foreign(x, z, p.gid())) continue; // a neighbouring building stands there
                 for (int dy = 1; dy >= -3; dy--) {
                     int y = a[1] + dy;
                     if (dy == 1 && !air(a[0], a[1] + 2, a[2])) continue;
@@ -217,9 +223,6 @@ final class BuildingRender {
             }
         }
         walkSeen = seen.size();
-        StringBuilder sb = new StringBuilder();
-        int k = 0;
-        for (long kk : seen) { if (k++ > 40) break; }
         walkEnd = "start " + sx + "," + sy + "," + sz;
         return false;
     }

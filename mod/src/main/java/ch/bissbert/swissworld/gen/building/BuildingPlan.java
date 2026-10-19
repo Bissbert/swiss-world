@@ -234,6 +234,9 @@ public record BuildingPlan(long gid, Style style, Columns cols, int storey, List
             Dir first = doorSide();
             Dir[] sides = {first, first.cw().cw(), first.cw(), first.cw().cw().cw()};
             Door fallback = null;
+            boolean fallbackBlocked = false;
+            Door lastResort = null;
+            Door walled = null; // has a path to the terrain, but it ends in a pocket
             for (int level = 0; level < 4; level++) {
                 Door best = null;
                 int bestLen = Integer.MAX_VALUE;
@@ -264,21 +267,65 @@ public record BuildingPlan(long gid, Style style, Columns cols, int storey, List
                     }
                     for (Door d : cands) {
                         int[] t = BuildingStage.trace(c, d, y0 + d.up(), terrain);
-                        if (t == null) {
-                            if (fallback == null) fallback = d;
-                        } else if (t.length < bestLen) {
+                        boolean ok = t != null && t.length < bestLen && escapes(d, t);
+                        if (ok) {
                             best = d;
                             bestLen = t.length;
                             if (bestLen <= SHORT_PATH) return best;
+                        } else if (level == 3) { // the inside cell is a wall itself: only if nothing else works
+                            if (lastResort == null) lastResort = d;
+                        } else if (t != null && walled == null) {
+                            walled = d;
+                        } else if (t == null || t.length < bestLen) {
+                            // no way out found: keep the first candidate, but not one that opens onto a neighbour
+                            boolean blocked = terrain.foreign(d.x + d.out.dx, d.z + d.out.dz, gid);
+                            if (fallback == null || fallbackBlocked && !blocked) {
+                                fallback = d;
+                                fallbackBlocked = blocked;
+                            }
                         }
                     }
                 }
                 if (best != null) return best;
             }
-            return fallback;
+            return walled != null ? walled : fallback != null ? fallback : lastResort;
         }
 
         static final int SHORT_PATH = 6;
+
+        /**
+         * True if a walker standing at the end of the path {@code t} can go on over the terrain (steps of at most one
+         * block, not through this or a neighbouring building) to {@link Buildings#MARGIN} cells beyond the bbox; a
+         * landing in a pocket between two buildings does not count. Unloaded terrain counts as open.
+         */
+        boolean escapes(Door d, int[] t) {
+            int sx = d.x + d.out.dx * t.length, sz = d.z + d.out.dz * t.length;
+            double h0 = terrain.terrain(sx, sz);
+            if (Double.isNaN(h0)) return true;
+            java.util.HashMap<Long, Integer> seen = new java.util.HashMap<>();
+            java.util.ArrayDeque<int[]> q = new java.util.ArrayDeque<>();
+            int m = Buildings.MARGIN;
+            seen.put(((long) sx << 32) ^ (sz & 0xFFFFFFFFL), (int) Math.floor(SwissCoords.toY(h0)));
+            q.add(new int[]{sx, sz});
+            while (!q.isEmpty() && seen.size() < 4000) {
+                int[] a = q.poll();
+                if (a[0] < c.minX - m || a[0] > c.maxX + m || a[1] < c.minZ - m || a[1] > c.maxZ + m) return true;
+                int ga = seen.get(((long) a[0] << 32) ^ (a[1] & 0xFFFFFFFFL));
+                for (Dir o : Dir.values()) {
+                    int x = a[0] + o.dx, z = a[1] + o.dz;
+                    long k = ((long) x << 32) ^ (z & 0xFFFFFFFFL);
+                    if (seen.containsKey(k)) continue;
+                    if (c.state(x, z) == Columns.BODY || terrain.foreign(x, z, gid)) continue;
+                    double h = terrain.terrain(x, z);
+                    if (Double.isNaN(h)) return true;
+                    int g = (int) Math.floor(SwissCoords.toY(h));
+                    if (Math.abs(g - ga) > 1) continue;
+                    seen.put(k, g);
+                    q.add(new int[]{x, z});
+                }
+            }
+            return seen.size() >= 4000;
+        }
 
         /** A door at (x, z) facing {@code out} under the rule of {@code level}, or null. */
         Door candidate(int x, int z, Dir out, int y0, int level) {

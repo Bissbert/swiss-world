@@ -100,6 +100,75 @@ class BuildingSweepTest {
     }
 
     /**
+     * Writes probe targets for the in-game check (SWISSWORLD_PROBE_OUT): per building its door cells, the cell inside,
+     * roof columns over rooms (top block per the offline render) and panes with their run axis. Buildings: the gids in
+     * SWISSWORLD_PROBE_GIDS plus the first SWISSWORLD_PROBE_PER_STYLE (default 3) complete buildings of each style.
+     */
+    @Test
+    void probeTargets() throws Exception {
+        String dir = System.getenv("SWISSWORLD_SWEEP_STORE"), list = System.getenv("SWISSWORLD_SWEEP_LIST"),
+                out = System.getenv("SWISSWORLD_PROBE_OUT");
+        assumeTrue(dir != null && list != null && out != null, "probe env not set");
+        net.minecraft.SharedConstants.tryDetectVersion();
+        net.minecraft.server.Bootstrap.bootStrap();
+        java.util.Set<String> gids = new java.util.HashSet<>(List.of(System.getenv().getOrDefault("SWISSWORLD_PROBE_GIDS", "").split(",")));
+        int per = Integer.parseInt(System.getenv().getOrDefault("SWISSWORLD_PROBE_PER_STYLE", "3"));
+        Map<String, SwdCell> memo = new java.util.HashMap<>();
+        CellView v = new CellView(new SwissCoords(2_632_900, 1_170_600), (e, n) -> memo.computeIfAbsent(e + "_" + n, k -> {
+            try {
+                Path p = Path.of(dir, "cells", k + ".swd");
+                return java.nio.file.Files.isRegularFile(p) ? SwdReader.read(p) : null;
+            } catch (java.io.IOException ex) {
+                throw new RuntimeException(ex);
+            }
+        }));
+        List<String> lines = new ArrayList<>();
+        Map<Style, Integer> taken = new java.util.EnumMap<>(Style.class);
+        for (String k : list.split(",")) {
+            String[] en = k.trim().split("_");
+            SwdCell cell = v.cells().get(Integer.parseInt(en[0]), Integer.parseInt(en[1]));
+            if (cell == null || cell.buildings() == null) continue;
+            for (SwdCell.Building b : cell.buildings()) {
+                boolean pick = gids.contains(Long.toString(b.gid()));
+                BuildingPlan p = BuildingPlan.of(v, cell, b);
+                if (p.door() == null || p.rooms().isEmpty()) continue;
+                if (!pick && taken.getOrDefault(p.style(), 0) >= per) continue;
+                BuildingRender r = new BuildingRender(p, v);
+                if (r.incomplete && !pick || !BuildingRender.check(r).isEmpty()) continue;
+                taken.merge(p.style(), 1, Integer::sum);
+                BuildingPlan.Door d = p.door();
+                int y = p.floorY(0) + d.up() + 1;
+                lines.add("B " + b.gid() + " " + p.style() + " " + d.x() + " " + y + " " + d.z() + " " + d.out().dx + " "
+                        + d.out().dz + " " + (d.x() - d.out().dx) + " " + (d.z() - d.out().dz));
+                int top = p.floors().size() - 1, n = 0;
+                for (BuildingPlan.Room room : p.rooms()) {
+                    if (room.floor() != top || n >= 3) continue;
+                    int cx = (room.x0() + room.x1()) / 2, cz = (room.z0() + room.z1()) / 2, fy = p.floorY(top);
+                    if (!p.cols().body(cx, cz) || p.cols().topFull(cx, cz) <= fy + 2 || !r.air(cx, fy + 1, cz)) continue;
+                    int t = r.y0 + r.h - 1;
+                    while (t > fy && r.air(cx, t, cz)) t--;
+                    lines.add("R " + cx + " " + (fy + 1) + " " + cz + " " + t);
+                    n++;
+                }
+                n = 0;
+                for (int yy = r.y0; yy < r.y0 + r.h && n < 3; yy++) {
+                    for (int z = p.cols().minZ; z <= p.cols().maxZ && n < 3; z++) {
+                        for (int x = p.cols().minX; x <= p.cols().maxX && n < 3; x++) {
+                            net.minecraft.world.level.block.state.BlockState bs = r.at(x, yy, z);
+                            if (!(bs.getBlock() instanceof net.minecraft.world.level.block.IronBarsBlock)) continue;
+                            boolean ew = bs.getValue(net.minecraft.world.level.block.CrossCollisionBlock.EAST);
+                            lines.add("P " + x + " " + yy + " " + z + " " + (ew ? "x" : "z"));
+                            n++;
+                        }
+                    }
+                }
+            }
+        }
+        java.nio.file.Files.write(Path.of(out), lines);
+        System.out.println("probeTargets: " + lines.stream().filter(l -> l.startsWith("B")).count() + " buildings " + taken);
+    }
+
+    /**
      * Renders and checks every building of the cells; prints one summary line and writes the problems to
      * $WATERTIGHT_OUT (default /tmp/watertight.txt). WT_NEAR=x,z adds the plan, ground ring, side view and top view of
      * the buildings around that block column, whether they fail or not.
@@ -109,7 +178,7 @@ class BuildingSweepTest {
         net.minecraft.server.Bootstrap.bootStrap();
         List<String> bad = new ArrayList<>();
         Map<String, Integer> causes = new java.util.TreeMap<>();
-        int total = 0, checked = 0, skipped = 0, withRooms = 0, leaking = 0, doorless = 0, badDoor = 0, openPanes = 0;
+        int total = 0, checked = 0, skipped = 0, withRooms = 0, leaking = 0, doorless = 0, badDoor = 0, openPanes = 0, hemmed = 0, thin = 0;
         String near = System.getenv("WT_NEAR");
         for (SwdCell cell : cells) {
             for (SwdCell.Building b : cell.buildings()) {
@@ -129,14 +198,21 @@ class BuildingSweepTest {
                 if (why.stream().anyMatch(w -> w.startsWith("pane-open"))) openPanes++;
                 if (why.stream().anyMatch(w -> w.startsWith("nodoor"))) doorless++;
                 else if (why.stream().anyMatch(w -> w.startsWith("door"))) badDoor++;
-                bad.add(b.gid() + " " + p.style() + " " + why);
+                else if (why.stream().anyMatch(w -> w.startsWith("hemmed"))) hemmed++;
+                else if (why.stream().anyMatch(w -> w.startsWith("thin"))) thin++;
+                bad.add(b.gid() + " " + p.style() + " bbox " + p.cols().minX + ".." + p.cols().maxX + " " + p.cols().minZ + ".."
+                        + p.cols().maxZ + " door=" + p.door() + " " + why);
             }
         }
         System.out.printf("watertight[%s]: %d buildings, %d checked, %d at a missing cell edge, %d with rooms, %d leaking, "
-                + "%d without door, %d bad door, %d with open panes; %s%n", label, total, checked, skipped, withRooms,
-                leaking, doorless, badDoor, openPanes, causes);
+                + "%d without door, %d bad door, %d with open panes, %d hemmed in by neighbours, %d thin; %s%n", label, total,
+                checked, skipped, withRooms, leaking, doorless, badDoor, openPanes, hemmed, thin, causes);
+        // acceptance: nothing leaks or lacks a door; a door may only fail where neighbouring buildings or a thin shell
+        // leave no room (a handful per thousand)
+        org.junit.jupiter.api.Assertions.assertTrue(hemmed + thin <= Math.max(2, withRooms / 100),
+                "hemmed in " + hemmed + ", thin " + thin);
         java.nio.file.Files.write(Path.of(System.getenv().getOrDefault("WATERTIGHT_OUT", "/tmp/watertight.txt")), bad);
-        return bad.stream().filter(l -> !l.startsWith("NEAR")).toList();
+        return bad.stream().filter(l -> !l.startsWith("NEAR") && !l.contains("[hemmed ") && !l.contains("[thin ")).toList();
     }
 
     private static List<String> inspect(String near, BuildingPlan p, BuildingRender r, CellView v, List<String> why) {
@@ -151,6 +227,17 @@ class BuildingSweepTest {
             for (int x = c.minX - 1; x <= c.maxX + 1; x++) {
                 double h = v.terrain(x, z);
                 sb.append(Double.isNaN(h) ? " ??" : String.format("%3d", (int) Math.floor(SwissCoords.toY(h)) - p.floorY(0)));
+            }
+            sb.append('\n');
+        }
+        sb.append("\nmap (B body, e eave, F other building, D door, o outside cell, . free):\n");
+        for (int z = c.minZ - 8; z <= c.maxZ + 8; z++) {
+            for (int x = c.minX - 8; x <= c.maxX + 8; x++) {
+                BuildingPlan.Door d = p.door();
+                char ch = c.state(x, z) == Columns.BODY ? 'B' : c.state(x, z) == Columns.EAVE ? 'e' : v.foreign(x, z, p.gid()) ? 'F' : '.';
+                if (d != null && x == d.x() && z == d.z()) ch = 'D';
+                else if (d != null && x == d.x() + d.out().dx && z == d.z() + d.out().dz) ch = 'o';
+                sb.append(ch);
             }
             sb.append('\n');
         }

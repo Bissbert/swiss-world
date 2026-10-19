@@ -212,7 +212,7 @@ public final class BuildingStage implements GenStage {
         int prev = y0;
         for (int i = 0; i < MAX_RUN; i++) {
             int x = d.x() + d.out().dx * (i + 1), z = d.z() + d.out().dz * (i + 1);
-            if (c.state(x, z) == Columns.BODY) return null;
+            if (c.state(x, z) == Columns.BODY || view.foreign(x, z, c.gid)) return null;
             double h = view.terrain(x, z);
             if (Double.isNaN(h)) return i == 0 ? null : Arrays.copyOf(ys, i);
             int g = (int) Math.floor(SwissCoords.toY(h));
@@ -246,7 +246,7 @@ public final class BuildingStage implements GenStage {
         for (int i = 0; i < ys.length; i++) {
             int x = d.x() + d.out().dx * (i + 1), z = d.z() + d.out().dz * (i + 1);
             double h = view.terrain(x, z);
-            if (Double.isNaN(h)) break;
+            if (Double.isNaN(h) || view.foreign(x, z, p.gid())) break;
             int ground = (int) Math.floor(SwissCoords.toY(h)), y = ys[i];
             int prev = i == 0 ? y0 : ys[i - 1];
             for (int a = y + 1; a <= Math.max(ground > y ? ground : y, i == 0 || p.cols().state(x, z) == Columns.EAVE ? y + 3 : y); a++) put.set(x, a, z, AIR);
@@ -262,7 +262,7 @@ public final class BuildingStage implements GenStage {
         for (int i = ys.length; i < ys.length + 5; i++) {
             int x = d.x() + d.out().dx * (i + 1), z = d.z() + d.out().dz * (i + 1);
             double h = view.terrain(x, z);
-            if (Double.isNaN(h) || p.cols().state(x, z) != Columns.EAVE) continue;
+            if (Double.isNaN(h) || p.cols().state(x, z) != Columns.EAVE || view.foreign(x, z, p.gid())) continue;
             int g = (int) Math.floor(SwissCoords.toY(h));
             for (int a = g + 1; a <= g + 3; a++) put.set(x, a, z, AIR);
         }
@@ -273,7 +273,7 @@ public final class BuildingStage implements GenStage {
         int n = 0;
         while (n < 8) {
             int x = d.x() + d.out().dx * (n + 1), z = d.z() + d.out().dz * (n + 1);
-            if (p.cols().state(x, z) == Columns.BODY || Double.isNaN(view.terrain(x, z))) break;
+            if (p.cols().state(x, z) == Columns.BODY || view.foreign(x, z, p.gid()) || Double.isNaN(view.terrain(x, z))) break;
             n++;
         }
         int[] ys = new int[Math.max(n, 1)];
