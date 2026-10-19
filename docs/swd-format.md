@@ -136,7 +136,7 @@ count × entry (48 bytes):
   u64 gid            stable global building id = first 8 bytes of SHA-1(UUID string), little-endian.
                      Identical in every cell the building touches.
   u64 egid           GWR EGID (0 = unknown)
-  u16 objektart      swissBUILDINGS3D OBJEKTART code (raw)
+  u16 objektart      swissBUILDINGS3D OBJEKTART as a stable code (table below; the source stores text)
   u16 gwrCategory    GKAT (0 = unknown)
   u16 gwrClass       GKLAS (0 = unknown)
   u16 gwrPeriod      GBAUP (0 = unknown)
@@ -164,6 +164,23 @@ columnCount × column:
     u8  part         0 body, 1 roof overhang/eave (outside the walls), 2 annex
     u8  roofFlags    bit0 top of this span is roof, bit1 slope half-step (top ends at x.5)
 ```
+
+**Span rules:**
+
+- Spans in one column **never overlap** and are sorted bottom-up. The source has overlapping solids. The sidecar resolves them bottom-up: a span starting inside the one below is clipped to start at its top, or dropped if it lies fully inside.
+- `roofFlags.bit0` is set on the **topmost span of each building** in a column, not only on the topmost span of the column.
+- A building is listed in a cell's `BTBL` when at least one of its column centres (body or eave) lies in the cell.
+
+**`objektart` codes.** These are append-only, because the codes are written into cells. Unknown text maps to 0.
+
+| Code | OBJEKTART | Code | OBJEKTART |
+|---|---|---|---|
+| 0 | unknown / other | 6 | Unterirdisches Gebaeude |
+| 1 | Gebaeude Einzelhaus | 7 | Lagertank |
+| 2 | Hochhaus | 8 | Treibhaus |
+| 3 | Sakrales Gebaeude | 9 | Mauer gross |
+| 4 | Im Bau | 10 | Bruecke gedeckt |
+| 5 | Gebaeude unsichtbar | | |
 
 The mod derives walls, floors, stairs and roof shapes from spans and neighbours. A building that crosses a cell border has spans in each cell and the same `gid` everywhere.
 
