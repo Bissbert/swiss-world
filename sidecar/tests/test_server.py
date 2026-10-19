@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
-from swissdata import build, coverage, names, server, swd
+from swissdata import build, coverage, names, progress, server, swd
 from swissdata.config import Config
 
 E, N = 2631, 1170
@@ -134,7 +134,7 @@ def test_prefetch_generated_status_place(setup):
         client.get("/wait", params={"cell": f"{E + 3},{N}", "timeoutMs": 5000})
         assert client.post("/generated", json={"cells": [[E, N]]}).status_code == 204
         st = client.get("/status").json()
-        assert set(st) == {"queue", "store", "scratch", "upstream", "versions"}
+        assert set(st) == {"queue", "builds", "store", "scratch", "upstream", "versions"}
         assert st["store"]["capBytes"] == 12_000_000_000
         assert client.get("/place", params={"q": "Bern"}).status_code == 503
         assert client.get("/wait", params={"cell": "nope"}).status_code == 400
@@ -161,3 +161,34 @@ def test_wait_requeues_error_after_retry(setup):
         terr.fail.clear()
         assert client.get("/wait", params={"cell": f"{E},{N}", "timeoutMs": 5000}).json()["state"] == "ready"
     assert terr.order == [(E, N), (E, N)]
+
+
+def test_status_lists_builds_with_stage_and_download(setup, monkeypatch):
+    """GET /status "builds": stage/step per builder, elapsed time, and the bytes of a download as they stream."""
+    _, terr, app = setup()
+    seen = {}
+
+    class Downloading:
+        name = "downloading"
+        tags = ()
+
+        def build(self, e_km, n_km, cfg, partial, pinned):
+            p = progress.current()
+            p.file, p.bytes, p.total_bytes = "swissbuildings3d.zip", 1 << 20, 4 << 20
+            seen["mid"] = app.state.queue.builds()
+            p.file = None
+            return build.LayerResult()
+
+    with TestClient(app) as client:
+        app.state.queue.builders = [terr, Downloading(), build.DefaultSurface()]
+        states(client, [[E, N]])
+        assert terr.started.wait(5)
+        b = client.get("/status").json()["builds"]
+        assert len(b) == 1 and b[0]["cell"] == [E, N] and b[0]["stage"] == "gated"
+        assert (b[0]["step"], b[0]["steps"]) == (1, 3) and b[0]["elapsedS"] >= 0 and "download" not in b[0]
+        terr.gate.set()
+        assert client.get("/wait", params={"cell": f"{E},{N}", "timeoutMs": 5000}).json()["state"] == "ready"
+        assert client.get("/status").json()["builds"] == []
+    mid = seen["mid"][0]
+    assert mid["stage"] == "downloading" and mid["step"] == 2
+    assert mid["download"] == {"file": "swissbuildings3d.zip", "bytes": 1 << 20, "totalBytes": 4 << 20}

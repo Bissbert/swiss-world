@@ -24,10 +24,34 @@ class ArrivalTest {
     }
 
     @Test
-    void barShowsCellsThenChunks() {
-        assertEquals("Building terrain… 1/4 cells · /swiss back cancels", Arrival.bar(1, 4, 0, 9, false));
-        assertEquals("Generating terrain… 6/9 chunks · /swiss back cancels", Arrival.bar(4, 4, 6, 9, false));
-        assertTrue(Arrival.bar(0, 1, 0, 9, true).contains("sidecar not reachable"));
+    void barSaysWhatTheSidecarDoesAndAlwaysMoves() {
+        assertEquals("Building terrain… 0/1 cells, queued in the sidecar · 3 s · /swiss back cancels",
+                Arrival.bar(0, 1, 0, 9, null, 3, false));
+        Arrival.Build step = new Arrival.Build(2600, 1199, "buildings", 6, 8, null, 0, -1);
+        assertEquals("Building terrain… cell 1 of 1: buildings (6/8) · 41 s · /swiss back cancels",
+                Arrival.bar(0, 1, 0, 9, step, 41, false));
+        Arrival.Build dl = new Arrival.Build(2600, 1199, "buildings", 6, 8, "b.zip", 50L << 20, 210L << 20);
+        assertEquals("Building terrain… cell 2 of 4: downloading b.zip 50/210 MB · 12 s · /swiss back cancels",
+                Arrival.bar(1, 4, 0, 9, dl, 12, false));
+        assertEquals("Generating terrain… 6/9 chunks · 97 s · /swiss back cancels", Arrival.bar(4, 4, 6, 9, null, 97, false));
+        assertTrue(Arrival.bar(0, 1, 0, 9, null, 5, true).contains("sidecar not reachable"));
+        // same state, one second later: different text
+        assertTrue(!Arrival.bar(0, 1, 0, 9, step, 41, false).equals(Arrival.bar(0, 1, 0, 9, step, 42, false)));
+    }
+
+    @Test
+    void parsesStatusBuilds() {
+        com.google.gson.JsonObject st = com.google.gson.JsonParser.parseString("""
+                {"queue": {"now": 0, "prefetch": 0, "building": 2}, "builds": [
+                 {"cell": [2600, 1199], "stage": "alti", "step": 1, "steps": 8, "elapsedS": 2.5},
+                 {"cell": [2601, 1199], "stage": "buildings", "step": 6, "steps": 8, "elapsedS": 40,
+                  "download": {"file": "b.zip", "bytes": 10, "totalBytes": null}},
+                 {"cell": "garbage"}]}""").getAsJsonObject();
+        java.util.List<Arrival.Build> b = Arrival.builds(st);
+        assertEquals(2, b.size());
+        assertEquals(new Arrival.Build(2600, 1199, "alti", 1, 8, null, 0, -1), b.get(0));
+        assertEquals(new Arrival.Build(2601, 1199, "buildings", 6, 8, "b.zip", 10, -1), b.get(1));
+        assertTrue(Arrival.builds(com.google.gson.JsonParser.parseString("{\"queue\": {}}").getAsJsonObject()).isEmpty());
     }
 
     @Test

@@ -24,7 +24,7 @@ from fastapi import FastAPI, Query, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from . import __version__, build, coverage, names, stac, swd
+from . import __version__, build, coverage, names, progress, stac, swd
 from .config import Config
 from .fetch import STATS
 from .manifest import Pins
@@ -56,6 +56,7 @@ class BuildQueue:
         self._cv = threading.Condition()
         self._threads: list[threading.Thread] = []
         self._stop = False
+        self._progress: dict[tuple[int, int], progress.CellProgress] = {}
 
     # --- API side -----------------------------------------------------------------------------
 
@@ -90,6 +91,12 @@ class BuildQueue:
             return {"now": sum(1 for s in live if s.state == "queued" and s.priority == 0),
                     "prefetch": sum(1 for s in live if s.state == "queued" and s.priority == 1),
                     "building": sum(1 for s in live if s.state == "building")}
+
+    def builds(self) -> list[dict]:
+        """The cells being built right now: builder stage, step, elapsed time and the download in progress."""
+        with self._cv:
+            live = list(self._progress.values())
+        return [p.as_dict() for p in live]
 
     def _enqueue(self, cell: tuple[int, int], priority: int) -> bool:
         """Returns True if the cell was (re)queued or upgraded."""
@@ -163,8 +170,12 @@ class BuildQueue:
     def _work(self) -> None:
         while (cell := self._next()) is not None:
             t0 = time.monotonic()
+            prog = progress.CellProgress(cell)
+            with self._cv:
+                self._progress[cell] = prog
             try:
-                self.build_cell(*cell)
+                with progress.tracking(prog):
+                    self.build_cell(*cell)
                 with self._cv:
                     self._states.pop(cell, None)
                 log.info("built %s_%s in %.1fs", *cell, time.monotonic() - t0)
@@ -174,6 +185,7 @@ class BuildQueue:
                     s = self._states[cell]
                     s.state, s.error, s.retry_at = "error", f"{type(ex).__name__}: {ex}", time.time() + RETRY_AFTER_S
             with self._cv:
+                self._progress.pop(cell, None)
                 self._cv.notify_all()
 
     def build_cell(self, e_km: int, n_km: int) -> None:
@@ -302,6 +314,7 @@ def create_app(cfg: Config | None = None, builders=None, grid: np.ndarray | None
         pins = Pins(cfg.store)
         return {
             "queue": app.state.queue.counts(),
+            "builds": app.state.queue.builds(),
             "store": {"cells": store.count, "bytes": store.bytes, "capBytes": cfg.store_cap_bytes},
             "scratch": {"bytes": scratch, "capBytes": cfg.scratch_cap_bytes},
             "upstream": {"requests": STATS.requests, "errors": STATS.errors, "lastError": STATS.last_error,

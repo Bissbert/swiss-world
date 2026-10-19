@@ -36,12 +36,51 @@ final class Arrival {
         return now - lastProgress > NO_PROGRESS_TICKS && !sidecarBusy ? "no progress for " + NO_PROGRESS_TICKS / 20 + " s" : null;
     }
 
-    /** "Building terrain… 1/4 cells", then "Generating terrain… 6/9 chunks". */
-    static String bar(int cellsReady, int cellsTotal, int chunksReady, int chunksTotal, boolean sidecarDown) {
-        String s = cellsReady < cellsTotal
-                ? "Building terrain… " + cellsReady + "/" + cellsTotal + " cells"
-                : "Generating terrain… " + chunksReady + "/" + chunksTotal + " chunks";
-        return s + (sidecarDown ? " (sidecar not reachable)" : "") + " · /swiss back cancels";
+    /** One entry of the sidecar's GET /status "builds": a cell being built, its builder step and download. */
+    record Build(int eKm, int nKm, String stage, int step, int steps, String file, long bytes, long totalBytes) {}
+
+    /** The "builds" list of a /status answer; empty when it is missing (older sidecar) or malformed. */
+    static java.util.List<Build> builds(com.google.gson.JsonObject status) {
+        java.util.List<Build> out = new java.util.ArrayList<>();
+        if (status == null || !status.has("builds") || !status.get("builds").isJsonArray()) return out;
+        for (com.google.gson.JsonElement el : status.getAsJsonArray("builds")) {
+            try {
+                com.google.gson.JsonObject b = el.getAsJsonObject();
+                com.google.gson.JsonArray c = b.getAsJsonArray("cell");
+                com.google.gson.JsonObject d = b.has("download") && b.get("download").isJsonObject() ? b.getAsJsonObject("download") : null;
+                out.add(new Build(c.get(0).getAsInt(), c.get(1).getAsInt(), b.get("stage").getAsString(),
+                        b.get("step").getAsInt(), b.get("steps").getAsInt(),
+                        d == null ? null : d.get("file").getAsString(), d == null ? 0 : d.get("bytes").getAsLong(),
+                        d == null || d.get("totalBytes").isJsonNull() ? -1 : d.get("totalBytes").getAsLong()));
+            } catch (RuntimeException ignored) {
+                // skip an entry this version does not understand
+            }
+        }
+        return out;
+    }
+
+    /**
+     * The action bar while waiting. It always ends with the seconds waited, so it moves every second; the middle says
+     * what the sidecar is doing for this player's cells: "Building terrain… cell 1 of 1: buildings (6/8) · 41 s",
+     * "Building terrain… cell 1 of 2: downloading swissbuildings3d.zip 50/210 MB · 12 s", "… 0/1 cells, queued in the
+     * sidecar · 3 s", then "Generating terrain… 6/9 chunks · 97 s".
+     */
+    static String bar(int cellsReady, int cellsTotal, int chunksReady, int chunksTotal, Build mine, int waitS, boolean sidecarDown) {
+        String s;
+        if (cellsReady >= cellsTotal) {
+            s = "Generating terrain… " + chunksReady + "/" + chunksTotal + " chunks";
+        } else if (mine == null) {
+            s = "Building terrain… " + cellsReady + "/" + cellsTotal + " cells" + (sidecarDown ? "" : ", queued in the sidecar");
+        } else {
+            s = "Building terrain… cell " + (cellsReady + 1) + " of " + cellsTotal + ": " + (mine.file() != null
+                    ? "downloading " + mine.file() + " " + mb(mine.bytes()) + (mine.totalBytes() > 0 ? "/" + mb(mine.totalBytes()) : "") + " MB"
+                    : mine.stage() + " (" + mine.step() + "/" + mine.steps() + ")");
+        }
+        return s + (sidecarDown ? " (sidecar not reachable)" : "") + " · " + waitS + " s · /swiss back cancels";
+    }
+
+    private static long mb(long bytes) {
+        return Math.round(bytes / 1_048_576.0);
     }
 
     /**

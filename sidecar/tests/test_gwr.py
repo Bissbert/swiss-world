@@ -42,6 +42,9 @@ def test_soft_pin(monkeypatch, tmp_path, caplog):
         assert gwr.load_pinned(cfg, "gwr_be_2026-01-05")[1] == "gwr_be_2026-11-02"
     assert "gwr_be_2026-01-05" in caplog.text
     assert gwr.snapshots(cfg) == ["gwr_be_2026-10-19", "gwr_be_2026-11-02"]
+    # another worker's half-written temp archive is not a snapshot (it sorted last and was read: BadZipFile)
+    (cfg.store / "gwr" / "gwr_be_2026-11-02.npz.1-2.tmp.npz").write_bytes(b"partial")
+    assert gwr.snapshots(cfg) == ["gwr_be_2026-10-19", "gwr_be_2026-11-02"]
 
 
 def test_merge_sources_soft_gwr_pin():

@@ -230,6 +230,16 @@ None. The real cells copied from the shared store (layers TERR/SURF/WLVL/WKND/OC
   tp to the Nether cancelled; sidecar stopped → gave up after 60 s with "not reachable". rcon `origin place`:
   set/not found/connection refused/locked replies all arrived.
 
+- Action bar during the cell build (later the same day): the sidecar's `/status` has `builds` (per cell: builder
+  stage `step/steps`, elapsed, current download with bytes; `swissdata/progress.py`, a thread-local set by
+  `assemble` and `fetch`). The mod polls it every 2 s and shows "Building terrain… cell k of n: downloading F x/y MB"
+  or "…: buildings (6/8)", else "r/t cells, queued", then "Generating terrain… x/9 chunks"; every line ends in the
+  elapsed seconds, so it changes every second even while one stage takes 40 s. Tested: plain `/swiss` onto an
+  unbuilt origin cell (35 s, stages + seconds) and a 4-cell goto (download line seen).
+- Found while testing: `gwr.snapshots` listed `_write`'s temp file, so a racing worker read a half-written npz
+  (BadZipFile on a fresh store); fixed. Open, not mine: with current main, worldgen workers spun for minutes in
+  `BuildingPlan.Planner.nearestFree` (via `light`) around E 2720 N 1117, so no chunk generated and goto gave up.
+
 ## M2 notes
 
 - Sea and ocean fish spawns at y −1807.

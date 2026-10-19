@@ -67,11 +67,18 @@ The mod reports cells whose chunks are all generated. These are evicted first wh
 ### `GET /status`
 ```json
 {"queue": {"now": 0, "prefetch": 12, "building": 2},
+ "builds": [{"cell": [2600, 1199], "stage": "buildings", "step": 6, "steps": 8, "elapsedS": 41.5,
+             "download": {"file": "swissbuildings3d_3_0_2025_1166-24.gdb.zip", "bytes": 52428800, "totalBytes": 210000000}}],
  "store": {"cells": 431, "bytes": 182000000, "capBytes": 12000000000},
  "scratch": {"bytes": 0, "capBytes": 2000000000},
  "upstream": {"requests": 5021, "errors": 3, "lastError": null, "downloads": 1345, "downloadBytes": 1460000000},
  "versions": {"tlm": "swisstlm3d_2026-02", "boundaries": "swissboundaries3d_2026-01", "names": "swissnames3d_2026"}}
 ```
+
+`builds` (added for the arrival progress bar) lists the cells being built right now, one entry per worker: the
+builder running (`stage`, its 1-based `step` of `steps`), seconds since the build started, and `download` while that
+builder streams a file into the raw cache (`totalBytes` null without a Content-Length). Downloads served from the cache
+do not appear. The mod polls this every 2 s while a player waits for terrain.
 
 ### `GET /place?q=Grimsel&limit=10[&mode=prefix|exact]`
 Gazetteer lookup (swissNAMES3D), used for `/swiss goto` and its tab completion.

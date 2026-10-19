@@ -12,7 +12,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-from . import __version__
+from . import __version__, progress
 from .config import Config
 
 USER_AGENT = f"swissdata/{__version__} (swissworld Minecraft mod; on-demand swisstopo open data)"
@@ -66,14 +66,23 @@ def fetch(cfg: Config, url: str, retries: int = 4) -> Path:
         delay = 2.0
         for attempt in range(retries):
             try:
+                prog = progress.current()
                 with httpx.stream("GET", url, headers={"User-Agent": USER_AGENT}, timeout=120,
                                   follow_redirects=True) as r:
                     r.raise_for_status()
+                    if prog is not None:
+                        size = r.headers.get("content-length")
+                        prog.bytes, prog.total_bytes = 0, int(size) if size and size.isdigit() else None
+                        prog.file = dest.name
                     with open(part, "wb") as f:
                         for chunk in r.iter_bytes(1 << 20):
                             f.write(chunk)
+                            if prog is not None:
+                                prog.bytes += len(chunk)
                         f.flush()
                         os.fsync(f.fileno())
+                    if prog is not None:
+                        prog.file = None
                 os.replace(part, dest)
                 STATS.count(download_bytes=dest.stat().st_size)
                 return dest

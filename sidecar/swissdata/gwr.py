@@ -136,7 +136,9 @@ def snapshot_path(cfg: Config, sid: str) -> Path:
 def snapshots(cfg: Config, cantons: tuple[str, ...] = CANTONS) -> list[str]:
     """Archived snapshot ids of `cantons`, oldest first (the ids end in the ISO export date)."""
     prefix = f"gwr_{'+'.join(cantons)}_"
-    return sorted(p.stem for p in (cfg.store / "gwr").glob(f"{prefix}*.npz") if p.stem[len(prefix):][:1].isdigit())
+    # skip _write's temp files (…npz.<pid>-<tid>.tmp.npz): a racing worker would read a half-written archive
+    return sorted(p.stem for p in (cfg.store / "gwr").glob(f"{prefix}*.npz")
+                  if p.stem[len(prefix):][:1].isdigit() and not p.name.endswith(".tmp.npz"))
 
 
 def _snapshot(cfg: Config, sid: str) -> GwrTable:

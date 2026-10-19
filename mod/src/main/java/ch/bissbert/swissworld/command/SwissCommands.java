@@ -61,7 +61,7 @@ public final class SwissCommands {
 
     private static final TicketType<ChunkPos> ENTER_TICKET =
             TicketType.create("swissworld_enter", Comparator.comparingLong(ChunkPos::toLong));
-    private static final int STATUS_TICKS = 5 * 20;
+    private static final int STATUS_TICKS = 2 * 20;
     private static final String ATTRIBUTION = "Data ©swisstopo";
 
     /** Players waiting for their target chunk; main thread only. */
@@ -92,6 +92,8 @@ public final class SwissCommands {
     /** Sidecar activity seen by the last /status poll (main thread only): downloads, requests, store size. */
     private static long sidecarActivity;
     private static boolean sidecarBusy, statusInFlight;
+    /** The sidecar's builds in progress by cell key, from the last /status poll (main thread only). */
+    private static Map<Long, Arrival.Build> sidecarBuilds = Map.of();
 
     private static final PlaceLookup PLACES = new PlaceLookup(SwissRuntime::sidecar, System::currentTimeMillis);
 
@@ -281,12 +283,14 @@ public final class SwissCommands {
         ServerLevel swiss = server.getLevel(SwissRegistries.SWITZERLAND);
         int now = server.getTickCount();
         pollSidecar(server, now);
+        List<Long> missing = new java.util.ArrayList<>();
         for (Iterator<Map.Entry<UUID, Pending>> it = PENDING.entrySet().iterator(); it.hasNext(); ) {
             Map.Entry<UUID, Pending> en = it.next();
             Pending t = en.getValue();
+            missing.clear();
             ServerPlayer p = server.getPlayerList().getPlayer(en.getKey());
             LevelChunk chunk = swiss == null ? null : swiss.getChunkSource().getChunkNow(t.chunk.x, t.chunk.z);
-            int[] counts = swiss == null ? new int[4] : counts(swiss, t);
+            int[] counts = swiss == null ? new int[4] : counts(swiss, t, missing);
             long progress = sidecarActivity * 31 + SwissRuntime.chunksGenerated() * 7 + counts[0] * 1000L + counts[2];
             if (progress != t.progress) {
                 t.progress = progress;
@@ -322,14 +326,15 @@ public final class SwissCommands {
                         + (SwissRuntime.cells().sidecarDown() ? " (the data sidecar is not reachable)" : "")
                         + ". Try again in a while.").withStyle(ChatFormatting.RED));
             } else if ((now - t.startTick) % Arrival.BAR_TICKS == 0) {
-                p.displayClientMessage(Component.literal(Arrival.bar(counts[0], counts[1], counts[2], counts[3],
-                        SwissRuntime.cells().sidecarDown())).withStyle(ChatFormatting.GRAY), true);
+                Arrival.Build mine = missing.stream().map(sidecarBuilds::get).filter(java.util.Objects::nonNull).findFirst().orElse(null);
+                p.displayClientMessage(Component.literal(Arrival.bar(counts[0], counts[1], counts[2], counts[3], mine,
+                        (now - t.startTick) / 20, SwissRuntime.cells().sidecarDown())).withStyle(ChatFormatting.GRAY), true);
             }
         }
     }
 
     /** {cells ready, cells needed, chunks generated, chunks needed} for the 3x3 chunks the arrival ticket loads. */
-    private static int[] counts(ServerLevel swiss, Pending t) {
+    private static int[] counts(ServerLevel swiss, Pending t, List<Long> missing) {
         CellCache cells = SwissRuntime.cells();
         SwissCoords c = SwissRuntime.coords();
         int chunks = 0, ready = 0;
@@ -341,9 +346,11 @@ public final class SwissCommands {
                 for (int corner = 0; corner < 4; corner++) {
                     int bx = cx * 16 + (corner & 1) * 15, bz = cz * 16 + (corner >> 1) * 15;
                     int e = SwissCoords.cellKm(c.east(bx)), n = SwissCoords.cellKm(c.north(bz));
-                    if (seen.add(CellCache.key(e, n))
-                            && (cells.getIfPresent(e, n) != null || cells.coverageState(e, n) == ch.bissbert.swissworld.cell.Coverage.OUTSIDE)) {
+                    if (!seen.add(CellCache.key(e, n))) continue;
+                    if (cells.getIfPresent(e, n) != null || cells.coverageState(e, n) == ch.bissbert.swissworld.cell.Coverage.OUTSIDE) {
                         ready++;
+                    } else {
+                        missing.add(CellCache.key(e, n));
                     }
                 }
             }
@@ -359,13 +366,21 @@ public final class SwissCommands {
             statusInFlight = false;
             if (err != null || st == null) {
                 sidecarBusy = false;
+                sidecarBuilds = Map.of();
                 return;
             }
+            Map<Long, Arrival.Build> builds = new HashMap<>();
+            long moving = 0;
+            for (Arrival.Build b : Arrival.builds(st)) {
+                builds.put(CellCache.key(b.eKm(), b.nKm()), b);
+                moving += b.step() * 1_000_003L + b.bytes();
+            }
+            sidecarBuilds = builds;
             try {
                 JsonObject q = st.getAsJsonObject("queue"), up = st.getAsJsonObject("upstream"), store = st.getAsJsonObject("store");
                 sidecarBusy = q.get("building").getAsInt() + q.get("now").getAsInt() > 0;
                 sidecarActivity = up.get("requests").getAsLong() * 3 + up.get("downloads").getAsLong() * 5
-                        + up.get("downloadBytes").getAsLong() + store.get("cells").getAsLong() * 11;
+                        + up.get("downloadBytes").getAsLong() + store.get("cells").getAsLong() * 11 + moving;
             } catch (RuntimeException e) {
                 sidecarBusy = false;
             }

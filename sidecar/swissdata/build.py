@@ -11,7 +11,7 @@ from typing import Protocol
 
 import numpy as np
 
-from . import swd
+from . import progress, swd
 from .buildings import BuildingsBuilder
 from .canopy import CanopyBuilder
 from .config import Config
@@ -64,7 +64,11 @@ def assemble(e_km: int, n_km: int, cfg: Config, pinned: dict[str, object] | None
              builders: list[LayerBuilder] | None = None) -> tuple[swd.Cell, dict[str, object]]:
     """Runs all builders. `pinned` is the cell's manifest "sources" (rebuilds must reuse them)."""
     acc = LayerResult()
-    for b in builders if builders is not None else BUILDERS:
+    todo = builders if builders is not None else BUILDERS
+    prog = progress.current()
+    for i, b in enumerate(todo):
+        if prog is not None:
+            prog.stage, prog.step, prog.steps = b.name, i + 1, len(todo)
         r = b.build(e_km, n_km, cfg, acc, pinned)
         for tag, arr in r.layers.items():
             if tag not in b.tags:
