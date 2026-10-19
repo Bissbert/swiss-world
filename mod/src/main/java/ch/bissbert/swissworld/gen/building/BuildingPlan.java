@@ -250,14 +250,20 @@ public record BuildingPlan(long gid, Style style, Columns cols, int storey, List
             int y0 = floors.get(0);
             Dir first = doorSide();
             Dir[] sides = {first, first.cw().cw(), first.cw(), first.cw().cw().cw()};
+            int[] road = new int[4];
+            for (int i = 0; i < 4; i++) road[i] = roadDist(sides[i]);
             Door fallback = null;
             boolean fallbackBlocked = false;
             Door lastResort = null;
             Door walled = null; // has a path to the terrain, but it ends in a pocket
+            Door sunkenBest = null; // a door found at level 0 or 1 whose landing lies in a hole: only if nothing better turns up
+            int sunkenDepth = Integer.MAX_VALUE;
             for (int level = 0; level < 4; level++) {
+                if (level == 2 && sunkenBest != null) return sunkenBest;
                 Door best = null;
-                int bestLen = Integer.MAX_VALUE;
-                for (Dir out : sides) {
+                int bestDepth = 0, bestRoad = 0;
+                for (int si = 0; si < 4; si++) {
+                    Dir out = sides[si];
                     List<Door> cands = new ArrayList<>();
                     if (level >= 2) {
                         for (int z = c.minZ; z <= c.maxZ; z++) {
@@ -282,18 +288,20 @@ public record BuildingPlan(long gid, Style style, Columns cols, int storey, List
                             }
                         }
                     }
+                    Door sideBest = null;
+                    int sideLen = Integer.MAX_VALUE;
                     for (Door d : cands) {
                         int[] t = BuildingStage.trace(c, d, y0 + d.up(), terrain);
-                        boolean ok = t != null && t.length < bestLen && escapes(d, t);
+                        boolean ok = t != null && t.length < sideLen && escapes(d, t);
                         if (ok) {
-                            best = d;
-                            bestLen = t.length;
-                            if (bestLen <= SHORT_PATH) return best;
+                            sideBest = d;
+                            sideLen = t.length;
+                            if (sideLen <= SHORT_PATH) break;
                         } else if (level == 3) { // the inside cell is a wall itself: only if nothing else works
                             if (lastResort == null) lastResort = d;
                         } else if (t != null && walled == null) {
                             walled = d;
-                        } else if (t == null || t.length < bestLen) {
+                        } else if (t == null || t.length < sideLen) {
                             // no way out found: keep the first candidate, but not one that opens onto a neighbour
                             boolean blocked = terrain.foreign(d.x + d.out.dx, d.z + d.out.dz, gid);
                             if (fallback == null || fallbackBlocked && !blocked) {
@@ -302,10 +310,60 @@ public record BuildingPlan(long gid, Style style, Columns cols, int storey, List
                             }
                         }
                     }
+                    if (sideBest == null) continue;
+                    // across the sides: a landing level with the ground around it first, then the side facing the nearest
+                    // road or path, then the order of sides (the mapped entrance side, else a hash of the building)
+                    int depth = Math.max(1, sunk(sideBest, y0 + sideBest.up));
+                    if (best == null || depth < bestDepth || depth == bestDepth && road[si] < bestRoad) {
+                        best = sideBest;
+                        bestDepth = depth;
+                        bestRoad = road[si];
+                    }
                 }
-                if (best != null) return best;
+                if (best != null) {
+                    if (bestDepth <= 1 || level >= 2) return best;
+                    if (bestDepth < sunkenDepth) {
+                        sunkenBest = best;
+                        sunkenDepth = bestDepth;
+                    }
+                }
             }
+            if (sunkenBest != null) return sunkenBest;
             return walled != null ? walled : fallback != null ? fallback : lastResort;
+        }
+
+        /**
+         * How far the terrain within three blocks of the cell outside the door (this building's and neighbouring
+         * buildings' columns left out) rises above the door's floor level; 0 if it does not.
+         */
+        int sunk(Door d, int y) {
+            int ox = d.x + d.out.dx, oz = d.z + d.out.dz, worst = 0;
+            for (int z = oz - 3; z <= oz + 3; z++) {
+                for (int x = ox - 3; x <= ox + 3; x++) {
+                    if (c.state(x, z) == Columns.BODY || terrain.foreign(x, z, gid)) continue;
+                    double h = terrain.terrain(x, z);
+                    if (!Double.isNaN(h)) worst = Math.max(worst, (int) Math.floor(SwissCoords.toY(h)) - y);
+                }
+            }
+            return worst;
+        }
+
+        static final int ROAD_REACH = 14;
+
+        /** Blocks from the facade on side {@code out} to the nearest road, track or path in front of it (ROAD_REACH + 1 if none). */
+        int roadDist(Dir out) {
+            boolean alongX = !out.alongX();
+            int lo = alongX ? c.minX : c.minZ, hi = alongX ? c.maxX : c.maxZ, mid = Math.floorDiv(lo + hi, 2);
+            lo = Math.max(lo, mid - 12);
+            hi = Math.min(hi, mid + 12);
+            int edge = out == Dir.N ? c.minZ : out == Dir.S ? c.maxZ : out == Dir.W ? c.minX : c.maxX;
+            for (int t = 1; t <= ROAD_REACH; t++) {
+                for (int u = lo; u <= hi; u++) {
+                    int x = alongX ? u : edge + out.dx * t, z = alongX ? edge + out.dz * t : u;
+                    if (terrain.way(x, z)) return t;
+                }
+            }
+            return ROAD_REACH + 1;
         }
 
         static final int SHORT_PATH = 6;

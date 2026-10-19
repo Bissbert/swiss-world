@@ -149,3 +149,9 @@ None. No contract file was changed.
   8+ tall without stairs/ladder (footprint at least 5x5), closed dark air pockets (tolerated: a handful of roof voids),
   slowest plan time (< 1000 ms asserted). Results: 6 origin cells (3511 buildings) 0 dark of 27020 rooms, 0 without
   door, 0 without core; next store 0 dark of 101 rooms.
+
+## Building entrances (buildings round)
+- Cause of doors "in the ground": findDoor took the first side with a short path and never looked at how far the ground around the landing rises above the door; the cut for the way out was one block wide (a pit); the lift of the floor is limited by the room height, so low houses on terrain +1 stay one block below the ground.
+- findDoor now scores every side at levels 0/1: landing sunk by <= 1 against terrain within 3 blocks (BuildingPlan.sunk) is accepted at once, the side facing the nearest road/track/path (CellView.way, overlay classes 2-7 on the ground, reach 14) wins ties, deeper landings are used only if nothing else works. Lift bound is ceiling-3 (was -4).
+- BuildingStage.steps: where the way out is cut into higher ground it is 3 wide with a retaining wall (foundation block) at +-2; the low-eave clearing is 3 wide and 12 long (was 1 wide, 5 long; a 1-wide lane under an eave dead-ended).
+- Sweep metric (BuildingRender.entrance, BuildingSweepTest): "entrances: N bad (P 1-wide pits, S sunken > 1 below terrain within 3 and narrow)". Before/after: origin 6 cells 1022 -> 112, next store 11 -> 0, Innertkirchen 2660_1172 99 -> 19. Remaining pits are mostly doors in notches of irregular footprints with the building's own wall/eave beside them. Low 1-storey houses still sit 1 below the ground (3-wide shallow approach).

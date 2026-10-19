@@ -200,6 +200,50 @@ final class BuildingRender {
     }
 
     /**
+     * Entrance quality: "pit" = within the first four cells outside the door one has a solid block two above the walking
+     * level on both sides (a 1-wide trench the player cannot step out of); "sunken d" = the landing is d > 1 blocks below the highest terrain within three blocks
+     * (the building itself and neighbouring buildings left out) and the way out is not at least two wide. A wide cut
+     * (stairs down two or more wide between retaining walls) is a proper sunken entrance and is not reported.
+     * Empty if fine or no door.
+     */
+    java.util.List<String> entrance() {
+        java.util.List<String> res = new java.util.ArrayList<>();
+        BuildingPlan.Door dr = p.door();
+        if (dr == null || p.rooms().isEmpty()) return res;
+        int y = p.floorY(0) + dr.up();
+        int ox = dr.x() + dr.out().dx, oz = dr.z() + dr.out().dz;
+        int worst = 0;
+        for (int z = oz - 3; z <= oz + 3; z++) {
+            for (int x = ox - 3; x <= ox + 3; x++) {
+                if (c.state(x, z) == Columns.BODY || view.foreign(x, z, p.gid())) continue;
+                double h = view.terrain(x, z);
+                if (!Double.isNaN(h)) worst = Math.max(worst, (int) Math.floor(SwissCoords.toY(h)) - y);
+            }
+        }
+        int[] ys = BuildingStage.trace(c, dr, y, view);
+        int n = Math.min(4, ys == null ? 1 : ys.length);
+        int minWidth = 3;
+        boolean pit = false;
+        Dir l = dr.out().cw(), rr = l.opposite();
+        for (int i = 0; i < n; i++) {
+            int x = dr.x() + dr.out().dx * (i + 1), z = dr.z() + dr.out().dz * (i + 1);
+            int sy = ys == null ? y : ys[i];
+            int width = 1;
+            boolean blockedL = !air(x + l.dx, sy + 2, z + l.dz); // a one block rise at the side can be stepped onto
+            boolean blockedR = !air(x + rr.dx, sy + 2, z + rr.dz);
+            for (Dir s : new Dir[]{l, rr}) {
+                int lx = x + s.dx, lz = z + s.dz;
+                if (air(lx, sy + 1, lz) && air(lx, sy + 2, lz) && (!air(lx, sy, lz) || !air(lx, sy - 1, lz))) width++;
+            }
+            minWidth = Math.min(minWidth, width);
+            pit |= blockedL && blockedR;
+        }
+        if (pit) res.add("pit");
+        if (worst > 1 && minWidth < 2) res.add("sunken " + worst);
+        return res;
+    }
+
+    /**
      * Visible roof gaps in the footprint: "gap-under" = a roof stair or slab of a body column with air directly
      * below it (the dark underside seen from the side of a stepped roof), "roof-hole" = a body column whose
      * topmost block is not roof material. Eave columns (outside the walls) overhang on purpose and do not count.

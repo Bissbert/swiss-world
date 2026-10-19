@@ -191,7 +191,7 @@ class BuildingSweepTest {
         Map<String, Integer> causes = new java.util.TreeMap<>();
         long slowMs = 0;
         String slowest = "";
-        int total = 0, checked = 0, skipped = 0, withRooms = 0, leaking = 0, doorless = 0, badDoor = 0, openPanes = 0, gapUnder = 0, roofHoles = 0, rooms = 0, darkRooms = 0, darkBuildings = 0, noStairs = 0, noCore = 0, pockets = 0, hemmed = 0, thin = 0;
+        int total = 0, checked = 0, skipped = 0, withRooms = 0, leaking = 0, doorless = 0, badDoor = 0, openPanes = 0, gapUnder = 0, roofHoles = 0, rooms = 0, darkRooms = 0, darkBuildings = 0, noStairs = 0, noCore = 0, pockets = 0, hemmed = 0, thin = 0, pitDoors = 0, sunkenDoors = 0, badEntrances = 0;
         String near = System.getenv("WT_NEAR");
         for (SwdCell cell : cells) {
             for (SwdCell.Building b : cell.buildings()) {
@@ -209,6 +209,13 @@ class BuildingSweepTest {
                 if (!p.rooms().isEmpty()) withRooms++;
                 rooms += p.rooms().size();
                 List<String> why = BuildingRender.check(r);
+                List<String> ent = r.entrance();
+                if (!ent.isEmpty()) {
+                    if (ent.contains("pit")) pitDoors++;
+                    if (ent.stream().anyMatch(w -> w.startsWith("sunken"))) sunkenDoors++;
+                    badEntrances++;
+                    bad.add("NEARDOOR " + b.gid() + " " + p.style() + " door=" + p.door() + " " + ent);
+                }
                 if (near != null) bad.addAll(inspect(near, p, r, v, why));
                 if (why.isEmpty()) continue;
                 for (String w : why) {
@@ -234,6 +241,7 @@ class BuildingSweepTest {
         System.out.printf("watertight[%s]: %d buildings, %d checked, %d at a missing cell edge, %d with rooms, %d leaking, "
                 + "%d without door, %d bad door, %d with open panes, %d with gaps under roof stairs, %d with roof holes, %d rooms of which %d dark in %d buildings, %d multi-floor without stairs, %d 8+ blocks tall without a stairs or ladder block, %d with a closed dark air pocket, %d hemmed in by neighbours, %d thin; %s%n", label, total,
                 checked, skipped, withRooms, leaking, doorless, badDoor, openPanes, gapUnder, roofHoles, rooms, darkRooms, darkBuildings, noStairs, noCore, pockets, hemmed, thin, causes);
+        System.out.printf("watertight[%s]: entrances: %d bad (%d 1-wide pits, %d sunken more than 1 below the terrain within 3 and narrow) of %d with rooms%n", label, badEntrances, pitDoors, sunkenDoors, withRooms);
         System.out.printf("watertight[%s]: slowest plan %d ms (%s)%n", label, slowMs, slowest);
         org.junit.jupiter.api.Assertions.assertTrue(slowMs < 1000, "plan took " + slowMs + " ms: " + slowest);
         // acceptance: nothing leaks or lacks a door; a door may only fail where neighbouring buildings or a thin shell
