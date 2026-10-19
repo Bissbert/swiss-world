@@ -63,8 +63,12 @@ public final class SwissChunkGenerator extends ChunkGenerator {
     /** Real sea level 193 m (lowest point of Switzerland) -> y = -1807. Ocean outside the border. */
     public static final int SEA_LEVEL_Y = (int) SwissCoords.toY(193);
 
-    /** Cells are loaded for the chunk plus this many columns around it, so stages can look at neighbour columns. */
-    public static final int CELL_MARGIN = 8;
+    /**
+     * Cells are loaded for the chunk plus this many columns around it, so stages can look at neighbour columns.
+     * The widest look-out is {@link ch.bissbert.swissworld.gen.surface.TransportPlan#MARGIN}: it smooths ways and
+     * follows rail tracks that far.
+     */
+    public static final int CELL_MARGIN = 24;
 
     public SwissChunkGenerator(BiomeSource biomeSource) {
         super(biomeSource);

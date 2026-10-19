@@ -24,10 +24,14 @@ final class Cells {
 
     /** Grid for the chunk containing (x, z) over a world that has only {@code cell}. */
     static ColumnGrid grid(SwdCell cell, int x, int z) {
+        return grid(cell, x, z, ColumnGrid.MARGIN + WaterPlan.BANK_REACH - 1);
+    }
+
+    static ColumnGrid grid(SwdCell cell, int x, int z, int margin) {
         return new ColumnGrid(ORIGIN, (bx, bz) -> {
             long e = ORIGIN.east(bx), n = ORIGIN.north(bz);
             return SwissCoords.cellKm(e) == cell.eKm() && SwissCoords.cellKm(n) == cell.nKm() ? cell : null;
-        }, Math.floorDiv(x, 16) * 16, Math.floorDiv(z, 16) * 16);
+        }, Math.floorDiv(x, 16) * 16, Math.floorDiv(z, 16) * 16, margin);
     }
 
     /** Flat cell 2632_1170 at {@code h} metres, meadow, every optional layer present and empty. */
