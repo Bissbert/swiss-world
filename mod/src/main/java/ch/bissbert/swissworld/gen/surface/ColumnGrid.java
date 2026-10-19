@@ -190,6 +190,12 @@ public final class ColumnGrid {
         return k(x, z);
     }
 
+    /** The column lies at least {@code pad} columns inside the sampled square. */
+    boolean inside(int x, int z, int pad) {
+        int i = x - minX, j = z - minZ;
+        return i >= pad && j >= pad && i < size - pad && j < size - pad;
+    }
+
     int cells() {
         return size * size;
     }
