@@ -10,7 +10,8 @@
 2. **roofFlags bit0 semantics.** Implemented as: set on the topmost span of a building in a column (body or
    overhang). Spans of a lower building under another building's overhang keep their own bit0. If the mod
    wants "topmost span in the column regardless of building", say so — it is a one-line change.
-3. **Building in a cell** = at least one of its column centres (body or overhang) lies in the cell. The BTBL bbox
+3. **Spans in a column are disjoint** (see Decisions) — proposal to state it in swd-format.md §6.
+4. **Building in a cell** = at least one of its column centres (body or overhang) lies in the cell. The BTBL bbox
    is the whole building (all its columns, including other cells), relative to this cell. A building touching
    the cell only by a sliver smaller than one column centre is not listed (Interlaken: 1 case, 0.78 m²).
 
@@ -43,6 +44,10 @@ No contract file was edited.
     roofs end at the real roof surface; a skin clearly above the body top in that column becomes its own body span;
     a skin below the body top is dropped.
   - part 2 (annex) is not produced yet.
+- **Spans in a column are disjoint** (not stated in swd-format.md §6; proposal: make it a rule). Overlapping
+  solids exist in the data (Interlaken cell: 1,248 overlapping pairs, 995 of them body-in-neighbour-body, median
+  10 m). `buildings.disjoint` resolves them bottom-up per column: a span starting inside the one below starts
+  at its top, or is dropped if fully contained. No BTBL row lost all its spans in the Interlaken cell.
 - **roofFlags bit1 (half step)** is set when the span top in dm ends in 3..7 (i.e. within ±0.2 m of x.5).
 - **BTBL** rows are sorted by gid; `baseH` = lowest body point, `topH` = highest point of body and roof skins;
   `entranceSide` = 0 (not derived yet). `floors` = GASTW.
@@ -63,6 +68,11 @@ No contract file was edited.
 
 ## Results (evidence)
 
+- `build.assemble(2632, 1170, cfg)` with the real BUILDERS list → sources
+  `{"buildings": [4 item ids], "gwr": "gwr_be_2026-10-19"}`; feeding them back as `pinned` (JSON round trip)
+  gives identical BTBL/BSPN. `swd.encode`/`decode` round-trips the cell (833 kB with a dummy TERR — there is no
+  terrain builder on this branch, so `assemble` alone cannot produce an encodable cell here).
+  Note: `assemble` merges sources flat (`dict.update`), so the top-level keys `buildings` and `gwr` are taken.
 - `uv run --group dev pytest -q` → all pass (synthetic tests for voxeliser, buildings, gwr; real-data acceptance
   `sidecar/tests/test_interlaken.py`, skipped when the raw files are not cached, never uses the network).
 - Cell 2632_1170 (Interlaken), sheets pinned to the 2021 versions:
@@ -71,8 +81,8 @@ No contract file was edited.
   - Span volume 2,216,797 m³ vs Building_solid + Roof_solid volume 2,244,692 m³ (−1.24 %).
   - GWR class for 877 / 949 buildings with an EGID (92.4 %); 10 buildings have no EGID.
   - Hotel Victoria-Jungfrau (EGID 1346414, GKLAS 1211 hotel): BTBL topH 604.5 m vs DACH_MAX 604.53 m; highest
-    span top 603.6 m (−0.93 m — the apex of a pointed tower roof lies between column centres; passes ±1 m but
-    only just). Its bbox crosses the west cell border (minX < 0), as expected.
+    span top 603.6 m (−0.93 m — the apex of a pointed tower roof lies between column centres; passes ±1 m with
+    only 7 cm margin). Its bbox crosses the west cell border (minX < 0), as expected.
   - 200,507 columns, 206,655 spans for the cell.
 - Timing (M-series Mac): Interlaken sheet 1208-43 (3,643 bodies, 5,918 roof skins, 580k triangles):
   fiona read 5.7 s, voxelise + assemble 3.5 s. Cold build of the cell incl. 4 sheets ≈ 21 s; with sheet caches

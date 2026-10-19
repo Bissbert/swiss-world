@@ -111,6 +111,15 @@ def test_victoria_jungfrau(result):
     assert v.min_z <= N_KM * 1000 + 999 - 1170668 <= v.max_z
 
 
+def test_spans_disjoint_and_sorted(result):
+    (r, _) = result
+    for col in r.spans.values():
+        assert all(s.bottom_h < s.top_h for s in col)
+        assert all(a.top_h <= b.bottom_h for a, b in zip(col, col[1:]))
+    with_spans = {s.building_idx for col in r.spans.values() for s in col}
+    print(f"\n{len(r.buildings) - len(with_spans)} BTBL rows lost all spans to overlap resolution")
+
+
 def test_deterministic(result):
     (r, _) = result
     r2 = buildings.BuildingsBuilder().build(E_KM, N_KM, cfg, build.LayerResult(), {"buildings": ITEMS})

@@ -96,3 +96,9 @@ def test_builder_uses_pinned_items(monkeypatch, tmp_path):
     assert r.sources == {"buildings": [sh.item], "gwr": "gwr_be_x"}
     assert len(r.buildings) == 2 and r.buildings[0].gwr_class == 0
     assert any(isinstance(b, buildings.BuildingsBuilder) for b in build.BUILDERS)
+
+
+def test_disjoint_spans():
+    S = swd.Span
+    col = [S(100, 200, 0), S(150, 180, 1), S(190, 260, 2, 1, 1), S(260, 270, 3)]
+    assert buildings.disjoint(col) == [S(100, 200, 0), S(200, 260, 2, 1, 1), S(260, 270, 3)]

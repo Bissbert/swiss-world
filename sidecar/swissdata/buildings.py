@@ -289,9 +289,24 @@ def cell_buildings(e_km: int, n_km: int, sheets: list[Sheet], table: gwr.GwrTabl
             dx, dz = int(sh.e[k] - e0), int(n0 + swd.CELL - 1 - sh.n[k])
             spans.setdefault((dx, dz), []).append(
                 swd.Span(int(sh.bottom[k]), int(sh.top[k]), idx, int(sh.part[k]), int(sh.roof[k])))
-    for col in spans.values():
+    for key, col in spans.items():
         col.sort(key=lambda s: (s.bottom_h, s.building_idx, s.part))
+        spans[key] = disjoint(col)
     return buildings, spans
+
+
+def disjoint(col: list[swd.Span]) -> list[swd.Span]:
+    """Spans sorted by bottom -> non-overlapping spans. Overlapping solids (touching or nested buildings, eaves over
+    a neighbour) are resolved bottom-up: a span starting inside the one below starts at its top instead, and is
+    dropped when nothing of it is left."""
+    out: list[swd.Span] = []
+    for s in col:
+        if out and s.bottom_h < out[-1].top_h:
+            if s.top_h <= out[-1].top_h:
+                continue
+            s = swd.Span(out[-1].top_h, s.top_h, s.building_idx, s.part, s.roof_flags)
+        out.append(s)
+    return out
 
 
 class BuildingsBuilder:
