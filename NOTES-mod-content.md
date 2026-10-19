@@ -12,12 +12,15 @@
 ## Decisions
 - **Plan per building, rendered per chunk.** A plan depends only on the building's own BTBL row and its BSPN
   columns, never on the chunk being generated, so every chunk that touches a building computes the same plan
-  (tested across a synthetic cell border). Plans are cached per gid (LRU 256) since every stage of every chunk
-  a building touches asks again; without the cache large blocks stalled chunk generation.
+  (tested across a synthetic cell border). Plans are cached (LRU 256) since every stage of every chunk a building
+  touches asks again; without the cache large blocks stalled chunk generation. The key is gid plus which cells
+  under the margin-grown bbox corners exist, so a plan made without a neighbour is not reused once it exists
+  (gid is global per swd-format §6).
 - **Neighbour cells**: `GenContext` only loads the cells under the chunk's corners, so `CellView` falls back to the
   store for any other cell a building reaches (memoised per chunk). It reads the file on the calling thread: stages
   can run on CellCache's own IO threads, and joining `CellCache.get` there deadlocked (watchdog kill in the dev
-  run). `Buildings.near` scans the cells under the margin-grown box, not just the chunk corners.
+  run). Like `CellCache.load` it treats an existing file as the cell; the manifest-entry readiness rule from docs/dev.md
+  is not applied by mod-core's loader either. `Buildings.near` scans the cells under the margin-grown box, not just the chunk corners.
 - **Storey height** from the BTBL height span and GASTW: `round(h / (GASTW + 0.7))`, clamped to 3..4 blocks;
   4 without GASTW. Halls (church, barn, industrial incl. greenhouse, plain = tank/large wall/covered bridge) get one floor.
 - **Roof** from the column tops: a column whose top is above a lower neighbour of the same building gets a stair
@@ -65,16 +68,18 @@ with a ridge, glowstone, beds, chest with `swissworld:chests/workshop`, barrel w
 After the neighbour/cache changes: 147 chunks force-loaded (chalet, the 4-storey block, and the cell's west border
 x -912..-880 where the neighbour cell is missing) in 16 s without errors; fixture acceptance probes unchanged.
 
-Planner sweep (ad-hoc test, not committed) over all 959 real buildings: 959 planned, 0 failures; 10354 rooms,
+Planner sweep (ad-hoc test, not committed; re-run on the final code, 0.8 s) over all 959 real buildings: 959 planned,
+0 failures, every room with a light and a container; 10354 rooms,
 41351 eave columns in 926 buildings (part=1 is common), 5200 columns with several spans, 247 single-floor,
 514 with a ladder core, 43 multi-floor buildings with neither stairs nor ladder. Styles: TOWN_HOUSE 405,
 INDUSTRIAL 140, OLD_TOWN 133, MODERN 84, CHALET 80, BARN 55, COMMERCIAL 32, HOTEL 20, CHURCH 7, PLAIN 3.
 
 ## Known limitations / follow-ups
 - **Cross-cell buildings**: neighbours are now read from the store (see Decisions). A neighbour cell built
-  *after* some of the building's chunks were generated yields a different plan for the later chunks (seam).
+  *after* some of the building's chunks were generated yields a different plan for the later chunks (a seam at
+  the chunks already generated; the cache key prevents the missing half from persisting).
   Suggestion for mod-core, not required: preload neighbour cells in GenContext so the fallback rarely reads.
-- The plan cache is static and keyed by gid only; switching stores in one JVM (integrated client) could reuse a
+- The plan cache is static; switching stores in one JVM (integrated client) could reuse a
   stale plan. Fine on a dedicated server.
 - 43 of 959 real multi-floor buildings get neither stairs nor ladder (no free 1-wide run); their upper floors are
   unreachable.
