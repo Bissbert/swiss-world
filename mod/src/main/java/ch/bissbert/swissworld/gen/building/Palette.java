@@ -69,6 +69,12 @@ public record Palette(Block wall, Block base, Block foundation, Block floor, Blo
                     v == 0 ? Blocks.DARK_OAK_PLANKS : Blocks.SPRUCE_PLANKS, Blocks.SPRUCE_FENCE, Blocks.SPRUCE_DOOR,
                     Blocks.SPRUCE_PLANKS, Blocks.SPRUCE_STAIRS, Blocks.SPRUCE_STAIRS, Blocks.SPRUCE_FENCE,
                     Blocks.SPRUCE_SLAB, bed);
+            case CANOPY -> new Palette(Blocks.SPRUCE_PLANKS, v == 0 ? Blocks.STRIPPED_SPRUCE_LOG : Blocks.SPRUCE_LOG,
+                    Blocks.COBBLESTONE, Blocks.SPRUCE_PLANKS, v == 2 ? Blocks.SMOOTH_STONE_SLAB : Blocks.SPRUCE_STAIRS,
+                    v == 2 ? Blocks.SMOOTH_STONE_SLAB : Blocks.SPRUCE_SLAB,
+                    v == 2 ? Blocks.SMOOTH_STONE : Blocks.SPRUCE_PLANKS, Blocks.GLASS_PANE, Blocks.SPRUCE_DOOR,
+                    Blocks.SPRUCE_PLANKS, Blocks.SPRUCE_STAIRS, Blocks.SPRUCE_STAIRS, Blocks.SPRUCE_FENCE,
+                    Blocks.SPRUCE_SLAB, bed);
             case COMMERCIAL -> new Palette(v == 0 ? Blocks.LIGHT_GRAY_CONCRETE : Blocks.SMOOTH_SANDSTONE,
                     Blocks.POLISHED_ANDESITE, Blocks.STONE_BRICKS, Blocks.POLISHED_ANDESITE, Blocks.GRANITE_STAIRS,
                     Blocks.GRANITE_SLAB, Blocks.POLISHED_GRANITE, Blocks.GLASS_PANE, Blocks.BIRCH_DOOR,

@@ -4,16 +4,16 @@ import ch.bissbert.swissworld.cell.SwdCell;
 
 /** Building archetype (PLAN §8), chosen from GWR class/period, OBJEKTART and altitude, deterministic per gid. */
 public enum Style {
-    CHALET, TOWN_HOUSE, OLD_TOWN, MODERN, BARN, CHURCH, INDUSTRIAL, HOTEL, COMMERCIAL, TANK, GREENHOUSE, WALL, BRIDGE;
+    CHALET, TOWN_HOUSE, OLD_TOWN, MODERN, BARN, CHURCH, INDUSTRIAL, HOTEL, COMMERCIAL, TANK, GREENHOUSE, WALL, BRIDGE, CANOPY;
 
     /** One open hall (or none) per building instead of storeys and rooms. */
     public boolean hall() {
         return this == BARN || this == CHURCH || this == INDUSTRIAL || this == GREENHOUSE || empty();
     }
 
-    /** Structures without door, interior or loot: tank (hollow), large wall (solid), covered bridge (walk-through). */
+    /** Structures without door, interior or loot: tank, large wall, covered bridge, open building or canopy. */
     public boolean empty() {
-        return this == TANK || this == WALL || this == BRIDGE;
+        return this == TANK || this == WALL || this == BRIDGE || this == CANOPY;
     }
 
     public boolean residential() {
@@ -23,7 +23,8 @@ public enum Style {
     /**
      * GKLAS (GWR building class): 11xx residential, 1211/1212 hotel, 1220/1230/1231/126x commercial and public,
      * 1241/1242/1251/1252 industrial and storage, 1271 agricultural, 1272 religious.
-     * OBJEKTART (docs/swd-format.md §6): 3 sacred building, 7 tank, 8 greenhouse, 9 large wall, 10 covered bridge.
+     * OBJEKTART (docs/swd-format.md §6): 3 sacred building, 7 tank, 8 greenhouse, 9 large wall, 10 covered bridge,
+     * 11 open building and 12 canopy (both roof on posts).
      */
     public static Style pick(SwdCell.Building b, double baseH, int footprint) {
         int k = b.gwrClass(), period = b.gwrPeriod();
@@ -34,6 +35,7 @@ public enum Style {
             case 8: return GREENHOUSE;
             case 9: return WALL;
             case 10: return BRIDGE;
+            case 11, 12: return CANOPY;
             default: break;
         }
         if (k == 1271) return BARN;

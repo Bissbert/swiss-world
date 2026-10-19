@@ -16,7 +16,8 @@ import net.minecraft.world.level.block.state.properties.SlabType;
  * Building shells from BSPN/BTBL with vanilla palettes. Owner: mod-content.
  * Per body column: foundation down to the terrain, walls where a side faces outside, air inside with floor slabs,
  * the top block as roof (stairs facing uphill on slopes, a slab on half steps); eaves become thin slabs.
- * Special types: a round hollow tank, an all-glass greenhouse, a solid wall, a covered bridge open at both ends.
+ * Special types: a round hollow tank, an all-glass greenhouse, a solid wall, a covered bridge open at both ends,
+ * a canopy (open building, free-standing roof): only the roof, on posts at its corners.
  */
 public final class BuildingStage implements GenStage {
     private static final BlockState AIR = Blocks.AIR.defaultBlockState();
@@ -35,14 +36,16 @@ public final class BuildingStage implements GenStage {
             tank(p, pal, put, view);
             return;
         }
-        boolean glass = p.style() == Style.GREENHOUSE;
+        boolean glass = p.style() == Style.GREENHOUSE, canopy = p.style() == Style.CANOPY;
         int xa = Math.max(c.minX, put.minX()), xb = Math.min(c.maxX, put.minX() + 15);
         int za = Math.max(c.minZ, put.minZ()), zb = Math.min(c.maxZ, put.minZ() + 15);
         for (int z = za; z <= zb; z++) {
             for (int x = xa; x <= xb; x++) {
                 byte st = c.state(x, z);
                 if (st == Columns.EAVE && !glass) eave(c.eave2(x, z), x, z, pal, put);
-                else if (st == Columns.BODY) column(p, c, pal, x, z, put, view);
+                else if (st == Columns.BODY && !canopy) column(p, c, pal, x, z, put, view);
+                else if (st == Columns.BODY) put.set(x, c.topFull(x, z), z, roof(p, pal, x, z));
+                if (canopy && st != Columns.OUT && c.corner(x, z)) post(c, pal, x, z, put, view);
             }
         }
         if (p.door() != null) steps(p, pal, put, view);
@@ -61,6 +64,16 @@ public final class BuildingStage implements GenStage {
         if ((c.top2(x, z) & 1) != 0 && p.style() != Style.GREENHOUSE) {
             put.set(x, top + 1, z, Put.with(pal.roofSlab().defaultBlockState(), SlabBlock.TYPE, SlabType.BOTTOM));
         }
+    }
+
+    /** A post from the terrain up to the underside of the roof (at most 16 blocks). */
+    static void post(Columns c, Palette pal, int x, int z, Put put, CellView view) {
+        double h = view.terrain(x, z);
+        if (Double.isNaN(h)) return;
+        int e2 = c.state(x, z) == Columns.BODY ? 2 * c.topFull(x, z) + 1 : c.eave2(x, z);
+        int under = Math.floorDiv(e2, 2) - ((e2 & 1) != 0 ? 0 : 1), ground = (int) Math.floor(SwissCoords.toY(h));
+        if (under - ground > 17) return;
+        for (int y = ground + 1; y < under; y++) put.set(x, y, z, pal.base().defaultBlockState());
     }
 
     /** Down to the terrain under columns that start near floor 0; a bridge only where it meets the ground. */
@@ -154,7 +167,7 @@ public final class BuildingStage implements GenStage {
         int rel = p.style().hall() ? y - p.floorY(0) : Math.floorMod(y - p.floorY(0), p.storey());
         int u = (face.alongX() ? z : x) + Hash.pick(p.gid(), 31, 12);
         return switch (p.style()) {
-            case BARN, TANK, GREENHOUSE, WALL -> false;
+            case BARN, TANK, GREENHOUSE, WALL, CANOPY -> false;
             case BRIDGE -> rel == 2 && Math.floorMod(u, 3) != 0;
             case CHURCH -> rel >= 2 && rel <= 5 && Math.floorMod(u, 4) == 1;
             case INDUSTRIAL -> rel == 3 || rel == 4;

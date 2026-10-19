@@ -32,7 +32,11 @@
   top, hollow, no windows; 8 Treibhaus = glass walls and flat glass roof on a stone-brick base, coarse-dirt floor,
   one hall with storage loot; 9 Mauer gross = solid stone/cobble/stone-brick; 10 Bruecke gedeckt = spruce deck and
   walls, open portals at both ends of the long axis, fence windows, foundation only where the deck is ≤ 3 blocks above
-  ground. 7, 9, 10 (`Style.empty()`) have no door, stairs, rooms, props or loot.
+  ground. 11 Offenes Gebaeude, 12 Flugdach (main be45cfa) and any building whose spans are all part 1 (free-standing
+  roof) = `CANOPY`: only the roof (top blocks/eave slabs, spruce or smooth stone) plus log posts at the footprint
+  corners (skipped if longer than 17 blocks), no walls. 7, 9, 10, 11, 12 (`Style.empty()`) have no door, stairs,
+  rooms, props or loot. Overhang-only detection waits until no column is unknown, so a roof whose body lies in a
+  missing neighbour cell is not misread as a canopy.
 - **Roof** from the column tops: a column whose top is above a lower neighbour of the same building gets a stair
   facing uphill; odd half-metre tops get a bottom slab; columns of part=1 (eave/overhang) become thin slabs.
   roofFlags bit0 marks the topmost span per building in a column; that span is the one rendered as roof.
@@ -87,11 +91,12 @@ In game (real store): pillar ladder at (-371,-1434..-1419,-132), partition pilla
 on every storey.
 
 Special types in game: private store `/tmp/swissworld-mod-content-special` = fixture plus four copies of its
-building with OBJEKTART 7/8/9/10 at dz +20/40/60/80 (bridge lifted 60 m), written with sidecar `swd.py`
+building with OBJEKTART 7/8/9/10/11/12 at dz +20..+120 (bridge lifted 60 m; the 12 copy has only part-1 spans), written with sidecar `swd.py`
 (read-only use). Slices: tank hollow with light-gray concrete ring, smooth-stone top, rounded corners
 ((-800,-1386,-280) air); greenhouse glass walls/roof, stone-brick base, coarse dirt, chest `swissworld:chests/storage`
 at (-798,-1389,-254); wall solid cobblestone with stone-brick top; bridge spruce deck/walls, stair roof, open
-portals at both ends, fence window row, no foundation. No exceptions.
+portals at both ends, fence window row, no foundation; open building (11) and overhang-only canopy (12): roof slabs
+at -1383/-1382 on spruce-log posts at the four corners, nothing below the roof in between. No exceptions.
 
 ## Known limitations / follow-ups
 - **Cross-cell buildings**: neighbours are now read from the store (see Decisions). A neighbour cell built
@@ -101,7 +106,7 @@ portals at both ends, fence window row, no foundation. No exceptions.
 - The plan cache is static; switching stores in one JVM (integrated client) could reuse a
   stale plan. Fine on a dedicated server.
 - Buildings whose upper floors cannot be reached lose those floors (taller top storey) rather than getting a
-  bigger stair; tanks/greenhouses/covered bridges are absent from the real test cell, so only synthetic copies were
+  bigger stair; tanks/greenhouses/covered bridges/canopies are absent from the real test cell, so only synthetic copies were
   seen in game.
 - Lootr path compiled but untested (Lootr not in the dev run).
 - Real data has no entranceSide yet; door side is hashed. Stair cores in large real buildings often fall back to

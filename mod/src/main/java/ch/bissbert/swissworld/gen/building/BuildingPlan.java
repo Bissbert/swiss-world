@@ -126,9 +126,15 @@ public record BuildingPlan(long gid, Style style, Columns cols, int storey, List
             this.c = c;
             this.b = b;
             this.gid = b.gid();
-            int area = 0;
-            for (int z = c.minZ; z <= c.maxZ; z++) for (int x = c.minX; x <= c.maxX; x++) if (c.body(x, z)) area++;
-            this.style = Style.pick(b, c.baseH, area);
+            int area = 0, unknown = 0;
+            for (int z = c.minZ; z <= c.maxZ; z++) {
+                for (int x = c.minX; x <= c.maxX; x++) {
+                    if (c.body(x, z)) area++;
+                    else if (c.state(x, z) == Columns.UNKNOWN) unknown++;
+                }
+            }
+            // only overhang spans (free-standing roof, swd-format §6): a canopy whatever the OBJEKTART
+            this.style = area == 0 && unknown == 0 ? Style.CANOPY : Style.pick(b, c.baseH, area);
             double topY = c.y(Heights.toMetres(b.topH()));
             this.s = storey(topY - c.baseY, b.floors());
             int ceiling = (int) Math.floor(topY) - 1;

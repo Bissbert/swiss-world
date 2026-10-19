@@ -91,11 +91,11 @@ class BuildingPlanTest {
         assertTrue(plan.reachable());
     }
 
-    /** Lagertank, large wall and covered bridge have no door, interior or loot; a greenhouse is a glass hall. */
+    /** Tank, large wall, covered bridge, open building and canopy have no door, interior or loot; a greenhouse is a hall. */
     @Test
     void specialTypes() {
         SwdCell.Building b = cell.buildings().get(0);
-        for (int oa : new int[]{7, 8, 9, 10}) {
+        for (int oa : new int[]{7, 8, 9, 10, 11, 12}) {
             SwdCell.Building t = new SwdCell.Building(b.gid(), b.egid(), oa, b.gwrCategory(), b.gwrClass(),
                     b.gwrPeriod(), b.floors(), b.entranceSide(), b.baseH(), b.topH(), b.minX(), b.minZ(), b.maxX(),
                     b.maxZ());
@@ -108,11 +108,33 @@ class BuildingPlanTest {
                 assertFalse(p.rooms().isEmpty());
                 assertTrue(p.props().stream().anyMatch(pr -> pr.kind().container()));
             } else {
-                assertEquals(oa == 7 ? Style.TANK : oa == 9 ? Style.WALL : Style.BRIDGE, p.style());
+                assertEquals(oa == 7 ? Style.TANK : oa == 9 ? Style.WALL : oa == 10 ? Style.BRIDGE : Style.CANOPY,
+                        p.style());
                 assertNull(p.door());
                 assertTrue(p.rooms().isEmpty() && p.props().isEmpty() && p.lights().isEmpty(), "objektart " + oa);
             }
         }
+    }
+
+    /** A building of overhang spans only (free-standing roof) is a canopy whatever its OBJEKTART. */
+    @Test
+    void overhangOnlyIsCanopy() {
+        SwdCell.Building b = cell.buildings().get(0);
+        Map<Integer, SwdCell.Span[]> spans = new HashMap<>();
+        cell.spans().forEach((k, v) -> {
+            SwdCell.Span[] o = new SwdCell.Span[v.length];
+            for (int i = 0; i < v.length; i++) {
+                o[i] = new SwdCell.Span(v[i].bottomH(), v[i].topH(), v[i].buildingIdx(), 1, v[i].roofFlags());
+            }
+            spans.put(k, o);
+        });
+        SwdCell c = copy(cell, cell.eKm(), b, spans);
+        BuildingPlan p = BuildingPlan.of(view(c), c, b);
+        assertEquals(Style.CANOPY, p.style());
+        assertNull(p.door());
+        assertTrue(p.rooms().isEmpty() && p.props().isEmpty() && p.lights().isEmpty());
+        assertTrue(p.cols().corner(p.cols().minX, p.cols().minZ));
+        assertFalse(p.cols().corner(p.cols().minX + 2, p.cols().minZ + 2));
     }
 
     /** CellView over a block-column lookup (as GenContext.cellAt) must find the same cell as a km lookup. */

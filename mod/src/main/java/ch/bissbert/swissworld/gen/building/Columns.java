@@ -98,6 +98,11 @@ public final class Columns {
         return inBox(x, z) ? state[index(x, z)] : OUT;
     }
 
+    /** A covered column open towards x and towards z: where a canopy stands on a post. */
+    public boolean corner(int x, int z) {
+        return (state(x - 1, z) == OUT || state(x + 1, z) == OUT) && (state(x, z - 1) == OUT || state(x, z + 1) == OUT);
+    }
+
     public boolean body(int x, int z) {
         return state(x, z) == BODY;
     }
