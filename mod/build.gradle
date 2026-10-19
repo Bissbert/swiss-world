@@ -74,6 +74,8 @@ neoForge {
             systemProperty 'swissworld.store', System.getenv('SWISSWORLD_STORE') ?: rootProject.file('../store').absolutePath
             // A/B checks of the pack fast path (world/SectionPacking)
             systemProperty 'swissworld.vanillaPack', System.getenv('SWISSWORLD_VANILLA_PACK') ?: 'false'
+            // extra JVM flags for memory checks, e.g. SWISSWORLD_SERVER_JVM="-Xmx8g -Xlog:gc:file=gc.log"
+            jvmArguments.addAll((System.getenv('SWISSWORLD_SERVER_JVM') ?: '').tokenize())
             systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
         }
 

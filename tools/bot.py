@@ -9,6 +9,7 @@ Needs an offline-mode server with network-compression-threshold=-1. Op the bot w
     wait:<seconds>       keep the connection alive and print chat
     walk:<dx>,<dz>,<v>   fly in a straight line at v m/s (spectator mode recommended), one move packet per tick
 
+BOT_VIEW=<chunks> sets the requested view distance (default 8; the server clamps it to its own).
 Chat is printed as "chat: ..."; URLs in click events are printed as "link: ...". Login and respawn packets print
 "spawn: <dimension> flat=<isFlat>" (the client's sky horizon depends on isFlat).
 """
@@ -16,6 +17,7 @@ Chat is printed as "chat: ..."; URLs in click events are printed as "link: ...".
 from __future__ import annotations
 
 import hashlib
+import os
 import socket
 import struct
 import sys
@@ -149,7 +151,7 @@ class Bot:
             elif pid == 0x02:
                 self.send(0x03)
                 self.state = "config"
-                self.send(0x00, string("en_us") + bytes([8]) + varint(0) + b"\x01" + bytes([0x7F]) + varint(1) + b"\x00\x01")
+                self.send(0x00, string("en_us") + bytes([int(os.environ.get("BOT_VIEW", "8"))]) + varint(0) + b"\x01" + bytes([0x7F]) + varint(1) + b"\x00\x01")
             elif pid == 0x03:
                 sys.exit("set network-compression-threshold=-1")
             elif pid == 0x04:
