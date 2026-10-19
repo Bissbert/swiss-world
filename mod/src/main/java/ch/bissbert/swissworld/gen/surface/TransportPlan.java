@@ -17,7 +17,8 @@ import java.util.Arrays;
  *   <li>Rail track: the rail centre columns, minus one of two touching tracks, minus junction nodes; every rail's
  *       shape joins exactly its track neighbours, and its level is flat through curves (a curve cannot ascend).</li>
  *   <li>Earthworks: dry terrain within {@link #EARTHWORK_REACH} of an open way is cut or filled to the way's level
- *       at the shoulder and one block per column further out.</li>
+ *       at the shoulder, one block per column out to {@link #EARTHWORK_STEEP}, then easing back into the terrain,
+ *       so a cut into a steep slope ends in grassed steps instead of a wall.</li>
  *   <li>Tunnels: a bored profile lined with a floor, walls and a ceiling, closed against water and, where the cover
  *       is thin, buried under a block of soil (a covered cut).</li>
  * </ul>
@@ -32,7 +33,9 @@ public final class TransportPlan {
     static final int RAIL_CLIMB = 10, CLIMB_RUN = 2;
     /** Clear height above a tunnel floor. */
     static final int RAIL_TUNNEL_HEIGHT = 6, ROAD_TUNNEL_HEIGHT = 5;
-    static final int EARTHWORK_REACH = 3;
+    static final int EARTHWORK_REACH = 12, EARTHWORK_STEEP = 3;
+    /** Soil under a cut's top: as deep as the steepest step of a cut, so its faces show no bare stone. */
+    static final int CUT_SOIL = EARTHWORK_STEEP;
     /** How far a curve looks along its track for the level it keeps. */
     static final int CHAIN_WALK = 3;
     static final int NONE = ColumnGrid.NONE;
@@ -848,12 +851,14 @@ public final class TransportPlan {
     /**
      * New terrain top for a dry column without overlay or building near an open way, or NONE when it stays. At
      * Chebyshev distance k from a way column with deck D the top is held within D ± (k - 1): level with the deck at
-     * the shoulder, then a 1:1 slope. Never lowered below water beside it; tunnel lining columns are left alone.
+     * the shoulder, then a 1:1 slope out to {@link #EARTHWORK_STEEP}, then easing back into the terrain by
+     * {@link #EARTHWORK_REACH}. Never lowered below water beside it; tunnel
+     * lining columns are left alone.
      */
     public int earthwork(int x, int z) {
         if (!g.present(x, z) || g.overlay(x, z) != 0 || g.flags(x, z) != 0 || g.hasBuilding(x, z)) return NONE;
         if (water(x, z) != NONE || structure(x, z)) return NONE;
-        int lo = Integer.MIN_VALUE, hi = Integer.MAX_VALUE;
+        int lo = Integer.MIN_VALUE, hi = Integer.MAX_VALUE, near = Integer.MAX_VALUE;
         for (int j = -EARTHWORK_REACH; j <= EARTHWORK_REACH; j++) {
             for (int i = -EARTHWORK_REACH; i <= EARTHWORK_REACH; i++) {
                 if (!open(x + i, z + j)) continue;
@@ -861,11 +866,19 @@ public final class TransportPlan {
                 int d = shoulderDeck(x + i, z + j);
                 lo = Math.max(lo, d - (k - 1));
                 hi = Math.min(hi, d + (k - 1));
+                near = Math.min(near, k);
             }
         }
         if (lo == Integer.MIN_VALUE) return NONE;
         int top = g.top(x, z);
         int t = Math.max(Math.min(top, Math.max(lo, hi)), Math.min(lo, hi));
+        // beyond the 1:1 slope the cut or fill eases back into the terrain, meeting it at the terrain's own slope, so
+        // no wall stands where it ends
+        if (near > EARTHWORK_STEEP) {
+            double u = (near - EARTHWORK_STEEP) / (double) (EARTHWORK_REACH + 1 - EARTHWORK_STEEP);
+            double w = 1 - (1 - u) * (1 - u);
+            t = (int) Math.round(t + w * (top - t));
+        }
         int ns = neighbourWet(x, z);
         if (ns != NONE) t = Math.max(t, ns);
         return t == top ? NONE : t;
@@ -1097,6 +1110,8 @@ public final class TransportPlan {
         FLOOR,
         /** The surface block that was on the column's old top (earthworks move it). */
         TOP,
+        /** Under a cut's moved top: earth under a grown top, the same rock under rock, so a cut face is no bare stone. */
+        SUBSOIL,
         /** A stream's bed right over a tunnel's air: its old bed block if that cannot fall, else one like it that cannot. */
         BED
     }
@@ -1128,6 +1143,7 @@ public final class TransportPlan {
                 int top = g.top(x, z);
                 if (to < top) {
                     for (int y = to + 1; y <= top; y++) out.set(y, Part.AIR);
+                    for (int y = to - CUT_SOIL; y < to; y++) out.set(y, Part.SUBSOIL);
                 } else {
                     for (int y = top; y < to; y++) out.set(y, Part.SOIL);
                 }

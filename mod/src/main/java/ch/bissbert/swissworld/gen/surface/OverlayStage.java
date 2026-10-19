@@ -4,6 +4,7 @@ import ch.bissbert.swissworld.gen.GenContext;
 import ch.bissbert.swissworld.gen.GenStage;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.tags.BlockTags;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.FallingBlock;
 import net.minecraft.world.level.block.LanternBlock;
@@ -74,6 +75,7 @@ public final class OverlayStage implements GenStage {
             case RAILING -> railing(t, x, z);
             case LANTERN -> LANTERN;
             case TOP -> top.isAir() ? COVER : top;
+            case SUBSOIL -> top.isAir() || top.is(BlockTags.DIRT) ? SOIL : top;
             case BED -> top.isAir() || top.getBlock() instanceof FallingBlock ? BED : top;
         };
     }

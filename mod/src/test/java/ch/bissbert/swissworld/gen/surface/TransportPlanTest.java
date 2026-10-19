@@ -58,6 +58,33 @@ class TransportPlanTest {
         for (int y = d + 2; y < -1370; y++) assertEquals(B.AIR, v.at(2, y, 7), "above spike at " + y);
     }
 
+    /** Playtest 2026-10-20 00.10.30: a road cut into a steep slope left a vertical dirt and stone wall beside it. */
+    @Test
+    void cutIntoASteepSlopeIsTerracedAndGrassed() {
+        SwdCell c = Cells.flat(600);
+        Voxels.terrain(c, (x, z) -> 600 + 1.6 * x);
+        for (int z = -60; z <= 60; z++) {
+            for (int x = 0; x <= 5; x++) Cells.overlay(c, x, z, 3, x == 0 || x == 5 ? ColumnGrid.EDGE : 0, Double.NaN);
+        }
+        Voxels v = new Voxels(c, -4, -20, 24, 20, -1440, -1340);
+        List<String> walls = new ArrayList<>();
+        int steps = 0;
+        for (int z = -18; z <= 18; z++) {
+            for (int x = 6; x <= 20; x++) {
+                int a = topSolid(v, x - 1, z), b = topSolid(v, x, z);
+                if (b - a > TransportPlan.CUT_SOIL) walls.add(x + "," + z + ": " + a + " -> " + b);
+                // a cut column's step face stands in soil: every block of it is under the cut's top, none bare rock
+                if (v.part(x, b, z) != TransportPlan.Part.TOP) continue;
+                for (int y = a + 1; y < b; y++) {
+                    steps++;
+                    if (v.part(x, y, z) != TransportPlan.Part.SUBSOIL) walls.add(x + "," + y + "," + z + " face " + v.part(x, y, z));
+                }
+            }
+        }
+        assertTrue(steps > 0, "the slope is cut");
+        assertTrue(walls.isEmpty(), () -> "bare or high steps above the road: " + walls);
+    }
+
     @Test
     void roadShoulderIsGradedToTheDeck() {
         Voxels v = new Voxels(slopedRoad(), -8, -40, 14, 40, -1440, -1370);
