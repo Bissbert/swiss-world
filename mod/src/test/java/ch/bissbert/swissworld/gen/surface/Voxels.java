@@ -97,7 +97,7 @@ final class Voxels {
         });
         if (t.way(x, z)) {
             wayCol[c] = true;
-            deck[c] = t.tunnel(x, z) ? t.tunnelFloor(x, z) : t.deck(x, z);
+            deck[c] = t.tunnel(x, z) || t.absorbed(x, z) ? t.tunnelFloor(x, z) : t.deck(x, z);
             slab[c] = slabbed[0];
             tunnelWay[c] = t.tunnel(x, z);
             openRoad[c] = t.open(x, z) && t.road(x, z);

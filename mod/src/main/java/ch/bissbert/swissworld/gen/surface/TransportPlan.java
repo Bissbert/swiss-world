@@ -106,7 +106,22 @@ public final class TransportPlan {
 
     /** A way on the ground: not a bridge, not in a tunnel. Its terrain is cut or filled to its deck. */
     public boolean open(int x, int z) {
-        return way(x, z) && !g.flag(x, z, ColumnGrid.BRIDGE) && !g.flag(x, z, ColumnGrid.TUNNEL);
+        return way(x, z) && !g.flag(x, z, ColumnGrid.BRIDGE) && !g.flag(x, z, ColumnGrid.TUNNEL) && !absorbed(x, z);
+    }
+
+    /**
+     * A way without the tunnel flag that crosses a bored profile: it runs over it ({@link #over}), or it would cut
+     * through the bore, and then the bore wins: the column is part of the tunnel and the way gives way to it.
+     */
+    public boolean absorbed(int x, int z) {
+        return way(x, z) && !g.flag(x, z, ColumnGrid.TUNNEL) && tunnelFloor(x, z) != NONE && !over(x, z);
+    }
+
+    /** A way without the tunnel flag whose deck lies above the lining of a bore under it: both are built, apart. */
+    public boolean over(int x, int z) {
+        if (!way(x, z) || g.flag(x, z, ColumnGrid.TUNNEL)) return false;
+        int hi = tunnelHighCeiling(x, z);
+        return hi != NONE && deck(x, z) > hi;
     }
 
     /** Water the mod places in this column (WaterPlan's level), or NONE. */
@@ -142,6 +157,15 @@ public final class TransportPlan {
         return v;
     }
 
+    /**
+     * Two way columns of different ways where one is bored and the other is not: a way crossing over a tunnel or
+     * running beside it. Their profiles stay apart, however close they run. The same way leading into its portal
+     * (same class) still blends into the tunnel's deck.
+     */
+    private boolean crossing(int x, int z, int nx, int nz) {
+        return g.flag(nx, nz, ColumnGrid.TUNNEL) != g.flag(x, z, ColumnGrid.TUNNEL) && g.overlay(nx, nz) != g.overlay(x, z);
+    }
+
     private double profile(int x, int z, boolean rail) {
         int r = rail ? RAIL_RADIUS : ROAD_RADIUS;
         int r2 = r * r, full = (r + 1) * (r + 1);
@@ -152,6 +176,7 @@ public final class TransportPlan {
                 if (d2 > r2) continue;
                 int nx = x + i, nz = z + j;
                 if (rail ? !railWay(nx, nz) : !road(nx, nz)) continue;
+                if (crossing(x, z, nx, nz)) continue;
                 int w = full - d2;
                 sw += w;
                 sv += w * sample(nx, nz, rail);
@@ -171,7 +196,7 @@ public final class TransportPlan {
         int need = NONE;
         for (int j = -ROAD_RAMP; j <= ROAD_RAMP; j++) {
             for (int i = -ROAD_RAMP; i <= ROAD_RAMP; i++) {
-                if (!road(x + i, z + j)) continue;
+                if (!road(x + i, z + j) || crossing(x, z, x + i, z + j)) continue;
                 int n = roadNeed(x + i, z + j);
                 if (n != NONE) need = Math.max(need, n - Math.max(Math.abs(i), Math.abs(j)));
             }
@@ -216,7 +241,7 @@ public final class TransportPlan {
         int b = (int) Math.floor(profile(x, z, true));
         for (int jj = -RAIL_RAMP; jj <= RAIL_RAMP; jj++) {
             for (int ii = -RAIL_RAMP; ii <= RAIL_RAMP; ii++) {
-                if (!railWay(x + ii, z + jj)) continue;
+                if (!railWay(x + ii, z + jj) || crossing(x, z, x + ii, z + jj)) continue;
                 int n = railNeed(x + ii, z + jj);
                 if (n != NONE) b = Math.max(b, n - Math.max(Math.abs(ii), Math.abs(jj)));
             }
@@ -441,12 +466,13 @@ public final class TransportPlan {
         if (floor[k] != UNSET) return floor[k] == NONE ? NONE : floor[k] >> 1;
         int f = NONE;
         boolean rail = false;
-        if (g.present(x, z) && (tunnel(x, z) || !way(x, z))) {
+        if (g.present(x, z)) {
             if (tunnel(x, z)) {
                 f = deck(x, z);
                 rail = railWay(x, z);
             } else {
                 int lo = Integer.MAX_VALUE;
+                boolean own = false;
                 for (int j = -2; j <= 2; j++) {
                     for (int i = -2; i <= 2; i++) {
                         int nx = x + i, nz = z + j;
@@ -455,10 +481,13 @@ public final class TransportPlan {
                         if (tunnel(nx, nz) && (near || tunnelRailNode(nx, nz))) {
                             lo = Math.min(lo, deck(nx, nz));
                             rail |= railWay(nx, nz);
+                            own |= way(x, z) && g.overlay(nx, nz) == g.overlay(x, z);
                         }
                     }
                 }
                 if (lo != Integer.MAX_VALUE) f = lo;
+                // the tunnel's own approach, and another way at the floor's level beside it (a branch), stay open
+                if (f != NONE && way(x, z) && (own || Math.abs(deck(x, z) - f) <= 1)) f = NONE;
             }
         }
         floor[k] = f == NONE ? NONE : f * 2 + (rail ? 1 : 0);
@@ -528,7 +557,8 @@ public final class TransportPlan {
 
     /** A wall column: outside the profile, beside it, and no way (the way leading to a portal stays open). */
     public boolean tunnelWall(int x, int z) {
-        return g.present(x, z) && tunnelFloor(x, z) == NONE && !way(x, z) && tunnelHighCeiling(x, z) != NONE;
+        if (!g.present(x, z) || tunnelFloor(x, z) != NONE || tunnelHighCeiling(x, z) == NONE) return false;
+        return !way(x, z) || over(x, z);
     }
 
     /** Part of a tunnel (profile or wall): earthworks leave it alone. */
@@ -561,8 +591,9 @@ public final class TransportPlan {
         if (!g.present(x, z)) return true;
         if (structure(x, z)) {
             tunnelColumn(x, z, out);
+            if (over(x, z)) wayColumn(x, z, tunnelHighCeiling(x, z) + 1, out);
         } else if (way(x, z)) {
-            wayColumn(x, z, out);
+            wayColumn(x, z, Integer.MIN_VALUE, out);
         } else if (g.overlay(x, z) != 0 || g.flag(x, z, ColumnGrid.DAM_BODY)) {
             return false;
         } else {
@@ -581,7 +612,7 @@ public final class TransportPlan {
     }
 
     /** A road or rail column outside a tunnel: embankment or cut, culvert roof over water, deck, slab or rail. */
-    private void wayColumn(int x, int z, Sink out) {
+    private void wayColumn(int x, int z, int bottom, Sink out) {
         boolean bridge = g.flag(x, z, ColumnGrid.BRIDGE);
         boolean underBridge = OverlayPlan.railUnderBridge(g, x, z);
         int top = g.top(x, z), deck = deck(x, z);
@@ -594,9 +625,9 @@ public final class TransportPlan {
             }
         } else {
             // embankment on the terrain, or the roof of a culvert over this column's water
-            for (int y = Math.max(top, wet) + 1; y < deck; y++) out.set(y, Part.FILL);
+            for (int y = Math.max(Math.max(top, wet) + 1, bottom); y < deck; y++) out.set(y, Part.FILL);
         }
-        for (int y = deck + 1; y <= top; y++) out.set(y, Part.AIR); // cut
+        for (int y = Math.max(deck + 1, bottom); y <= top; y++) out.set(y, Part.AIR); // cut
         if (underBridge) {
             // swd-format §5: a rail on a ballast bed on the terrain, under the road deck and its beam
             int bed = railBed(x, z);
@@ -634,7 +665,7 @@ public final class TransportPlan {
             for (int y = lo; y < floor; y++) out.set(y, Part.LINING);
             for (int y = floor + 1; y < ceil; y++) out.set(y, Part.AIR);
             for (int y = ceil; y <= hi; y++) out.set(y, Part.LINING);
-            if (way(x, z)) {
+            if (tunnel(x, z)) {
                 boolean road = road(x, z);
                 out.set(floor, road ? Part.SURFACE : Part.BALLAST);
                 if (road && roadSlab(x, z)) out.set(floor + 1, Part.SLAB);
@@ -646,7 +677,7 @@ public final class TransportPlan {
                 out.set(floor, Part.LINING);
             }
         }
-        if (wetTop(x, z) == NONE && top < hi + 2) {
+        if (wetTop(x, z) == NONE && top < hi + 2 && !over(x, z)) {
             for (int y = Math.max(top, hi) + 1; y <= hi + 1; y++) out.set(y, y == hi + 1 ? Part.COVER : Part.SOIL);
         }
     }

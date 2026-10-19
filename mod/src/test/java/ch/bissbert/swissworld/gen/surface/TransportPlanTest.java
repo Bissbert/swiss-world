@@ -399,6 +399,60 @@ class TransportPlanTest {
         }
     }
 
+    /**
+     * Playtest 19.05.33: a footpath without the tunnel flag runs inside the tunnel's strip (deep under the hill, and
+     * near a portal where the hill is low) and branches off beside it. The bore wins: its interior stays clear, the
+     * path runs on above it where it can.
+     */
+    @Test
+    void waysCrossingATunnelLeaveItsInteriorClear() {
+        SwdCell c = tunnelHill();
+        for (int z = -25; z <= -10; z++) {
+            // its own levels (OELV) put it half way up the bore
+            for (int x = -2; x <= -1; x++) Cells.overlay(c, x, z, 6, 0, 603);
+        }
+        for (int z = 34; z <= 44; z++) {
+            for (int x = 1; x <= 2; x++) Cells.overlay(c, x, z, 6, 0, Double.NaN);
+        }
+        for (int x = -12; x <= 12; x++) {
+            for (int z = -31; z <= -30; z++) {
+                if (Math.abs(x) > 2) Cells.overlay(c, x, z, 6, 0, Double.NaN);
+            }
+        }
+        Voxels v = new Voxels(c, -16, -60, 16, 60, -1430, -1370);
+        int floor = v.deck[v.col(0, 0)];
+        List<String> bad = new ArrayList<>();
+        for (int z = -40; z <= 40; z++) {
+            int head = z >= 12 && z <= 16 ? 3 : 6;
+            for (int x = -2; x <= 2; x++) {
+                int col = v.col(x, z);
+                // the bore's floor under the path; at the ramped edge by a portal the arch comes one lower
+                int f = v.tunnelWay[col] ? v.deck[col] : v.deck[v.col(0, z)];
+                int h = v.tunnelWay[col] ? head : head - 1;
+                for (int y = f + 1; y <= f + h; y++) {
+                    B b = v.at(x, y, z);
+                    if (b != B.AIR && b != B.RAIL && b != B.LANTERN) bad.add(x + "," + y + "," + z + " in the bore: " + b);
+                }
+            }
+            int f = v.deck[v.col(0, z)];
+            for (int y = f + 1; y <= f + head; y++) {
+                if (v.at(-3, y, z) == B.AIR || v.at(3, y, z) == B.AIR) {
+                    if (z < 34) bad.add("wall open at " + z + "," + y);
+                }
+            }
+        }
+        // the path over the bore and the branch beside it are still there, on the surface
+        for (int[] p : new int[][] {{-8, -30}, {3, -31}, {8, -31}}) {
+            int d = v.deck[v.col(p[0], p[1])];
+            assertTrue(d > floor + 8, "path " + p[0] + "," + p[1] + " deck " + d);
+            assertEquals(B.SOLID, v.at(p[0], d, p[1]));
+            assertEquals(B.AIR, v.at(p[0], d + 2, p[1]));
+        }
+        bad.addAll(railFaults(v));
+        bad.addAll(v.unstableWater(2));
+        assertTrue(bad.isEmpty(), () -> "faults: " + bad);
+    }
+
     @Test
     void tunnelPortalsOpenToTheApproach() {
         Voxels v = new Voxels(tunnelHill(), -10, -60, 10, 60, -1430, -1370);
