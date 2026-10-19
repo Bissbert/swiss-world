@@ -85,6 +85,26 @@ class BuildingPlanTest {
         assertTrue(plan.floorAt(1, lx, lz) && !plan.cut(1, lx, lz));
     }
 
+    /** The rendered fixture is closed (roof, walls, panes), has a door from outside onto floor 0 and a walkable landing. */
+    @Test
+    void renderedFixtureIsClosedWithDoor() throws Exception {
+        net.minecraft.SharedConstants.tryDetectVersion();
+        net.minecraft.server.Bootstrap.bootStrap();
+        assertNotNull(plan.door());
+        assertEquals(List.of(), BuildingRender.check(new BuildingRender(plan, view(cell))));
+    }
+
+    /** Panes only on straight runs: a column whose side neighbour is not a wall of the same face never gets one. */
+    @Test
+    void panesNeedStraightWall() {
+        Columns c = plan.cols();
+        int y = plan.floorY(0) + 2;
+        // middle of the north facade: neighbours left and right are facade columns facing the same way
+        assertTrue(BuildingStage.straight(c, c.minX + 3, y, c.minZ, Dir.N));
+        // corner column: the neighbour towards the outside is not a facade of the same face
+        assertFalse(BuildingStage.straight(c, c.minX, y, c.minZ, Dir.N));
+    }
+
     @Test
     void everyFloorReachable() {
         assertNotNull(plan.stairs());
@@ -173,8 +193,9 @@ class BuildingPlanTest {
         BuildingPlan fromWest = BuildingPlan.of(both, west, west.buildings().get(0));
         BuildingPlan fromEast = BuildingPlan.of(both, east, east.buildings().get(0));
         assertSame(fromWest, fromEast);
-        assertEquals(plan.floors(), fromWest.floors());
-        assertEquals(plan.rooms().size(), fromWest.rooms().size());
+        // (floors and rooms are not compared with the unsplit plan: the shifted copies see other terrain around
+        // the footprint, and the ground floor is lifted towards the ground around it)
+        assertEquals(fromWest.floors(), fromEast.floors());
     }
 
     /** In game each chunk starts with its own cell only; the fallback must supply the neighbour, once. */

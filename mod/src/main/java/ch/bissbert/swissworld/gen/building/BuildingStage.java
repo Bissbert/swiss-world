@@ -3,6 +3,7 @@ package ch.bissbert.swissworld.gen.building;
 import ch.bissbert.swissworld.cell.SwissCoords;
 import ch.bissbert.swissworld.gen.GenContext;
 import ch.bissbert.swissworld.gen.GenStage;
+import java.util.Arrays;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.CrossCollisionBlock;
 import net.minecraft.world.level.block.DoorBlock;
@@ -61,7 +62,7 @@ public final class BuildingStage implements GenStage {
         int lo = c.lo(x, z), top = c.topFull(x, z);
         foundation(p, pal, x, z, lo, put, view);
         for (int y = lo; y <= top; y++) put.set(x, y, z, y == top ? roof(p, pal, x, z) : block(p, c, pal, x, y, z));
-        if ((c.top2(x, z) & 1) != 0 && p.style() != Style.GREENHOUSE) {
+        if ((c.top2(x, z) & 1) != 0 && p.style() != Style.GREENHOUSE && c.uphill(x, z) == null) {
             put.set(x, top + 1, z, Put.with(pal.roofSlab().defaultBlockState(), SlabBlock.TYPE, SlabType.BOTTOM));
         }
     }
@@ -143,14 +144,14 @@ public final class BuildingStage implements GenStage {
     static BlockState wall(BuildingPlan p, Palette pal, int x, int y, int z, Dir face, int outs) {
         int y0 = p.floorY(0);
         BuildingPlan.Door door = p.door();
-        if (door != null && door.x() == x && door.z() == z && (y == y0 + 1 || y == y0 + 2)) {
+        if (door != null && door.x() == x && door.z() == z && (y == y0 + door.up() + 1 || y == y0 + door.up() + 2)) {
             BlockState d = pal.door().defaultBlockState().setValue(DoorBlock.FACING, Put.mc(door.out().opposite()));
-            return d.setValue(DoorBlock.HALF, y == y0 + 1 ? DoubleBlockHalf.LOWER : DoubleBlockHalf.UPPER);
+            return d.setValue(DoorBlock.HALF, y == y0 + door.up() + 1 ? DoubleBlockHalf.LOWER : DoubleBlockHalf.UPPER);
         }
         boolean chaletBase = p.style() == Style.CHALET && p.floors().size() > 1 && y < p.floorY(1);
         if (y <= y0 || chaletBase && y == y0 + 1) return pal.base().defaultBlockState();
         if (p.style() == Style.BRIDGE && y == p.cols().lo(x, z)) return pal.floor().defaultBlockState();
-        if (outs == 1 && window(p, x, y, z, face)) {
+        if (outs == 1 && straight(p.cols(), x, y, z, face) && window(p, x, y, z, face)) {
             BlockState w = pal.pane().defaultBlockState();
             boolean ew = !face.alongX();
             return w.setValue(CrossCollisionBlock.EAST, ew).setValue(CrossCollisionBlock.WEST, ew)
@@ -159,10 +160,25 @@ public final class BuildingStage implements GenStage {
         return chaletBase ? pal.base().defaultBlockState() : pal.wall().defaultBlockState();
     }
 
+    /**
+     * True on a straight wall run: both lateral neighbours along the wall are body columns with a wall at this height
+     * facing the same side. A pane elsewhere (a jog of a stepped facade, a corner, a gap) would leave its sides open.
+     */
+    static boolean straight(Columns c, int x, int y, int z, Dir face) {
+        Dir a = face.cw(), b = a.opposite();
+        for (Dir d : new Dir[]{a, b}) {
+            int nx = x + d.dx, nz = z + d.dz;
+            if (!c.body(nx, nz) || y < c.lo(nx, nz) || y > c.topFull(nx, nz)) return false;
+            byte s = c.state(nx + face.dx, nz + face.dz);
+            if (s == Columns.BODY || s == Columns.UNKNOWN) return false;
+        }
+        return true;
+    }
+
     /** Regular window grid per storey: rows 2..storey-1 above each floor, columns by a per-style pattern. */
     static boolean window(BuildingPlan p, int x, int y, int z, Dir face) {
         BuildingPlan.Door door = p.door();
-        if (door != null && Math.abs(door.x() - x) + Math.abs(door.z() - z) <= 1 && y <= p.floorY(0) + 3) return false;
+        if (door != null && Math.abs(door.x() - x) + Math.abs(door.z() - z) <= 1 && y <= p.floorY(0) + door.up() + 3) return false;
         // storeys repeat above the last planned floor, so a building with dropped floors keeps its window rows
         int rel = p.style().hall() ? y - p.floorY(0) : Math.floorMod(y - p.floorY(0), p.storey());
         int u = (face.alongX() ? z : x) + Hash.pick(p.gid(), 31, 12);
@@ -184,21 +200,90 @@ public final class BuildingStage implements GenStage {
         return Put.with(pal.roofStairs().defaultBlockState(), StairBlock.FACING, Put.mc(up));
     }
 
-    /** Landing in front of the door, stairs down to the terrain, and headroom cut into higher ground. */
+    private static final int MAX_RUN = 24;
+
+    /**
+     * The walking levels (block y of the surface) of the path leading out of the door, cell by cell, ending on the
+     * natural terrain; each cell differs from the last by at most one block. Null if it runs into the own building,
+     * leaves the loaded cells at once, or does not reach the terrain within {@link #MAX_RUN} cells.
+     */
+    static int[] trace(Columns c, BuildingPlan.Door d, int y0, CellView view) {
+        int[] ys = new int[MAX_RUN];
+        int prev = y0;
+        for (int i = 0; i < MAX_RUN; i++) {
+            int x = d.x() + d.out().dx * (i + 1), z = d.z() + d.out().dz * (i + 1);
+            if (c.state(x, z) == Columns.BODY || view.foreign(x, z, c.gid)) return null;
+            double h = view.terrain(x, z);
+            if (Double.isNaN(h)) return i == 0 ? null : Arrays.copyOf(ys, i);
+            int g = (int) Math.floor(SwissCoords.toY(h));
+            int y = i == 0 ? y0 : Math.max(prev - 1, Math.min(prev + 1, g));
+            ys[i] = y;
+            if (y == g && calm(c, d, i + 1, g, view)) return Arrays.copyOf(ys, i + 1);
+            prev = y;
+        }
+        return null;
+    }
+
+    /** The terrain after cell {@code i} of the path stays walkable (steps of at most one block) for a few cells. */
+    private static boolean calm(Columns c, BuildingPlan.Door d, int i, int g, CellView view) {
+        for (int k = 0; k < 6; k++, i++) {
+            int x = d.x() + d.out().dx * (i + 1), z = d.z() + d.out().dz * (i + 1);
+            double h = view.terrain(x, z);
+            if (Double.isNaN(h)) return true;
+            int n = (int) Math.floor(SwissCoords.toY(h));
+            if (Math.abs(n - g) > 1) return false;
+            g = n;
+        }
+        return true;
+    }
+
+    /** Landing in front of the door, then steps and a trench (higher ground) or fill (lower) down to the terrain. */
     static void steps(BuildingPlan p, Palette pal, Put put, CellView view) {
         BuildingPlan.Door d = p.door();
-        int y0 = p.floorY(0);
-        BlockState stair = Put.with(pal.steps().defaultBlockState(), StairBlock.FACING, Put.mc(d.out().opposite()));
-        for (int i = 0; i < 8; i++) {
+        int y0 = p.floorY(0) + d.up();
+        int[] ys = trace(p.cols(), d, y0, view);
+        if (ys == null) ys = fallbackPath(p, d, y0, view);
+        for (int i = 0; i < ys.length; i++) {
             int x = d.x() + d.out().dx * (i + 1), z = d.z() + d.out().dz * (i + 1);
-            if (p.cols().state(x, z) == Columns.BODY) return;
             double h = view.terrain(x, z);
-            if (Double.isNaN(h)) return;
-            int ground = (int) Math.floor(SwissCoords.toY(h)), y = y0 - i;
-            for (int a = y + 1; a <= Math.min(ground, y + 3); a++) put.set(x, a, z, AIR);
-            if (ground >= y) return;
-            put.set(x, y, z, i == 0 ? pal.base().defaultBlockState() : stair);
+            if (Double.isNaN(h) || view.foreign(x, z, p.gid())) break;
+            int ground = (int) Math.floor(SwissCoords.toY(h)), y = ys[i];
+            int prev = i == 0 ? y0 : ys[i - 1];
+            for (int a = y + 1; a <= Math.max(ground > y ? ground : y, i == 0 || p.cols().state(x, z) == Columns.EAVE ? y + 3 : y); a++) put.set(x, a, z, AIR);
+            if (y == ground && i > 0) continue;
+            BlockState b;
+            if (i == 0 || y == prev) b = pal.base().defaultBlockState();
+            else b = Put.with(pal.steps().defaultBlockState(), StairBlock.FACING,
+                    Put.mc(y < prev ? d.out().opposite() : d.out()));
+            if (y != ground || i == 0) put.set(x, y, z, b);
             for (int a = ground + 1; a < y; a++) put.set(x, a, z, pal.foundation().defaultBlockState());
         }
+        // low eave slabs over the natural ground where the path ends would block the way out
+        for (int i = ys.length; i < ys.length + 5; i++) {
+            int x = d.x() + d.out().dx * (i + 1), z = d.z() + d.out().dz * (i + 1);
+            double h = view.terrain(x, z);
+            if (Double.isNaN(h) || p.cols().state(x, z) != Columns.EAVE || view.foreign(x, z, p.gid())) continue;
+            int g = (int) Math.floor(SwissCoords.toY(h));
+            for (int a = g + 1; a <= g + 3; a++) put.set(x, a, z, AIR);
+        }
+    }
+
+    /** No path reaches the terrain: still cut the first cells so the door opens onto a landing. */
+    private static int[] fallbackPath(BuildingPlan p, BuildingPlan.Door d, int y0, CellView view) {
+        int n = 0;
+        while (n < 8) {
+            int x = d.x() + d.out().dx * (n + 1), z = d.z() + d.out().dz * (n + 1);
+            if (p.cols().state(x, z) == Columns.BODY || view.foreign(x, z, p.gid()) || Double.isNaN(view.terrain(x, z))) break;
+            n++;
+        }
+        int[] ys = new int[Math.max(n, 1)];
+        int prev = y0;
+        for (int i = 0; i < ys.length; i++) {
+            double h = view.terrain(d.x() + d.out().dx * (i + 1), d.z() + d.out().dz * (i + 1));
+            int g = Double.isNaN(h) ? y0 : (int) Math.floor(SwissCoords.toY(h));
+            ys[i] = i == 0 ? y0 : Math.max(prev - 1, Math.min(prev + 1, g));
+            prev = ys[i];
+        }
+        return ys;
     }
 }

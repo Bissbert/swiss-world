@@ -13,16 +13,33 @@ import net.minecraft.world.level.chunk.ChunkAccess;
  * unclipped write would land in the wrong column). States with a block entity get one: proto chunks don't create them.
  */
 public final class Put {
+    /** Where writes land; a seam so tests can render a building into a plain map. */
+    public interface Sink {
+        void set(BlockPos pos, BlockState s);
+    }
+
     private final ChunkAccess chunk;
+    private final Sink sink;
     private final int x0, z0, minY, maxY;
     private final BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
 
     public Put(ChunkAccess chunk) {
         this.chunk = chunk;
+        this.sink = null;
         this.x0 = chunk.getPos().getMinBlockX();
         this.z0 = chunk.getPos().getMinBlockZ();
         this.minY = chunk.getMinBuildHeight();
         this.maxY = chunk.getMaxBuildHeight();
+    }
+
+    /** A 16x16 window at the chunk origin (x0, z0) that writes to {@code sink} (tests). */
+    public Put(int x0, int z0, int minY, int maxY, Sink sink) {
+        this.chunk = null;
+        this.sink = sink;
+        this.x0 = x0;
+        this.z0 = z0;
+        this.minY = minY;
+        this.maxY = maxY;
     }
 
     public int minX() {
@@ -45,6 +62,10 @@ public final class Put {
     public BlockEntity entity(int x, int y, int z, BlockState s) {
         if (!in(x, z) || y <= minY || y >= maxY) return null;
         pos.set(x, y, z);
+        if (sink != null) {
+            sink.set(pos, s);
+            return null;
+        }
         BlockState old = chunk.setBlockState(pos, s, false);
         if (old != null && old.hasBlockEntity()) chunk.removeBlockEntity(pos);
         if (s.hasBlockEntity() && s.getBlock() instanceof EntityBlock eb) {

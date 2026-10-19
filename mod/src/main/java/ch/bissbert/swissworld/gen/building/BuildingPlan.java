@@ -2,6 +2,8 @@ package ch.bissbert.swissworld.gen.building;
 
 import ch.bissbert.swissworld.cell.Heights;
 import ch.bissbert.swissworld.cell.SwdCell;
+import ch.bissbert.swissworld.cell.SwissCoords;
+import java.util.Arrays;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -17,8 +19,15 @@ public record BuildingPlan(long gid, Style style, Columns cols, int storey, List
                            Stairs stairs, List<Room> rooms, List<Partition> walls, List<Prop> props,
                            List<Light> lights) {
 
-    /** Door column on the facade; {@code out} points outside. The door stands on floor 0. */
-    public record Door(int x, int z, Dir out) {}
+    /**
+     * Door column on the facade; {@code out} points outside. The door stands on floor 0, or one block above it ({@code up} = 1)
+     * where the ground floor of the footprint sits one higher (the terrain-stepped body bottoms differ by a block).
+     */
+    public record Door(int x, int z, Dir out, int up) {
+        public Door(int x, int z, Dir out) {
+            this(x, z, out, 0);
+        }
+    }
 
     /**
      * First step of every flight at (x, z), rising along dir; walk is the side of the parallel landing row.
@@ -40,7 +49,7 @@ public record BuildingPlan(long gid, Style style, Columns cols, int storey, List
     public record Light(int x, int y, int z, LightKind kind) {}
 
     public static BuildingPlan of(CellView view, SwdCell home, SwdCell.Building b) {
-        return new Planner(Columns.of(view, home, b), b).plan();
+        return new Planner(Columns.of(view, home, b), b, view).plan();
     }
 
     public int floorY(int k) {
@@ -51,7 +60,7 @@ public record BuildingPlan(long gid, Style style, Columns cols, int storey, List
     public boolean floorAt(int k, int x, int z) {
         if (!cols.body(x, z)) return false;
         int y = floors.get(k);
-        return k == 0 ? cols.lo(x, z) <= y : y >= cols.lo(x, z) && y + 3 <= cols.topFull(x, z);
+        return k == 0 ? cols.lo(x, z) <= y : y >= cols.lo(x, z) && y + 3 <= cols.cover(x, z);
     }
 
     /** Index i of (x, z) along the stair run (0 = first step, s = landing), or -1. */
@@ -94,7 +103,7 @@ public record BuildingPlan(long gid, Style style, Columns cols, int storey, List
         for (int k = 1; k < floors.size(); k++) {
             int x = stairs.x + (stairs.ladder ? stairs.walk.dx : stairs.dir.dx * storey);
             int z = stairs.z + (stairs.ladder ? stairs.walk.dz : stairs.dir.dz * storey);
-            if (stairs.ladder && cols.topFull(stairs.x, stairs.z) < floorY(k) + 3) return false;
+            if (stairs.ladder && cols.cover(stairs.x, stairs.z) < floorY(k) + 3) return false;
             if (!floorAt(k, x, z) || cut(k, x, z) || pillar(x, z)) return false;
         }
         return true;
@@ -111,7 +120,7 @@ public record BuildingPlan(long gid, Style style, Columns cols, int storey, List
         final SwdCell.Building b;
         final long gid;
         final Style style;
-        final int s;
+        int s;
         final List<Integer> floors = new ArrayList<>();
         final List<Room> rooms = new ArrayList<>();
         final List<Partition> walls = new ArrayList<>();
@@ -121,8 +130,10 @@ public record BuildingPlan(long gid, Style style, Columns cols, int storey, List
         Door door;
         Stairs stairs;
         BuildingPlan view;
+        final CellView terrain;
 
-        Planner(Columns c, SwdCell.Building b) {
+        Planner(Columns c, SwdCell.Building b, CellView terrain) {
+            this.terrain = terrain;
             this.c = c;
             this.b = b;
             this.gid = b.gid();
@@ -136,17 +147,66 @@ public record BuildingPlan(long gid, Style style, Columns cols, int storey, List
             // only overhang spans (free-standing roof, swd-format §6): a canopy whatever the OBJEKTART
             this.style = area == 0 && unknown == 0 ? Style.CANOPY : Style.pick(b, c.baseH, area);
             double topY = c.y(Heights.toMetres(b.topH()));
-            this.s = storey(topY - c.baseY, b.floors());
             int ceiling = (int) Math.floor(topY) - 1;
-            for (int k = 0; k == 0 || (!style.hall() && c.baseY + k * s + 3 <= ceiling
-                    && (b.floors() <= 0 || k <= b.floors())); k++) {
-                floors.add(c.baseY + k * s);
+            // the ground floor sits on the level most of the footprint starts at (the mapped base, or one block above:
+            // body bottoms are rounded, so a footprint on flat ground often starts a block above the base)
+            int[] n = new int[4];
+            for (int z = c.minZ; z <= c.maxZ; z++) {
+                for (int x = c.minX; x <= c.maxX; x++) {
+                    if (c.body(x, z) && c.lo(x, z) <= c.baseY + 3) n[Math.max(0, c.lo(x, z) - c.baseY)]++;
+                }
             }
+            int best = 0;
+            for (int i = 1; i < 4; i++) if (n[i] > n[best]) best = i;
+            int y0 = c.baseY + best;
+            // a footprint sunk below the paving around it (urban cells are flat at street level) would put the ground
+            // floor windows at foot height: lift the floor towards the median ground along the footprint, by at most 3
+            this.topY = topY;
+            this.ceiling = ceiling;
+            this.flat = y0;
+            this.lift = Math.max(0, Math.min(Math.min(3, groundAround(terrain) - y0), ceiling - 4 - y0));
+            layFloors(y0 + lift);
+        }
+
+        final double topY;
+        final int ceiling, flat, lift;
+
+        void layFloors(int y0) {
+            floors.clear();
+            this.s = storey(topY - y0, b.floors());
+            for (int k = 0; k == 0 || (!style.hall() && y0 + k * s + 3 <= ceiling
+                    && (b.floors() <= 0 || k <= b.floors())); k++) {
+                floors.add(y0 + k * s);
+            }
+        }
+
+        /** Median terrain level of the cells touching the footprint from outside. */
+        private int groundAround(CellView terrain) {
+            int[] hs = new int[(c.maxX - c.minX + 3) * (c.maxZ - c.minZ + 3) * 4];
+            int n = 0;
+            for (int z = c.minZ; z <= c.maxZ; z++) {
+                for (int x = c.minX; x <= c.maxX; x++) {
+                    if (!c.body(x, z)) continue;
+                    for (Dir d : Dir.values()) {
+                        int nx = x + d.dx, nz = z + d.dz;
+                        if (c.state(nx, nz) == Columns.BODY || c.state(nx, nz) == Columns.UNKNOWN) continue;
+                        double h = terrain.terrain(nx, nz);
+                        if (!Double.isNaN(h)) hs[n++] = (int) Math.floor(SwissCoords.toY(h));
+                    }
+                }
+            }
+            if (n == 0) return Integer.MIN_VALUE / 2;
+            Arrays.sort(hs, 0, n);
+            return hs[n / 2];
         }
 
         BuildingPlan plan() {
             if (!style.empty()) {
                 door = findDoor();
+                if (door == null && lift > 0) { // no way in at the lifted floor: back to the mapped base
+                    layFloors(flat);
+                    door = findDoor();
+                }
                 // upper floors no stair or ladder reaches are dropped, leaving a taller top storey
                 while (floors.size() > 1 && (stairs = findStairs()) == null) floors.remove(floors.size() - 1);
             }
@@ -161,27 +221,126 @@ public record BuildingPlan(long gid, Style style, Columns cols, int storey, List
             return d != null ? d : Dir.values()[Hash.pick(gid, 3, 4)];
         }
 
-        /** Marches inward from the bbox edge on lines near the centre until a usable facade column is found. */
+        /**
+         * The door. Level 0 is the strict rule (a non-corner facade column found by marching inward from the bbox edge
+         * on lines near the centre, a fully enclosed room behind it); level 1 allows corners, level 2 any facade column
+         * of floor 0 (courtyards, annexes), level 3 also a room cell that is itself a facade column (thin buildings).
+         * A candidate counts only if its outside path reaches the terrain ({@link BuildingStage#trace}); the first level
+         * with such a candidate wins, with the shortest path (a path of at most {@link #SHORT_PATH} cells wins at once).
+         * If none has a path, the first candidate found is used anyway.
+         */
         Door findDoor() {
             int y0 = floors.get(0);
             Dir first = doorSide();
-            for (Dir out : new Dir[]{first, first.cw().cw(), first.cw(), first.cw().cw().cw()}) {
-                boolean alongX = !out.alongX();
-                int lo = alongX ? c.minX : c.minZ, hi = alongX ? c.maxX : c.maxZ, mid = Math.floorDiv(lo + hi, 2);
-                for (int o = 0; o <= hi - lo; o++) {
-                    int u = mid + ((o & 1) == 0 ? o / 2 : -(o + 1) / 2);
-                    if (u < lo || u > hi) continue;
-                    int v = out == Dir.N ? c.minZ : out == Dir.S ? c.maxZ : out == Dir.W ? c.minX : c.maxX;
-                    for (int step = 0; step <= (alongX ? c.maxZ - c.minZ : c.maxX - c.minX); step++, v -= out.dx + out.dz) {
-                        int x = alongX ? u : v, z = alongX ? v : u;
-                        if (!c.body(x, z)) continue;
-                        if (c.facade(x, z, out) && c.lo(x, z) <= y0 && c.topFull(x, z) >= y0 + 3
-                                && c.interior(x - out.dx, z - out.dz) && !corner(x, z)) {
-                            return new Door(x, z, out);
+            Dir[] sides = {first, first.cw().cw(), first.cw(), first.cw().cw().cw()};
+            Door fallback = null;
+            boolean fallbackBlocked = false;
+            Door lastResort = null;
+            Door walled = null; // has a path to the terrain, but it ends in a pocket
+            for (int level = 0; level < 4; level++) {
+                Door best = null;
+                int bestLen = Integer.MAX_VALUE;
+                for (Dir out : sides) {
+                    List<Door> cands = new ArrayList<>();
+                    if (level >= 2) {
+                        for (int z = c.minZ; z <= c.maxZ; z++) {
+                            for (int x = c.minX; x <= c.maxX; x++) {
+                                Door d = candidate(x, z, out, y0, level);
+                                if (d != null) cands.add(d);
+                            }
                         }
-                        break;
+                    } else {
+                        boolean alongX = !out.alongX();
+                        int lo = alongX ? c.minX : c.minZ, hi = alongX ? c.maxX : c.maxZ, mid = Math.floorDiv(lo + hi, 2);
+                        for (int o = 0; o <= hi - lo; o++) {
+                            int u = mid + ((o & 1) == 0 ? o / 2 : -(o + 1) / 2);
+                            if (u < lo || u > hi) continue;
+                            int v = out == Dir.N ? c.minZ : out == Dir.S ? c.maxZ : out == Dir.W ? c.minX : c.maxX;
+                            for (int step = 0; step <= (alongX ? c.maxZ - c.minZ : c.maxX - c.minX); step++, v -= out.dx + out.dz) {
+                                int x = alongX ? u : v, z = alongX ? v : u;
+                                if (!c.body(x, z)) continue;
+                                Door d = candidate(x, z, out, y0, level);
+                                if (d != null) cands.add(d);
+                                break;
+                            }
+                        }
+                    }
+                    for (Door d : cands) {
+                        int[] t = BuildingStage.trace(c, d, y0 + d.up(), terrain);
+                        boolean ok = t != null && t.length < bestLen && escapes(d, t);
+                        if (ok) {
+                            best = d;
+                            bestLen = t.length;
+                            if (bestLen <= SHORT_PATH) return best;
+                        } else if (level == 3) { // the inside cell is a wall itself: only if nothing else works
+                            if (lastResort == null) lastResort = d;
+                        } else if (t != null && walled == null) {
+                            walled = d;
+                        } else if (t == null || t.length < bestLen) {
+                            // no way out found: keep the first candidate, but not one that opens onto a neighbour
+                            boolean blocked = terrain.foreign(d.x + d.out.dx, d.z + d.out.dz, gid);
+                            if (fallback == null || fallbackBlocked && !blocked) {
+                                fallback = d;
+                                fallbackBlocked = blocked;
+                            }
+                        }
                     }
                 }
+                if (best != null) return best;
+            }
+            return walled != null ? walled : fallback != null ? fallback : lastResort;
+        }
+
+        static final int SHORT_PATH = 6;
+
+        /**
+         * True if a walker standing at the end of the path {@code t} can go on over the terrain (steps of at most one
+         * block, not through this or a neighbouring building) to {@link Buildings#MARGIN} cells beyond the bbox; a
+         * landing in a pocket between two buildings does not count. Unloaded terrain counts as open.
+         */
+        boolean escapes(Door d, int[] t) {
+            int sx = d.x + d.out.dx * t.length, sz = d.z + d.out.dz * t.length;
+            double h0 = terrain.terrain(sx, sz);
+            if (Double.isNaN(h0)) return true;
+            java.util.HashMap<Long, Integer> seen = new java.util.HashMap<>();
+            java.util.ArrayDeque<int[]> q = new java.util.ArrayDeque<>();
+            int m = Buildings.MARGIN;
+            seen.put(((long) sx << 32) ^ (sz & 0xFFFFFFFFL), (int) Math.floor(SwissCoords.toY(h0)));
+            q.add(new int[]{sx, sz});
+            while (!q.isEmpty() && seen.size() < 4000) {
+                int[] a = q.poll();
+                if (a[0] < c.minX - m || a[0] > c.maxX + m || a[1] < c.minZ - m || a[1] > c.maxZ + m) return true;
+                int ga = seen.get(((long) a[0] << 32) ^ (a[1] & 0xFFFFFFFFL));
+                for (Dir o : Dir.values()) {
+                    int x = a[0] + o.dx, z = a[1] + o.dz;
+                    long k = ((long) x << 32) ^ (z & 0xFFFFFFFFL);
+                    if (seen.containsKey(k)) continue;
+                    if (c.state(x, z) == Columns.BODY || terrain.foreign(x, z, gid)) continue;
+                    double h = terrain.terrain(x, z);
+                    if (Double.isNaN(h)) return true;
+                    int g = (int) Math.floor(SwissCoords.toY(h));
+                    if (Math.abs(g - ga) > 1) continue;
+                    seen.put(k, g);
+                    q.add(new int[]{x, z});
+                }
+            }
+            return seen.size() >= 4000;
+        }
+
+        /** A door at (x, z) facing {@code out} under the rule of {@code level}, or null. */
+        Door candidate(int x, int z, Dir out, int y0, int level) {
+            if (!c.body(x, z) || !c.facade(x, z, out)) return null;
+            int ix = x - out.dx, iz = z - out.dz;
+            if (!c.body(ix, iz) || level == 0 && corner(x, z)) return null;
+            for (int up = 0; up <= 1; up++) {
+                int yd = y0 + up;
+                if (c.lo(x, z) > yd || c.topFull(x, z) < yd + 3 || floors.size() > 1 && floors.get(1) < yd + 3) continue;
+                // the room cell needs its floor at yd, headroom, and no neighbour that walls the cell in
+                if (up == 0 ? c.lo(ix, iz) > yd : c.lo(ix, iz) != yd) continue;
+                if (c.cover(ix, iz) < yd + 3 || level < 3 && !c.interior(ix, iz)) continue;
+                boolean walled = false;
+                for (Dir d : Dir.values()) walled |= c.body(ix + d.dx, iz + d.dz) && c.lo(ix + d.dx, iz + d.dz) > yd + 1;
+                if (!walled) return new Door(x, z, out, up);
             }
             return null;
         }
@@ -223,7 +382,7 @@ public record BuildingPlan(long gid, Style style, Columns cols, int storey, List
             for (int pass = 0; pass < 2; pass++) {
                 for (int o = 0; o < n; o++) {
                     int i = (o + rot) % n, x = c.minX + i % (c.maxX - c.minX + 1), z = c.minZ + i / (c.maxX - c.minX + 1);
-                    if (!c.interior(x, z) || c.topFull(x, z) < top + 3 || nearDoor(x, z)) continue;
+                    if (!c.interior(x, z) || c.cover(x, z) < top + 3 || nearDoor(x, z)) continue;
                     for (Dir d : Dir.values()) {
                         int bx = x + d.dx, bz = z + d.dz;
                         boolean back = pass == 0 ? !c.interior(bx, bz) && c.body(bx, bz) : c.interior(bx, bz);
@@ -239,7 +398,7 @@ public record BuildingPlan(long gid, Style style, Columns cols, int storey, List
         Dir exit(int x, int z, Dir back, int top) {
             for (Dir e : new Dir[]{back.opposite(), back.cw(), back.cw().cw().cw()}) {
                 int ex = x + e.dx, ez = z + e.dz;
-                if (c.interior(ex, ez) && c.lo(ex, ez) <= floors.get(1) && c.topFull(ex, ez) >= top + 3) return e;
+                if (c.interior(ex, ez) && c.lo(ex, ez) <= floors.get(1) && c.cover(ex, ez) >= top + 3) return e;
             }
             return null;
         }
@@ -249,14 +408,14 @@ public record BuildingPlan(long gid, Style style, Columns cols, int storey, List
                 int px = x + dir.dx * i, pz = z + dir.dz * i;
                 for (int w = 0; w <= 1; w++) {
                     int qx = px + walk.dx * w, qz = pz + walk.dz * w;
-                    if (!c.interior(qx, qz) || c.topFull(qx, qz) < top + 3 || nearDoor(qx, qz)) return false;
+                    if (!c.interior(qx, qz) || c.cover(qx, qz) < top + 3 || nearDoor(qx, qz)) return false;
                 }
             }
             return true;
         }
 
         boolean usable(int k, int x, int z) {
-            return c.interior(x, z) && view.floorAt(k, x, z) && c.topFull(x, z) >= floors.get(k) + 3
+            return c.interior(x, z) && view.floorAt(k, x, z) && c.cover(x, z) >= floors.get(k) + 3
                     && !view.reserved(x, z);
         }
 
@@ -358,8 +517,8 @@ public record BuildingPlan(long gid, Style style, Columns cols, int storey, List
                     int x = p[0], z = p[1], y = floors.get(k);
                     if (k + 1 < floors.size() && view.floorAt(k + 1, x, z) && !view.cut(k + 1, x, z)) {
                         lights.add(new Light(x, floors.get(k + 1), z, LightKind.GLOW));
-                    } else if (c.topFull(x, z) - 1 >= y + 3) {
-                        lights.add(new Light(x, Math.min(c.topFull(x, z) - 1, y + 4), z, LightKind.HANGING));
+                    } else if (c.cover(x, z) - 1 >= y + 3) {
+                        lights.add(new Light(x, Math.min(c.cover(x, z) - 1, y + 4), z, LightKind.HANGING));
                     } else {
                         lights.add(new Light(x, y + 1, z, LightKind.STANDING));
                         used.add(key(k, x, z));
@@ -381,7 +540,8 @@ public record BuildingPlan(long gid, Style style, Columns cols, int storey, List
             for (int z = z0; z <= z1; z++) {
                 for (int x = x0; x <= x1; x++) {
                     int d = Math.abs(x - cx) + Math.abs(z - cz);
-                    if (d < best && usable(r.floor, x, z) && !used.contains(key(r.floor, x, z))) {
+                    if (d < best && usable(r.floor, x, z) && !used.contains(key(r.floor, x, z))
+                            && !(r.floor == 0 && door != null && x == door.x - door.out.dx && z == door.z - door.out.dz)) {
                         best = d;
                         p = new int[]{x, z};
                     }
@@ -429,7 +589,8 @@ public record BuildingPlan(long gid, Style style, Columns cols, int storey, List
         int[] anyCell(Room r, List<Partition> ws, boolean strict) {
             for (int z = r.z0; z <= r.z1; z++) {
                 for (int x = r.x0; x <= r.x1; x++) {
-                    if (strict ? free(r, x, z, ws) : usable(r.floor, x, z) && !used.contains(key(r.floor, x, z))) {
+                    boolean inside = r.floor == 0 && door != null && x == door.x - door.out.dx && z == door.z - door.out.dz;
+                    if (strict ? free(r, x, z, ws) : !inside && usable(r.floor, x, z) && !used.contains(key(r.floor, x, z))) {
                         return new int[]{x, z};
                     }
                 }

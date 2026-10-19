@@ -17,11 +17,14 @@ public final class Columns {
 
     public final int minX, minZ, maxX, maxZ, baseY;
     public final double baseH;
+    /** The building these columns belong to. */
+    public final long gid;
     private final int w;
     private final byte[] state;
     private final int[] lo, top2, eave2;
 
-    private Columns(int minX, int minZ, int maxX, int maxZ, double baseH) {
+    private Columns(long gid, int minX, int minZ, int maxX, int maxZ, double baseH) {
+        this.gid = gid;
         this.minX = minX;
         this.minZ = minZ;
         this.maxX = maxX;
@@ -38,7 +41,7 @@ public final class Columns {
 
     /** Collects the columns of {@code b} (an entry of {@code home}) from every loaded cell. */
     public static Columns of(CellView view, SwdCell home, SwdCell.Building b) {
-        Columns c = new Columns(view.blockX(home, b.minX()), view.blockZ(home, b.minZ()),
+        Columns c = new Columns(b.gid(), view.blockX(home, b.minX()), view.blockZ(home, b.minZ()),
                 view.blockX(home, b.maxX()), view.blockZ(home, b.maxZ()), Heights.toMetres(b.baseH()));
         Map<SwdCell, Integer> idx = new IdentityHashMap<>();
         for (int z = c.minZ; z <= c.maxZ; z++) {
@@ -145,6 +148,13 @@ public final class Columns {
         return true;
     }
 
+    /** Lowest roof level (exclusive) among this column and its body neighbours: above it a side is open to the sky. */
+    public int cover(int x, int z) {
+        int m = topFull(x, z);
+        for (Dir d : Dir.values()) if (state(x + d.dx, z + d.dz) == BODY) m = Math.min(m, topFull(x + d.dx, z + d.dz));
+        return m;
+    }
+
     /** Neighbour of a body column with no building at all (not even an eave): an outer facade side. */
     public boolean facade(int x, int z, Dir d) {
         byte s = state(x + d.dx, z + d.dz);
@@ -164,7 +174,8 @@ public final class Columns {
                 best = d;
             }
         }
-        if (best == null) return null;
+        // a gradient below one half block per column is the height noise of the mapped roof, not a slope
+        if (best == null || Math.abs(bestG) < 2) return null;
         Dir up = bestG > 0 ? best : best.opposite(), down = up.opposite();
         int n = roof2(x + down.dx, z + down.dz);
         return n == NONE && state(x + down.dx, z + down.dz) != UNKNOWN || n != NONE && n < own

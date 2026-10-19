@@ -120,3 +120,10 @@ None. No contract file was changed.
 - `mod/src/main/resources/data/swissworld/tags/item/loot_denylist.json`: the datapack-extendable denylist tag for
   auto-mixed loot (the brief asks for a denylist; a tag lives under `tags/`, not `loot_table/`).
 - `mod/src/test/java/ch/bissbert/swissworld/gen/building/BuildingPlanTest.java`, `BuildingSweepTest.java`: tests.
+
+## Building fixes (doors, roofs, windows)
+- Roof leaks: FurnishStage.partition overwrote roof-side fill with air; now bounded by Columns.cover(). Roof stairs only where |gradient| >= 2 (Columns.uphill), no slab atop stairs.
+- Doors: Planner.findDoor tries levels 0..3 and needs a landing that escapes to open ground (BFS) and avoids other buildings' columns (CellView.foreign). Floor y0 is lifted toward surrounding terrain (max 3) so shop windows are not sunk below paving.
+- Windows: panes only on straight wall runs (BuildingStage.straight), else solid wall.
+- Test: BuildingSweepTest.watertight* flood-fills outside air; reports leaking, doorless, bad door, open panes, "hemmed" (neighbours block landing) and "thin". Env: SWISSWORLD_SWEEP_STORE, SWISSWORLD_SWEEP_LIST (cells), WT_NEAR=x,z (inspect), SWISSWORLD_PROBE_OUT/PER_STYLE/GIDS (probeTargets export for in-game probes).
+- Residual: 16 hemmed + 2 thin of 3556 buildings in a 7-cell sweep (buildings nested inside bigger neighbours).

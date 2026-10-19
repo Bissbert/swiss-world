@@ -72,6 +72,19 @@ public record CellView(SwissCoords coords, GenContext.CellLookup cells) {
         return cell.spansAt(SwissCoords.dx(coords.east(x)), SwissCoords.dz(coords.north(z)));
     }
 
+    /** True if column (x, z) holds a span of a building other than {@code gid} (a neighbour sharing or touching the wall). */
+    public boolean foreign(int x, int z, long gid) {
+        SwdCell cell = cell(x, z);
+        if (cell == null) return false;
+        SwdCell.Span[] spans = spans(cell, x, z);
+        if (spans == null) return false;
+        for (SwdCell.Span s : spans) {
+            if (s.buildingIdx() >= 0 && s.buildingIdx() < cell.buildings().size()
+                    && cell.buildings().get(s.buildingIdx()).gid() != gid) return true;
+        }
+        return false;
+    }
+
     /** Ground height in metres at the centre of column (x, z), NaN without a cell. */
     public double terrain(int x, int z) {
         SwdCell c = cell(x, z);
