@@ -43,6 +43,13 @@ public final class WaterStage implements GenStage {
                     chunk.setBlockState(pos.set(x, f.fallTop(), z), FLOWING, false);
                     continue;
                 }
+                if (f != null && f.cane()) {
+                    int s = f.sourceTop();
+                    for (int y = bottom; y < s; y++) chunk.setBlockState(pos.set(x, y, z), FILL, false);
+                    chunk.setBlockState(pos.set(x, s, z), REED_BED, false);
+                    for (int y = s + 1; y <= f.fallTop(); y++) chunk.setBlockState(pos.set(x, y, z), REED, false);
+                    continue;
+                }
                 if (f != null) {
                     for (int y = bottom; y <= f.sourceTop(); y++) chunk.setBlockState(pos.set(x, y, z), WATER, false);
                     if (f.lip()) chunk.setBlockState(pos.set(x, f.sourceTop() + 1, z), LIP, false);
@@ -56,7 +63,8 @@ public final class WaterStage implements GenStage {
                 }
                 int bank = WaterPlan.bankTop(g, x, z);
                 for (int y = bottom; y <= bank; y++) {
-                    chunk.setBlockState(pos.set(x, y, z), y == bank ? BANK_TOP : BANK, false);
+                    // earth under the gravel: a bank side that shows in the water is no stone wall
+                    chunk.setBlockState(pos.set(x, y, z), y == bank ? BANK_TOP : FILL, false);
                 }
             }
         }

@@ -132,9 +132,11 @@ class WaterPlanTest {
             for (int z = -12; z <= 12; z++) Cells.water(c, x, z, x + z <= 0 ? 601 : 600, 2);
         }
         Voxels v = new Voxels(c, -15, -15, 15, 15, -1415, -1390);
-        // where the step meets the shore the corner stays rock (the shore is too low for a reed): check mid-river
-        List<String> stones = v.stonesInWater(6), unstable = v.unstableWater(1);
+        // playtest: "in a river going uphill there are stone blocks on the border of the two levels", also where
+        // the step meets the shore
+        List<String> stones = v.stonesInWater(1), rock = v.exposedRock(1), unstable = v.unstableWater(1);
         assertTrue(stones.isEmpty(), () -> "stone in the river: " + stones);
+        assertTrue(rock.isEmpty(), () -> "stone showing at the step: " + rock);
         assertTrue(unstable.isEmpty(), () -> "water that would move: " + unstable);
     }
 

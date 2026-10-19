@@ -86,6 +86,9 @@ final class Voxels {
             for (int y = ground + 1; y < s; y++) put(x, y, z, B.SOLID, 0);
             put(x, s, z, B.CANE, 0);
             put(x, f.fallTop(), z, B.FLOW, 1);
+        } else if (f != null && f.cane()) {
+            for (int y = ground + 1; y <= f.sourceTop(); y++) put(x, y, z, B.SOLID, 0);
+            for (int y = f.sourceTop() + 1; y <= f.fallTop(); y++) put(x, y, z, B.CANE, 0);
         } else if (f != null) {
             for (int y = ground + 1; y <= f.sourceTop(); y++) put(x, y, z, B.SOURCE, 0);
             if (f.lip()) put(x, f.sourceTop() + 1, z, B.FLOW, 2);
@@ -261,6 +264,29 @@ final class Voxels {
                     boolean ew = surface(x + 1, y, z) && surface(x - 1, y, z);
                     boolean ns = surface(x, y, z + 1) && surface(x, y, z - 1);
                     if (ew || ns) bad.add(x + "," + y + "," + z);
+                }
+            }
+        }
+        return bad;
+    }
+
+    /**
+     * The stone WaterStage writes (rock corners of steps) where it shows: a face open to water or air, or under the
+     * open sky (nothing solid above). Margin columns at the box's edge are skipped.
+     */
+    List<String> exposedRock(int margin) {
+        List<String> bad = new ArrayList<>();
+        for (int x = x0 + margin; x < x0 + nx - margin; x++) {
+            for (int z = z0 + margin; z < z0 + nz - margin; z++) {
+                for (int y = y0 + 1; y < y0 + ny - 1; y++) {
+                    if (!rock(x, y, z) || at(x, y, z) != B.SOLID) continue;
+                    for (int[] d : new int[][] {{1, 0, 0}, {-1, 0, 0}, {0, 0, 1}, {0, 0, -1}, {0, 1, 0}}) {
+                        B n = at(x + d[0], y + d[1], z + d[2]);
+                        if (n != B.SOLID && n != B.SLAB) {
+                            bad.add(x + "," + y + "," + z + " open towards " + d[0] + "," + d[1] + "," + d[2] + ": " + n);
+                            break;
+                        }
+                    }
                 }
             }
         }
