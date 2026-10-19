@@ -245,6 +245,11 @@ public final class TransportPlan {
         int k = g.index(x, z);
         if (railBase[k] != UNSET) return railBase[k];
         if (gapKind(x, z) == GAP_RAIL) return railBase[k] = boreDeck(x, z);
+        if (cut(x, z)) {
+            int b = Integer.MAX_VALUE;
+            for (int[] d : EIGHT) if (railTunnel(x + d[0], z + d[1])) b = Math.min(b, railBase(x + d[0], z + d[1]));
+            return railBase[k] = b;
+        }
         int b = (int) Math.floor(profile(x, z, true));
         for (int jj = -RAIL_RAMP; jj <= RAIL_RAMP; jj++) {
             for (int ii = -RAIL_RAMP; ii <= RAIL_RAMP; ii++) {
@@ -325,6 +330,24 @@ public final class TransportPlan {
         return n;
     }
 
+    private static final int[][] EIGHT = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}, {1, 1}, {1, -1}, {-1, 1}, {-1, -1}};
+
+    private boolean railTunnel(int x, int z) {
+        return railWay(x, z) && g.flag(x, z, ColumnGrid.TUNNEL);
+    }
+
+    /**
+     * A column another way cut out of a rail tunnel where the two cross at an angle (the sidecar burns the way last):
+     * not rail way itself, with at least two rail tunnel columns among its eight neighbours. A track's ends on both
+     * sides of the cut join through it ({@link #bridge}).
+     */
+    private boolean cut(int x, int z) {
+        if (railWay(x, z) || g.overlay(x, z) == 0 || g.flag(x, z, ColumnGrid.TUNNEL)) return false;
+        int n = 0;
+        for (int[] d : EIGHT) if (railTunnel(x + d[0], z + d[1])) n++;
+        return n >= 2;
+    }
+
     /** Longest join from a track's end to a track beside it (steps). */
     static final int BRIDGE = 4;
 
@@ -350,16 +373,30 @@ public final class TransportPlan {
                 int ahead = -(dx * fx + dz * fz);
                 if (ahead < 0) continue; // behind the end: its own track
                 int tx = ex + dx, tz = ez + dz;
-                if (!t6(tx, tz) || thinDegree(tx, tz) != 2) continue;
+                if (!t6(tx, tz)) continue;
+                int[][] p;
+                if (thinDegree(tx, tz) == 2) {
+                    p = path(ex, ez, tx, tz);
+                } else if (thinDegree(tx, tz) == 1) {
+                    // the other end of a track a crossing way cut: one join, the same from both ends, through the cut
+                    p = ex < tx || ex == tx && ez < tz ? path(ex, ez, tx, tz) : path(tx, tz, ex, ez);
+                    boolean through = false;
+                    if (p != null) for (int[] q : p) through |= cut(q[0], q[1]);
+                    if (!through) continue;
+                } else {
+                    continue;
+                }
                 int score = m * 16 - ahead;
-                if (score < best && path(ex, ez, tx, tz) != null) {
+                if (score < best && p != null) {
                     best = score;
                     bx = tx;
                     bz = tz;
                 }
             }
         }
-        return bx == NONE ? null : path(ex, ez, bx, bz);
+        if (bx == NONE) return null;
+        if (thinDegree(bx, bz) == 1 && !(ex < bx || ex == bx && ez < bz)) return path(bx, bz, ex, ez);
+        return path(ex, ez, bx, bz);
     }
 
     /** A 4-connected line from (ex, ez) to (tx, tz) over free rail way columns, both ends excluded, or null. */
@@ -380,7 +417,7 @@ public final class TransportPlan {
             }
             if (xs) cx += sx;
             else cz += sz;
-            if (!railWay(cx, cz) || t6(cx, cz)) return null;
+            if (!railWay(cx, cz) && !cut(cx, cz) || t6(cx, cz)) return null;
             p[i] = new int[] {cx, cz};
         }
         // no other track beside the join
@@ -395,7 +432,7 @@ public final class TransportPlan {
 
     /** On the join of a track's end within {@link #BRIDGE} (see {@link #bridge}). */
     private boolean bridged(int x, int z) {
-        if (t6(x, z) || !railWay(x, z)) return false;
+        if (t6(x, z) || !railWay(x, z) && !cut(x, z)) return false;
         int k = g.index(x, z);
         if (joins[k] != UNSET) return joins[k] == 1;
         boolean on = false;
@@ -814,6 +851,22 @@ public final class TransportPlan {
         return tunnel(x, z) || gap(x, z) != NONE;
     }
 
+    /**
+     * Overlay class of the tunnel a bored column belongs to: that of the nearest tunnel way column (a path or crossing
+     * the bore took over gets the tunnel's road or rail surface), or the column's own.
+     */
+    public int boreClass(int x, int z) {
+        if (tunnel(x, z)) return g.overlay(x, z);
+        for (int r = 1; r <= BORE_GAP; r++) {
+            for (int i = -r; i <= r; i++) {
+                for (int[] p : new int[][] {{x + i, z - r}, {x + i, z + r}, {x - r, z + i}, {x + r, z + i}}) {
+                    if (g.inside(p[0], p[1], 0) && g.present(p[0], p[1]) && tunnel(p[0], p[1])) return g.overlay(p[0], p[1]);
+                }
+            }
+        }
+        return g.overlay(x, z);
+    }
+
     private int boreDeck(int x, int z) {
         return tunnel(x, z) ? deck(x, z) : Math.floorDiv(gap(x, z), 4);
     }
@@ -945,6 +998,8 @@ public final class TransportPlan {
     /** What goes into a block; {@link OverlayStage} picks the block state. */
     public enum Part {
         AIR, FILL, SOIL, BEAM, LINING, COVER, BALLAST, SURFACE, SLAB, RAIL, RAILING, LANTERN,
+        /** The floor of a bore under a way it absorbed or cut: the tunnel's own surface ({@link #boreClass}). */
+        FLOOR,
         /** The surface block that was on the column's old top (earthworks move it). */
         TOP
     }
@@ -1017,7 +1072,7 @@ public final class TransportPlan {
             out.set(deck + 1, Part.RAILING);
         } else if (road && roadSlab(x, z)) {
             out.set(deck + 1, Part.SLAB);
-        } else if (!underBridge && rail(x, z) && gap(x, z) == NONE) {
+        } else if (!underBridge && rail(x, z) && gap(x, z) == NONE && !cut(x, z)) {
             out.set(deck + 1, Part.RAIL);
         }
     }
@@ -1048,7 +1103,8 @@ public final class TransportPlan {
                 boolean lit = Math.floorMod(g.east(x) + g.north(z), LIGHT_SPACING) == 0 && ceil - 1 > floor + MIN_HEADROOM;
                 if (centre && lit) out.set(ceil - 1, Part.LANTERN);
             } else {
-                out.set(floor, Part.LINING);
+                out.set(floor, Part.FLOOR);
+                if (rail(x, z) && railLevel(x, z) == floor) out.set(floor + 1, Part.RAIL);
             }
         }
         if (wetTop(x, z) == NONE && top < hi + 2 && !over(x, z)) {

@@ -65,6 +65,7 @@ public final class OverlayStage implements GenStage {
             case COVER -> COVER;
             case BALLAST -> g.flag(x, z, ColumnGrid.EDGE) ? BALLAST_EDGE : BALLAST;
             case SURFACE -> surface(g, x, z, cls, y);
+            case FLOOR -> floor(t, x, z, y);
             case SLAB -> slab(cls);
             case RAIL -> rail(t, x, z);
             case RAILING -> railing(g, x, z);
@@ -101,6 +102,13 @@ public final class OverlayStage implements GenStage {
         if (cls == 0) return;
         set(chunk, pos, x, deck, z, surface(g, x, z, cls, deck));
         if (OverlayPlan.railing(g, x, z)) set(chunk, pos, x, deck + 1, z, railing(g, x, z));
+    }
+
+    /** A bore's floor under a way it took over: ballast in a rail tunnel, the road's surface in a road tunnel. */
+    private static BlockState floor(TransportPlan t, int x, int z, int y) {
+        int cls = t.boreClass(x, z);
+        if (cls == OverlayPlan.RAIL_BED || cls == OverlayPlan.RACK_BED) return BALLAST;
+        return cls == 7 ? LINING : surface(t.grid(), x, z, cls, y);
     }
 
     private static BlockState surface(ColumnGrid g, int x, int z, int cls, int deck) {

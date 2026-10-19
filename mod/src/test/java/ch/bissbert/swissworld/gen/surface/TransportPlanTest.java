@@ -539,6 +539,10 @@ class TransportPlanTest {
                     bad.add(x + "," + z + " no bore");
                     continue;
                 }
+                // its floor is the rail tunnel's ballast, not lining (playtest: stone bricks under the absorbed path)
+                TransportPlan.Part fp = v.part(x, f, z);
+                if (fp != TransportPlan.Part.BALLAST && fp != TransportPlan.Part.FLOOR) bad.add(x + "," + z + " floor " + fp);
+                if (fp == TransportPlan.Part.FLOOR && boreClass(c, x, z) != OverlayPlan.RAIL_BED) bad.add(x + "," + z + " floor class");
                 int h = v.tunnelWay[col] || z < 34 ? head : head - 1;
                 for (int y = f + 1; y <= f + h; y++) {
                     B b = v.at(x, y, z);
@@ -573,6 +577,56 @@ class TransportPlanTest {
         bad.addAll(railFaults(v));
         bad.addAll(v.unstableWater(2));
         assertTrue(bad.isEmpty(), () -> "faults: " + bad);
+    }
+
+    private static int boreClass(SwdCell c, int x, int z) {
+        return new TransportPlan(Cells.grid(c, x, z, TransportPlan.MARGIN)).boreClass(x, z);
+    }
+
+    /**
+     * A diagonal rail tunnel under a hill (top 620 m) with open approaches at 600 m. A footpath crosses over it at an
+     * angle (the sidecar burns it over the tunnel: its columns lose the tunnel flag and the rail centre), and at the
+     * south portal the rail centre lacks the tunnel flag, beside the headwall (playtest 17.09.19, 5892/-4699).
+     */
+    @Test
+    void diagonalTunnelKeepsItsTrackWhereOtherWaysCutIt() {
+        SwdCell c = Cells.flat(600);
+        Voxels.terrain(c, (x, z) -> {
+            double a = Math.abs(x + z) / 2.0;
+            return a >= 30 ? 600 : a > 20 ? 600 + 2 * (30 - a) : 620;
+        });
+        for (int i = -50; i <= 50; i++) {
+            boolean tunnel = Math.abs(i) <= 22;
+            for (int j = -3; j <= 4; j++) {
+                Cells.overlay(c, i + j, i, OverlayPlan.RAIL_BED, tunnel ? TUNNEL : 0, 600); // a cut up to the portals
+            }
+            for (int j = 0; j <= 1; j++) {
+                boolean portal = i == 22; // the centre line's last tunnel row has no tunnel flag
+                Cells.overlay(c, i + j, i, OverlayPlan.RAIL_BED, RAIL | (tunnel && !portal ? TUNNEL : 0), 600);
+            }
+        }
+        // the footpath, two wide, running north-east over the hill
+        for (int i = -30; i <= 30; i++) {
+            for (int j = 0; j <= 1; j++) Cells.overlay(c, i + j, -i, 6, 0, Double.NaN);
+        }
+        Voxels v = new Voxels(c, -40, -40, 40, 40, -1420, -1370);
+        List<String> bad = new ArrayList<>(railFaults(v));
+        int rails = 0;
+        for (int x = -39; x <= 39; x++) {
+            for (int z = -39; z <= 39; z++) {
+                int f = v.bore[v.col(x, z)];
+                if (f != ColumnGrid.NONE && !v.tunnelWay[v.col(x, z)]) {
+                    TransportPlan.Part p = v.part(x, f, z);
+                    if (p != TransportPlan.Part.BALLAST && p != TransportPlan.Part.FLOOR) bad.add(x + "," + z + " floor " + p);
+                }
+                for (int y = v.y0; y < v.y0 + v.ny; y++) if (v.at(x, y, z) == B.RAIL) rails++;
+            }
+        }
+        assertTrue(bad.isEmpty(), () -> "faults: " + bad);
+        assertTrue(rails >= 2 * 78, "rails " + rails);
+        // the path still runs over the hill
+        assertEquals(B.SOLID, v.at(1, -1380, -1));
+        assertEquals(B.AIR, v.at(1, -1379, -1));
     }
 
     @Test

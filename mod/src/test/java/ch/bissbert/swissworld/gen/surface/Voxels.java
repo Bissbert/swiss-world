@@ -22,6 +22,10 @@ final class Voxels {
     /** Water level (1..7 flowing, 8 falling) of FLOW blocks. */
     private final int[] level;
     private final Rail[] shape;
+    /** The transport part built here, or null (terrain, water). */
+    private final Part[] part;
+    /** WaterPlan's rock: the stone WaterStage writes between two water levels. */
+    private final boolean[] rock;
     /** Per column: the deck the plan reported (road/rail), or NONE. */
     final int[] deck;
     /** Per column: the floor of a bored profile here (whatever way runs above or through it), or NONE. */
@@ -48,6 +52,8 @@ final class Voxels {
         b = new B[nx * nz * ny];
         level = new int[b.length];
         shape = new Rail[b.length];
+        part = new Part[b.length];
+        rock = new boolean[b.length];
         java.util.Arrays.fill(b, B.AIR);
         deck = new int[nx * nz];
         bore = new int[nx * nz];
@@ -84,7 +90,10 @@ final class Voxels {
             for (int y = ground + 1; y <= f.sourceTop(); y++) put(x, y, z, B.SOURCE, 0);
             if (f.lip()) put(x, f.sourceTop() + 1, z, B.FLOW, 2);
             if (f.rock()) {
-                for (int y = f.sourceTop() + 1; y <= f.fallTop(); y++) put(x, y, z, B.SOLID, 0);
+                for (int y = f.sourceTop() + 1; y <= f.fallTop(); y++) {
+                    put(x, y, z, B.SOLID, 0);
+                    if (in(x, y, z)) rock[idx(x, y, z)] = true;
+                }
             } else {
                 for (int y = f.sourceTop() + 1; y < f.fallTop(); y++) put(x, y, z, B.FLOW, 8);
                 if (f.falls()) put(x, f.fallTop(), z, B.FLOW, 1);
@@ -105,6 +114,10 @@ final class Voxels {
                 default -> B.SOLID;
             };
             put(x, y, z, v, 0);
+            if (in(x, y, z)) {
+                part[idx(x, y, z)] = p;
+                rock[idx(x, y, z)] = false;
+            }
             if (p == Part.RAIL) shape[idx(x, y, z)] = t.railShape(x, z);
         });
         bore[c] = t.tunnelFloor(x, z);
@@ -141,6 +154,16 @@ final class Voxels {
         if (y < y0) return B.SOLID;
         if (!in(x, y, z)) return B.AIR;
         return b[idx(x, y, z)];
+    }
+
+    /** The transport part built at this block, or null. */
+    Part part(int x, int y, int z) {
+        return in(x, y, z) ? part[idx(x, y, z)] : null;
+    }
+
+    /** True where WaterStage writes its rock (stone) between two water levels. */
+    boolean rock(int x, int y, int z) {
+        return in(x, y, z) && rock[idx(x, y, z)];
     }
 
     int level(int x, int y, int z) {
