@@ -1,0 +1,16 @@
+Named survey points (y = metres - 2000):
+point                                     x      z  world     TERR   ALTI3D  names d(ALTI) block
+Harder Kulm Haupthuegel (1322)        -1310  -1270   -679  1321.78  1321.77   1322    +0  minecraft:dirt_path  (overlay/building/water column)
+Harder Kulm Aussichtspunkt (1322)     -1313  -1254   -678  1307.13  1306.67   1322   -16  minecraft:dirt_path  (overlay/building/water column)
+Harder Kulm station (1296)            -1046  -1372   (not generated)
+Höhematte (568)                        -647    -37  -1433   567.68   567.71    568    +0  minecraft:grass_block
+Interlaken Ost (567)                     23   -560  -1434   567.15   567.43    567    +1  minecraft:gravel  (overlay/building/water column)
+Interlaken Ost 2 (567)                   31   -535  -1434   566.91   566.79    567    +0  minecraft:gravel  (overlay/building/water column)
+Brienz station (566)                  12966  -7750  -1435   565.72   565.76    566    +0  minecraft:gravel  (overlay/building/water column)
+Meiringen station (595)               24072  -4792  -1405   595.13   594.97    595    -1  minecraft:gravel  (overlay/building/water column)
+Aareschlucht Graben (632)             26390  -3580  -1365   635.67   642.69    632    +7  minecraft:stone
+Handegg-Fall (1371)                   33690   7777   -632  1368.19  1370.49   1371    +2  minecraft:gravel  (overlay/building/water column)
+Grimselpass Pass (2163)               35980  13568    164  2163.52  2163.85   2163    -1  minecraft:smooth_stone_slab  (overlay/building/water column)
+Grimselpass Strassenpass (2164)       36037  13513    164  2164.50  2164.52   2164    +0  minecraft:polished_andesite  (overlay/building/water column)
+Totensee Staumauer (2155)             36516  13636    161  2153.79  2154.57   2155    -7  minecraft:smooth_stone  (overlay/building/water column)
+@<scratch> 39631 plain columns sampled. vs TERR within ±1: 39098/39631 (98.7 %) [-12:1, -9:2, -8:3, -7:1, -6:4, -5:11, -4:20, -3:47, -2:119, -1:1747, +0:36620, +1:731, +2:178, +3:75, +4:29, +5:18, +6:11, +7:4, +8:6, +9:1, +10:1, +21:1, +24:1]  vs ALTI3D within ±1: 38738/39631 (97.7 %) [-17:1, -12:2, -9:5, -8:1, -7:5, -6:5, -5:25, -4:31, -3:53, -2:216, -1:4302, +0:30815, +1:3621, +2:303, +3:110, +4:49, +5:36, +6:15, +7:15, +8:3, +9:7, +10:1, +11:6, +12:1, +22:1, +23:2]

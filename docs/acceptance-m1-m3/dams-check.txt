@@ -1,0 +1,15 @@
+dam group ~E 2665924 N 1156264: sampled 27, solid 27, solid at crest±2 27, water within 4 27; first fail None
+dam group ~E 2666180 N 1163432: sampled 413, solid 413, solid at crest±2 413, water within 4 85; first fail None
+dam group ~E 2666180 N 1159848: sampled 30, solid 30, solid at crest±2 30, water within 4 30; first fail None
+dam group ~E 2666436 N 1163432: sampled 687, solid 687, solid at crest±2 687, water within 4 54; first fail None
+dam group ~E 2667460 N 1162920: sampled 471, solid 471, solid at crest±2 471, water within 4 171; first fail None
+dam group ~E 2667460 N 1162664: sampled 638, solid 638, solid at crest±2 638, water within 4 165; first fail None
+dam group ~E 2667716 N 1160360: sampled 1664, solid 1664, solid at crest±2 1664, water within 4 232; first fail None
+dam group ~E 2667972 N 1160360: sampled 277, solid 277, solid at crest±2 277, water within 4 199; first fail None
+dam group ~E 2668228 N 1158568: sampled 397, solid 397, solid at crest±2 396, water within 4 179; first fail (35387, -78, 12226, 'minecraft:stone_bricks', 1911.6)
+dam group ~E 2668228 N 1158312: sampled 535, solid 532, solid at crest±2 525, water within 4 307; first fail (35406, -88, 12335, 'minecraft:air', 1911.6)
+dam group ~E 2668740 N 1158568: sampled 691, solid 691, solid at crest±2 691, water within 4 167; first fail None
+dam group ~E 2668996 N 1158568: sampled 198, solid 198, solid at crest±2 198, water within 4 82; first fail None
+dam group ~E 2668996 N 1156776: sampled 56, solid 56, solid at crest±2 56, water within 4 43; first fail None
+dam group ~E 2669252 N 1157032: sampled 76, solid 76, solid at crest±2 76, water within 4 67; first fail None
+TOTAL sampled 6160, solid 6157, crest±2 6149, water within 4 1808

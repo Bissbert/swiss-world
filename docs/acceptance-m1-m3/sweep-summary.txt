@@ -1,0 +1,9 @@
+2633_1170 rc=0 failures="0"
+watertight[store cells 2633_1170]: 265 buildings, 265 checked, 0 at a missing cell edge, 247 with rooms, 0 leaking, 0 without door, 0 bad door, 0 with open panes, 0 with gaps under roof stairs, 0 with roof holes, 0 hemmed in by neighbours, 0 thin; {}
+2644_1178 rc=0 failures="0"
+watertight[store cells 2644_1178]: 326 buildings, 326 checked, 0 at a missing cell edge, 309 with rooms, 0 leaking, 0 without door, 0 bad door, 0 with open panes, 0 with gaps under roof stairs, 0 with roof holes, 0 hemmed in by neighbours, 0 thin; {}
+2657_1175 rc=0 failures="0"
+watertight[store cells 2657_1175]: 731 buildings, 731 checked, 0 at a missing cell edge, 716 with rooms, 0 leaking, 0 without door, 0 bad door, 0 with open panes, 0 with gaps under roof stairs, 0 with roof holes, 2 hemmed in by neighbours, 1 thin; {INDUSTRIAL hemmed=1, INDUSTRIAL thin=1, TOWN_HOUSE hemmed=1}
+2666_1158 rc=0 failures="0"
+watertight[store cells 2666_1158]: 0 buildings, 0 checked, 0 at a missing cell edge, 0 with rooms, 0 leaking, 0 without door, 0 bad door, 0 with open panes, 0 with gaps under roof stairs, 0 with roof holes, 0 hemmed in by neighbours, 0 thin; {}
+2632_1170 (first run): watertight[store cells 2632_1170]: 969 buildings, 969 checked, 0 leaking, 0 without door, 0 bad door, 0 open panes, 0 roof holes, 2 hemmed in by neighbours, 0 thin

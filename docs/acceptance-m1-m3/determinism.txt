@@ -1,0 +1,9 @@
+World A: gen.py interlaken harder seam (forward order), seed 4242, hashed before any mutation (hash-A.json).
+World B: fresh world, same seed, gen.py interlaken harder seam --reverse; fill() 12.4 ms/chunk, 2931 chunks, load 25.
+det.py compare: 1667 chunks in both (1667/1667); 423418 sections; differing sections 709 in 614 chunks
+  (all at y -1472..-1441 and below, i.e. underground)
+det.py detail (block pairs world B vs world A), all ore-vs-ore swaps where veins of neighbouring chunks overlap:
+  iron_ore/coal_ore 91, coal_ore/copper_ore 81, copper_ore/coal_ore 60, coal_ore/iron_ore 47, coal_ore/redstone_ore 16,
+  gold_ore/coal_ore 14, coal_ore/gold_ore 13, redstone_ore/coal_ore 10, copper_ore/iron_ore 10, coal_ore/lapis_ore 8,
+  lapis_ore/coal_ore 6, gold_ore/iron_ore 5, gold_ore/lapis_ore 3, iron_ore/gold_ore 2, redstone_ore/gold_ore 2
+No terrain, water, building, furniture, road or rail block differs.

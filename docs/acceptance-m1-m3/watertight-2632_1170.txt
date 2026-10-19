@@ -1,0 +1,2 @@
+-8420630179866543726 MODERN bbox -643..-628 283..300 door=Door[x=-640, z=290, out=W, up=0] [hemmed landing-unreachable seen=3 [start -641,-1429,290]]
+-5737306888120133237 INDUSTRIAL bbox -242..-237 -244..-236 door=Door[x=-242, z=-240, out=W, up=0] [hemmed outside-neighbour]

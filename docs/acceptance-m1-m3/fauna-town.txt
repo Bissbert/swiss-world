@@ -1,0 +1,1 @@
+== fauna at (0.0,-1431.0,-100.0) after 120s at night: chicken 10, rabbit 1; none of: ['bat', 'slime', 'cod', 'salmon', 'tropical_fish', 'pufferfish', 'squid', 'glow_squid', 'axolotl', 'cow', 'sheep', 'pig', 'horse', 'fox', 'wolf', 'goat']

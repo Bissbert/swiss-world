@@ -1,0 +1,7 @@
+Area "aare" (LV95 2631500..2632300 / 1170750..1171100, Interlaken), 1173 full chunks, 93006 water blocks.
+water.py tick aare 60 (no breaks):   MSPT avg 2.7 max 11.7, P95 max 25.8 ms (TPS 20.0)
+water.py diff aare-0 aare-1:         0 chunks with changed water sections; net water blocks +0
+water.py banks aare 20:              breached 20 banks of 226 candidates (fill x y-3..y+1 z air next to WKND 2 river pixels)
+water.py tick aare 120 (after):      MSPT avg 1.4 max 2.2, P95 max 6.5 ms (TPS 20.0)
+water.py diff aare-1 aare-2:         19 chunks with changed water sections; net water blocks +67 (max +8 per chunk,
+                                     i.e. only the breach holes filled; no flooding, no draining)

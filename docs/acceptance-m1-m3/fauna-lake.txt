@@ -1,0 +1,1 @@
+== fauna at (5345.0,-1434.0,-3563.0) after 150s at night: ; none of: ['bat', 'slime', 'cod', 'salmon', 'tropical_fish', 'pufferfish', 'squid', 'glow_squid', 'axolotl', 'cow', 'sheep', 'pig', 'chicken', 'horse', 'fox', 'rabbit', 'wolf', 'goat']

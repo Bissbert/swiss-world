@@ -1,0 +1,39 @@
+sidecar stop: sidecar stopped
+  [sidecar down] tick query avg/P50/P95/P99 ms: (0.3, 0.3, 0.4, 0.6); status: cells 64/64 cached, 1 pending · chunks 60259 generated (6.5 ms/chunk), 56 waiting, 25 aborted · heap 3213/8192 MB · coverage loaded
+(a) bot joined: True; position after tp: Bot has the following entity data: [0.0d, -1431.0d, -100.0d]; bot log: spawn: minecraft:overworld flat=False | position: 0.5 64.0 -1.5 | spawn: swissworld:switzerland flat=True | position: 0.0 -1431.0 -100.0 | died: <death.attack.genericKill> | spawn: minecraft:overworld flat=False | position: 8.5 65.0 -7.5 | position: 8.5 65.0 -7.5
+  [after (a)] tick query avg/P50/P95/P99 ms: (7.7, 5.9, 17.4, 42.8); status: cells 64/64 cached, 1 pending · chunks 60259 generated (6.5 ms/chunk), 56 waiting, 25 aborted · heap 3482/8192 MB · coverage loaded
+(b) chunk at x -5800 z 1600 (cell in store) loaded: True after 1s
+  [(c) sidecar down t=25s] tick query avg/P50/P95/P99 ms: (4.8, 0.5, 50.0, 50.1); status: cells 64/64 cached, 1 pending · chunks 60322 generated (6.5 ms/chunk), 56 waiting, 106 aborted · heap 3960/8192 MB · coverage loaded
+  [(c) sidecar down t=30s] tick query avg/P50/P95/P99 ms: (0.6, 0.5, 1.1, 1.4); status: cells 64/64 cached, 0 pending · chunks 60322 generated (6.5 ms/chunk), 0 waiting, 162 aborted · heap 1780/8192 MB · coverage loaded
+Traceback (most recent call last):
+  File "<worktrees>/acceptance/tools/acceptance/acc.py", line 81, in __call__
+    return self._pkt(2, cmd)
+           ^^^^^^^^^^^^^^^^^
+  File "<worktrees>/acceptance/tools/acceptance/acc.py", line 76, in _pkt
+    n = struct.unpack("<i", self._recv(4))[0]
+                            ^^^^^^^^^^^^^
+  File "<worktrees>/acceptance/tools/acceptance/acc.py", line 69, in _recv
+    raise ConnectionError("rcon closed")
+ConnectionError: rcon closed
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "<worktrees>/acceptance/tools/acceptance/robust.py", line 98, in <module>
+    main((v[0], v[1], v[2]), (int(v[3]), int(v[4])), (int(v[5]), int(v[6])), *(v[7:8]))
+  File "<worktrees>/acceptance/tools/acceptance/robust.py", line 78, in main
+    qs.append(ticks(r, f"(c) sidecar down t={time.time() - t0:.0f}s"))
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<worktrees>/acceptance/tools/acceptance/robust.py", line 37, in ticks
+    q = parse_tick(r("tick query"))
+                   ^^^^^^^^^^^^^^^
+  File "<worktrees>/acceptance/tools/acceptance/acc.py", line 84, in __call__
+    self._connect()
+  File "<worktrees>/acceptance/tools/acceptance/acc.py", line 61, in _connect
+    self.s = socket.create_connection(("127.0.0.1", self.port), timeout=600)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "~/.local/share/uv/python/cpython-3.12.9-macos-aarch64-none/lib/python3.12/socket.py", line 865, in create_connection
+    raise exceptions[0]
+  File "~/.local/share/uv/python/cpython-3.12.9-macos-aarch64-none/lib/python3.12/socket.py", line 850, in create_connection
+    sock.connect(sa)
+ConnectionRefusedError: [Errno 61] Connection refused

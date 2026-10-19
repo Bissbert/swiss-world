@@ -1,0 +1,8 @@
+== flight town-interlaken: from (-1600.0,-1400.0,-200.0) by (4000.0,0.0) at 30.0 m/s (133 s planned); load 23.8
+bot: spawn: swissworld:switzerland flat=True | walked to 2400.0 -1400.0 -200.0 in 133.3s
+tick query samples 69: avg MSPT mean 4.7 max 9.3; P95 median 16.1 max 28.8; P99 max 409.7 ms
+share of samples with avg MSPT > 50 ms: 0 %
+chunks generated during flight: 5726
+max chunks waiting 0, aborted (placeholders) 0
+log: 0 StallGuard lines, 0 placeholder lines
+status after: cells 64/64 cached, 0 pending · chunks 60058 generated (6.5 ms/chunk), 0 waiting, 0 aborted · heap 2483/8192 MB · coverage loaded

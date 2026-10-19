@@ -1,0 +1,17 @@
+cell 2632_1170: 969 buildings in BTBL, 143 fully inside the generated area
+
+== buildings interlaken
+  buildings: 143
+  eave-only in this cell (skipped): 4
+  present: 139
+  with door: 139
+  multi-storey (>= 8 blocks): 108
+  multi-storey with stair/ladder core: 106
+  interior rooms: 324
+  dark rooms: 103
+  roof columns: round(world roof surface - source topH): within +-1 21053/21239 [-2:167, -1:9990, +0:11054, +1:9, +2:8, +3:3, +4:5, +5:3]
+  eave columns: within +-1 5867/5921 [-4:5, -3:10, -2:13, -1:2155, +0:3701, +1:11, +2:17, +3:7, +5:2]
+  dark room: 103 e.g. [(113756546470532192, 1130, (-484, -1433, 55), (-458, -1432, 86)), (125533191120220633, 532, (-355, -1435, -159), (-326, -1434, -144)), (667975057745303300, 502, (-535, -1434, 144), (-511, -1433, 164)), (681085732687085663, 316, (-531, -1433, 276), (-515, -1432, 288)), (809433890944663893, 144, (-312, -1432, 243), (-303, -1431, 252))]
+  no stair core: 2 e.g. [(12176293745493962998, (-343, -1434, 127)), (13101631549772798174, (-457, -1435, 15))]
+== containers: 1158 {'minecraft:chest': 959, 'minecraft:barrel': 199}; with LootTable 1158; without 0 e.g. []
+  loot tables: {'swissworld:chests/residential_living': 441, 'swissworld:chests/residential_bedroom': 413, 'swissworld:chests/residential_kitchen': 109, 'swissworld:chests/shop': 77, 'swissworld:chests/office': 51, 'swissworld:chests/hotel': 30, 'swissworld:chests/workshop': 20, 'swissworld:chests/barn': 13, 'swissworld:chests/church': 4}
