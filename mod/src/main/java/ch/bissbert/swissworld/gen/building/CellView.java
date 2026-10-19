@@ -92,6 +92,15 @@ public record CellView(SwissCoords coords, GenContext.CellLookup cells) {
                 : c.terrain(SwissCoords.dx(coords.east(x)) + 0.5, SwissCoords.dz(coords.north(z)) + 0.5);
     }
 
+    /** True if column (x, z) is a road, track, footpath or flight of steps on the ground (not a bridge or a tunnel). */
+    public boolean way(int x, int z) {
+        SwdCell c = cell(x, z);
+        if (c == null) return false;
+        int dx = SwissCoords.dx(coords.east(x)), dz = SwissCoords.dz(coords.north(z));
+        int k = c.overlay(dx, dz);
+        return k >= 2 && k <= 7 && (c.overlayFlags(dx, dz) & 3) == 0;
+    }
+
     /** Block x of a cell-relative column dx. */
     public int blockX(SwdCell cell, int dx) {
         return (int) ((long) cell.eKm() * 1000 - coords.e0()) + dx;
