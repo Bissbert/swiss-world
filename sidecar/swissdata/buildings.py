@@ -184,15 +184,17 @@ def sheet_from_solids(item: str, bodies: list[tuple[dict, np.ndarray]],
         volume[b] += voxel.solid_volume(t)
 
     # free-standing roofs (carports, shelters; no Building_solid) become their own rows, one per unit; their
-    # skin is emitted as overhang (roof without walls). Row id = smallest roof UUID of the unit.
+    # skin is emitted as overhang (roof without walls). Row id = smallest roof UUID of the unit; roofs without UUID
+    # sort last (then by sheet order), and a unit whose roofs all lack one is identified by its unit key.
     props = [p for p, _ in bodies]
     tris = list(body_tris)
     for unit_key, rr in free.items():
         b = len(props)
         roof_body[rr] = b
         body_unit.append(unit_ids.setdefault(unit_key, len(unit_ids)))
-        first = min(rr, key=lambda r: roofs[r][0]["UUID"])
-        props.append({**roofs[first][0], "EGID": max(roofs[r][0]["EGID"] or 0 for r in rr)})
+        first = min(rr, key=lambda r: (roofs[r][0]["UUID"] is None, roofs[r][0]["UUID"] or "", r))
+        props.append({**roofs[first][0], "UUID": roofs[first][0]["UUID"] or unit_key,
+                      "EGID": max(roofs[r][0]["EGID"] or 0 for r in rr)})
         tris.append(np.concatenate([roofs[r][1] for r in rr]))
         volume = np.append(volume, sum(voxel.solid_volume(roofs[r][1]) for r in rr))
     body_unit = np.asarray(body_unit, dtype=np.int64)
@@ -231,10 +233,11 @@ def sheet_from_solids(item: str, bodies: list[tuple[dict, np.ndarray]],
     over = rs_keep & ~has_body
     # a skin resting on the body (within SKIN_GAP_M of its top) raises that body span to the roof surface;
     # a skin clearly above it (e.g. a canopy over a lower annex) is its own body span; skins below are dropped
-    span = top_span[pos]
+    span = top_span[pos] if len(top_keys) else np.zeros(len(rs), dtype=np.int64)  # sheet without bodies
+    span_top = bs.top[span] if len(top_keys) else np.zeros(len(rs))
     on = rs_keep & has_body
-    rests = on & (rs.bottom <= bs.top[span] + SKIN_GAP_M) & (rs.top > bs.top[span])
-    above = on & (rs.bottom > bs.top[span] + SKIN_GAP_M)
+    rests = on & (rs.bottom <= span_top + SKIN_GAP_M) & (rs.top > span_top)
+    above = on & (rs.bottom > span_top + SKIN_GAP_M)
     body_top = bs.top.copy()
     np.maximum.at(body_top, span[rests], rs.top[rests])
 
