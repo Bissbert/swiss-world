@@ -109,6 +109,16 @@ public final class ColumnGrid {
         return coords.north(z);
     }
 
+    /** The block column x whose east is {@code e}: inverse of {@link #east}. */
+    public int xAt(long e) {
+        return (int) (e - coords.east(0));
+    }
+
+    /** The block column z whose north is {@code n}: inverse of {@link #north}. */
+    public int zAt(long n) {
+        return (int) (coords.north(0) - n);
+    }
+
     /** Inside Switzerland with a loaded cell; false means ocean. */
     public boolean present(int x, int z) {
         return present[k(x, z)];
