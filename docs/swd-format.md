@@ -126,6 +126,13 @@ Values 18–255 are reserved. Readers map unknown values to 0.
 
 Rail blocks are placed where `OFLG.bit2` is set on a class-8 column. The mod derives the rail shape from the neighbouring rail-centre columns.
 
+**Rail under a road bridge.** A column can have the bridge bit, a road `OCLS` (1–7) **and** `OFLG.bit2`. Then:
+
+- the road deck is at `OELV`;
+- the rail lies on the terrain under the deck, on a rail bed (ballast), with a rail block on the centre line.
+
+A rail bridge is still class 8 with the bridge bit, and the rail lies on the deck.
+
 ## 6. Buildings
 
 ### `BTBL`
