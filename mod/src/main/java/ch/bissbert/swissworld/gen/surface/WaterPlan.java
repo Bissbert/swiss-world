@@ -11,6 +11,9 @@ package ch.bissbert.swissworld.gen.surface;
  *   <li>A waterfall column (WKND 6) is a one-block pool on its ground; it falls only below a higher neighbouring
  *       source. Falling water with no source beside its top would drain on the first update, so WLVL alone never
  *       raises it.</li>
+ *   <li>Vanilla turns water with two source neighbours at its level, standing on a source or solid, into a source.
+ *       Where a drop would put such a block (a step that runs diagonally or turns a corner), the lower column is
+ *       rock from its source level up instead ({@link Fill#rock}). Rock is no source, so this never spreads.</li>
  * </ul>
  */
 public final class WaterPlan {
@@ -20,12 +23,13 @@ public final class WaterPlan {
 
     /**
      * Water of one column: sources from {@code ground + 1} to {@code sourceTop}, falling water above, and a flowing
-     * block (level 1) at {@code fallTop}, level with the neighbouring source that feeds it.
+     * block (level 1) at {@code fallTop}, level with the neighbouring source that feeds it. With {@code rock}, the
+     * part above {@code sourceTop} is solid instead.
      */
-    public record Fill(int sourceTop, int fallTop) {
+    public record Fill(int sourceTop, int fallTop, boolean rock) {
         /** No falling part when {@code fallTop <= sourceTop}. */
         public boolean falls() {
-            return fallTop > sourceTop;
+            return fallTop > sourceTop && !rock;
         }
     }
 
@@ -55,6 +59,19 @@ public final class WaterPlan {
     public static Fill fill(ColumnGrid g, int x, int z) {
         int s = sourceLevel(g, x, z);
         if (s == ColumnGrid.NONE) return null;
-        return new Fill(s, Math.max(s, neighbourSource(g, x, z)));
+        int top = Math.max(s, neighbourSource(g, x, z));
+        boolean rock = false;
+        for (int y = s + 1; y <= top && !rock; y++) rock = sourcesAt(g, x, z, y) >= 2;
+        return new Fill(s, top, rock);
+    }
+
+    /** Neighbours that have a source block at height y. */
+    static int sourcesAt(ColumnGrid g, int x, int z, int y) {
+        return sourceAt(g, x + 1, z, y) + sourceAt(g, x - 1, z, y) + sourceAt(g, x, z + 1, y) + sourceAt(g, x, z - 1, y);
+    }
+
+    private static int sourceAt(ColumnGrid g, int x, int z, int y) {
+        int s = sourceLevel(g, x, z);
+        return s != ColumnGrid.NONE && g.ground(x, z) < y && y <= s ? 1 : 0;
     }
 }

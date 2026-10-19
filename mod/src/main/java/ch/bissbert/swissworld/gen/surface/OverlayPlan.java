@@ -67,10 +67,28 @@ public final class OverlayPlan {
         return g.present(x, z) && g.overlay(x, z) != 0 && g.flag(x, z, ColumnGrid.BRIDGE);
     }
 
-    /** A bridge column on the side of the deck: a neighbour has no overlay. Bridge ends (next to the road) stay open. */
+    /**
+     * A bridge column on the side of the deck: a neighbour has no overlay and the deck goes on behind it and along it,
+     * so a walkable path stays free. A 2-wide deck gets a railing only on its east or south side, a 1-wide one none,
+     * and the stepped edge of a diagonal deck none. Bridge ends (next to the road) stay open.
+     */
     public static boolean railing(ColumnGrid g, int x, int z) {
         if (!bridge(g, x, z)) return false;
-        return g.overlay(x + 1, z) == 0 || g.overlay(x - 1, z) == 0 || g.overlay(x, z + 1) == 0 || g.overlay(x, z - 1) == 0;
+        return side(g, x, z, 1, 0) || side(g, x, z, -1, 0) || side(g, x, z, 0, 1) || side(g, x, z, 0, -1);
+    }
+
+    /**
+     * Open towards (dx, dz), with the deck behind (two more bridge columns, or one when this is the east/south side)
+     * and running on beside this column and the one behind it.
+     */
+    private static boolean side(ColumnGrid g, int x, int z, int dx, int dz) {
+        if (g.overlay(x + dx, z + dz) != 0 || !bridge(g, x - dx, z - dz)) return false;
+        if (dx + dz < 0 && !bridge(g, x - 2 * dx, z - 2 * dz)) return false;
+        return alongside(g, x, z, dx, dz, dz, dx) || alongside(g, x, z, dx, dz, -dz, -dx);
+    }
+
+    private static boolean alongside(ColumnGrid g, int x, int z, int dx, int dz, int px, int pz) {
+        return bridge(g, x + px, z + pz) && bridge(g, x - dx + px, z - dz + pz);
     }
 
     /**

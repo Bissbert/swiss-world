@@ -33,6 +33,10 @@ public final class WaterStage implements GenStage {
                 WaterPlan.Fill f = WaterPlan.fill(g, x, z);
                 if (f != null) {
                     for (int y = bottom; y <= f.sourceTop(); y++) chunk.setBlockState(pos.set(x, y, z), WATER, false);
+                    if (f.rock()) {
+                        for (int y = f.sourceTop() + 1; y <= f.fallTop(); y++) chunk.setBlockState(pos.set(x, y, z), BANK, false);
+                        continue;
+                    }
                     for (int y = f.sourceTop() + 1; y < f.fallTop(); y++) chunk.setBlockState(pos.set(x, y, z), FALLING, false);
                     if (f.falls()) chunk.setBlockState(pos.set(x, f.fallTop(), z), FLOWING, false);
                     continue;

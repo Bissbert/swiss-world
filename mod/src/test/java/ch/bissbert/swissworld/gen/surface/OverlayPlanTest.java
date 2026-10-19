@@ -100,4 +100,32 @@ class OverlayPlanTest {
         }
         assertTrue(OverlayPlan.pier(g, pierX, 0));
     }
+
+    @Test
+    void narrowBridgesKeepAWalkableColumn() {
+        SwdCell c = Cells.flat(600);
+        // footbridges running north-south: 1 wide at x 0, 2 wide at x 10..11
+        for (int z = -10; z <= 10; z++) {
+            Cells.overlay(c, 0, z, 6, ColumnGrid.BRIDGE, 605);
+            Cells.overlay(c, 10, z, 6, ColumnGrid.BRIDGE, 605);
+            Cells.overlay(c, 11, z, 6, ColumnGrid.BRIDGE, 605);
+        }
+        ColumnGrid g = Cells.grid(c, 0, 0);
+        assertFalse(OverlayPlan.railing(g, 0, 0));
+        assertFalse(OverlayPlan.railing(g, 10, 0));
+        assertTrue(OverlayPlan.railing(g, 11, 0));
+    }
+
+    @Test
+    void aDiagonalBridgeHasNoRailingsAcrossItsSteppedEdge() {
+        SwdCell c = Cells.flat(600);
+        // a 2-wide deck stepping south-east: (i, i) and (i + 1, i)
+        for (int i = -10; i <= 10; i++) {
+            Cells.overlay(c, i, i, 6, ColumnGrid.BRIDGE, 605);
+            Cells.overlay(c, i + 1, i, 6, ColumnGrid.BRIDGE, 605);
+        }
+        ColumnGrid g = Cells.grid(c, 0, 0);
+        assertFalse(OverlayPlan.railing(g, 0, 0));
+        assertFalse(OverlayPlan.railing(g, 1, 0));
+    }
 }

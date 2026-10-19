@@ -74,4 +74,27 @@ class WaterPlanTest {
         assertEquals(-1400, f.fallTop());
         assertTrue(f.falls());
     }
+
+    @Test
+    void cornerOfADiagonalStepIsRockNotWater() {
+        SwdCell c = Cells.flat(590);
+        // upper river at 601 m west and north of (0, 0), lower river at 600 m on (0, 0) and east and south of it
+        for (int x = -3; x <= 3; x++) {
+            for (int z = -3; z <= 3; z++) Cells.water(c, x, z, x < 0 || z < 0 ? 601 : 600, 3);
+        }
+        ColumnGrid g = Cells.grid(c, 0, 0);
+        WaterPlan.Fill corner = WaterPlan.fill(g, 0, 0);
+        assertEquals(2, WaterPlan.sourcesAt(g, 0, 0, -1399));
+        assertTrue(corner.rock());
+        assertFalse(corner.falls());
+        assertEquals(-1399, corner.fallTop());
+        // along the straight parts of the step one source feeds the flowing top: water, as before
+        WaterPlan.Fill edge = WaterPlan.fill(g, 2, 0);
+        assertFalse(edge.rock());
+        assertTrue(edge.falls());
+        assertEquals(-1399, edge.fallTop());
+        // the rock is no source, so the columns beside the corner stay water
+        assertFalse(WaterPlan.fill(g, 1, 0).rock());
+        assertFalse(WaterPlan.fill(g, 0, 1).rock());
+    }
 }
