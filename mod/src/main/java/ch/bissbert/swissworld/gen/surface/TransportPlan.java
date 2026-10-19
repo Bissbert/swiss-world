@@ -1060,6 +1060,19 @@ public final class TransportPlan {
         return true;
     }
 
+    /** A rail block on this column's deck (outside a tunnel, not under a road bridge). */
+    private boolean trackOnDeck(int x, int z) {
+        return !OverlayPlan.railUnderBridge(g, x, z) && rail(x, z) && gap(x, z) == NONE && !cut(x, z);
+    }
+
+    /**
+     * A bridge railing on this column: none where the track runs, since a diagonal track's staircase touches the edges
+     * of a narrow rail bridge, and a wall there would cut the line.
+     */
+    public boolean railing(int x, int z) {
+        return OverlayPlan.railing(g, x, z) && !(railWay(x, z) && trackOnDeck(x, z));
+    }
+
     /** A road or rail column outside a tunnel: embankment or cut, culvert roof over water, deck, slab or rail. */
     private void wayColumn(int x, int z, int bottom, Sink out) {
         boolean bridge = g.flag(x, z, ColumnGrid.BRIDGE);
@@ -1088,12 +1101,12 @@ public final class TransportPlan {
             }
         }
         out.set(deck, road ? Part.SURFACE : Part.BALLAST);
-        if (OverlayPlan.railing(g, x, z)) {
+        if (trackOnDeck(x, z)) {
+            out.set(deck + 1, Part.RAIL);
+        } else if (OverlayPlan.railing(g, x, z)) {
             out.set(deck + 1, Part.RAILING);
         } else if (road && roadSlab(x, z)) {
             out.set(deck + 1, Part.SLAB);
-        } else if (!underBridge && rail(x, z) && gap(x, z) == NONE && !cut(x, z)) {
-            out.set(deck + 1, Part.RAIL);
         }
     }
 

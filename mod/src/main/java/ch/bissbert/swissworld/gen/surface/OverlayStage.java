@@ -51,7 +51,7 @@ public final class OverlayStage implements GenStage {
                 int x = x0 + lx, z = z0 + lz;
                 BlockState top = chunk.getBlockState(pos.set(x, g.present(x, z) ? g.top(x, z) : 0, z));
                 boolean done = t.build(x, z, (y, part) -> set(chunk, pos, x, y, z, block(t, x, z, part, y, top)));
-                if (!done) column(chunk, g, x, z, pos);
+                if (!done) column(chunk, t, x, z, pos);
             }
         }
     }
@@ -71,7 +71,7 @@ public final class OverlayStage implements GenStage {
             case FLOOR -> floor(t, x, z, y);
             case SLAB -> slab(cls);
             case RAIL -> rail(t, x, z);
-            case RAILING -> railing(g, x, z);
+            case RAILING -> railing(t, x, z);
             case LANTERN -> LANTERN;
             case TOP -> top.isAir() ? COVER : top;
             case BED -> top.isAir() || top.getBlock() instanceof FallingBlock ? BED : top;
@@ -79,7 +79,8 @@ public final class OverlayStage implements GenStage {
     }
 
     /** Steps, dams, grass and other overlay that keeps its {@link ColumnGrid#deck}. */
-    private static void column(ChunkAccess chunk, ColumnGrid g, int x, int z, BlockPos.MutableBlockPos pos) {
+    private static void column(ChunkAccess chunk, TransportPlan t, int x, int z, BlockPos.MutableBlockPos pos) {
+        ColumnGrid g = t.grid();
         int cls = g.overlay(x, z);
         boolean bridge = g.flag(x, z, ColumnGrid.BRIDGE);
         boolean wet = g.source(x, z) != ColumnGrid.NONE;
@@ -105,7 +106,7 @@ public final class OverlayStage implements GenStage {
         }
         if (cls == 0) return;
         set(chunk, pos, x, deck, z, surface(g, x, z, cls, deck));
-        if (OverlayPlan.railing(g, x, z)) set(chunk, pos, x, deck + 1, z, railing(g, x, z));
+        if (t.railing(x, z)) set(chunk, pos, x, deck + 1, z, railing(t, x, z));
     }
 
     /** A bore's floor under a way it took over: ballast in a rail tunnel, the road's surface in a road tunnel. */
@@ -164,9 +165,9 @@ public final class OverlayStage implements GenStage {
     }
 
     /** A wall joined to the railing columns beside it; a post where it is not a straight run. */
-    private static BlockState railing(ColumnGrid g, int x, int z) {
-        boolean n = OverlayPlan.railing(g, x, z - 1), s = OverlayPlan.railing(g, x, z + 1);
-        boolean e = OverlayPlan.railing(g, x + 1, z), w = OverlayPlan.railing(g, x - 1, z);
+    private static BlockState railing(TransportPlan t, int x, int z) {
+        boolean n = t.railing(x, z - 1), s = t.railing(x, z + 1);
+        boolean e = t.railing(x + 1, z), w = t.railing(x - 1, z);
         boolean straight = n && s && !e && !w || e && w && !n && !s;
         return Blocks.STONE_BRICK_WALL.defaultBlockState()
                 .setValue(WallBlock.UP, !straight)

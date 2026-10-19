@@ -175,7 +175,10 @@ class TransportPlanTest {
                     for (int[] d : new int[][] {{1, 0}, {-1, 0}, {0, 1}, {0, -1}}) {
                         if (ends.stream().anyMatch(e -> e[0] == d[0] && e[1] == d[1])) continue;
                         int c = v.col(x + d[0], z + d[1]);
-                        if (v.railWay[c] && v.at(x + d[0], y, z + d[1]) == B.SOLID) bad.add(x + "," + y + "," + z + " in a trench");
+                        if (v.railWay[c] && v.at(x + d[0], y, z + d[1]) == B.SOLID
+                                && v.part(x + d[0], y, z + d[1]) != TransportPlan.Part.RAILING) {
+                            bad.add(x + "," + y + "," + z + " in a trench");
+                        }
                     }
                 }
             }
@@ -320,6 +323,27 @@ class TransportPlanTest {
                     && v.shape(x, y, i) != Rail.EAST_WEST) curves++;
         }
         assertTrue(curves >= 40, "curves " + curves);
+    }
+
+    @Test
+    void diagonalRailBridgeKeepsEveryRailOfItsStaircase() {
+        SwdCell c = Cells.flat(600);
+        // a narrow rail bridge running south-east, 6 m over the ground: per row the two centre columns of the
+        // staircase and one deck column on the east; the west of each row is open, so the west centre column is an
+        // edge of the deck (Brünig line at Interlaken, E 2633932 N 1171472)
+        for (int i = -40; i <= 40; i++) {
+            Cells.overlay(c, i, i, OverlayPlan.RAIL_BED, RAIL | ColumnGrid.BRIDGE, 606);
+            Cells.overlay(c, i + 1, i, OverlayPlan.RAIL_BED, RAIL | ColumnGrid.BRIDGE, 606);
+            Cells.overlay(c, i + 2, i, OverlayPlan.RAIL_BED, ColumnGrid.BRIDGE, 606);
+        }
+        Voxels v = new Voxels(c, -30, -30, 30, 30, -1410, -1385);
+        List<String> bad = railFaults(v);
+        assertTrue(bad.isEmpty(), () -> "rail faults: " + bad);
+        int rails = 0;
+        for (int i = -20; i <= 20; i++) {
+            for (int x = i; x <= i + 1; x++) if (v.at(x, v.deck[v.col(x, i)] + 1, i) == B.RAIL) rails++;
+        }
+        assertEquals(82, rails, "rails on the staircase");
     }
 
     @Test
