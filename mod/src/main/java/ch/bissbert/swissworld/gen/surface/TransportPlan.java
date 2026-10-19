@@ -35,7 +35,8 @@ public final class TransportPlan {
     private static final int UNSET = Integer.MAX_VALUE;
 
     private final ColumnGrid g;
-    private final int[] roadHalf, railBase, railNode, railLevel, floor, ceil, wet, gap;
+    private final int[] roadHalf, railBase, railNode, railLevel, floor, ceil, wet, gap, joins;
+    private final int[][] thinned;
 
     public TransportPlan(ColumnGrid g) {
         if (g.margin() < MARGIN) throw new IllegalArgumentException("grid margin " + g.margin() + " < " + MARGIN);
@@ -49,6 +50,9 @@ public final class TransportPlan {
         ceil = filled(n);
         wet = filled(n);
         gap = filled(n);
+        joins = filled(n);
+        thinned = new int[THIN.length][];
+        for (int i = 0; i < THIN.length; i++) thinned[i] = filled(n);
     }
 
     private static int[] filled(int n) {
@@ -257,22 +261,171 @@ public final class TransportPlan {
         return OverlayPlan.railCentre(g, x, z) || gapKind(x, z) == GAP_RAIL;
     }
 
-    /** Touching tracks: of two rail centres side by side, the one west or north keeps its rails. */
+    /** Thinning passes: each drops the centres with none on this side (north, west, south, east, ...). */
+    private static final int[] THIN = {0, 3, 1, 2, 0, 3};
+
+    /** A rail centre, or a gap of one column inside a rail way with centres on all four sides (two tracks touching). */
+    private boolean c00(int x, int z) {
+        if (c0(x, z)) return true;
+        for (int[] d : DIRS) if (!c0(x + d[0], z + d[1])) return false;
+        return railWay(x, z);
+    }
+
+    /**
+     * Two tracks drawn side by side (two centre lines touching, or one drawn two wide) thinned to one: pass by pass,
+     * the centres with no centre on the pass's side are dropped where that keeps their neighbours joined and does not
+     * shorten a track (a simple point of the 4-connected centres). Each pass looks one column further around.
+     */
+    private boolean thin(int x, int z, int pass) {
+        if (pass == 0) return c00(x, z);
+        int k = g.index(x, z);
+        int[] cache = thinned[pass - 1];
+        if (cache[k] != UNSET) return cache[k] == 1;
+        boolean keep = thin(x, z, pass - 1);
+        if (keep) {
+            int[] d = DIRS[THIN[pass - 1]];
+            if (!thin(x + d[0], z + d[1], pass - 1) && simple(x, z, pass - 1)) keep = false;
+        }
+        cache[k] = keep ? 1 : 0;
+        return keep;
+    }
+
+    /** Ring of the eight neighbours, clockwise from north. */
+    private static final int[][] RING = {{0, -1}, {1, -1}, {1, 0}, {1, 1}, {0, 1}, {-1, 1}, {-1, 0}, {-1, -1}};
+
+    /**
+     * Dropping (x, z) from the centres of {@code pass} keeps its centre neighbours (at least two) joined among its eight
+     * neighbours: one run of set cells around the ring that holds all its set side neighbours.
+     */
+    private boolean simple(int x, int z, int pass) {
+        boolean[] on = new boolean[8];
+        int sides = 0;
+        for (int i = 0; i < 8; i++) {
+            on[i] = thin(x + RING[i][0], z + RING[i][1], pass);
+            if (on[i] && i % 2 == 0) sides++;
+        }
+        if (sides < 2) return false;
+        // corners count only between two set sides (4-connected); runs of set sides around the ring
+        int runs = 0;
+        for (int i = 0; i < 8; i += 2) {
+            boolean a = on[i], next = on[(i + 2) % 8] && on[i + 1];
+            if (a && !next) runs++;
+        }
+        return runs == 1;
+    }
+
+    private boolean t6(int x, int z) {
+        return thin(x, z, THIN.length);
+    }
+
+    private int thinDegree(int x, int z) {
+        int n = 0;
+        for (int[] d : DIRS) if (t6(x + d[0], z + d[1])) n++;
+        return n;
+    }
+
+    /** Longest join from a track's end to a track beside it (steps). */
+    static final int BRIDGE = 4;
+
+    /**
+     * Where ways merge, the data sometimes ends one track's centre line a few columns short of the track it joins. Such
+     * an end gets a short join through the rail way to the nearest track at most {@link #BRIDGE} steps away (not back
+     * along its own track): the columns of that join, end excluded, or null.
+     */
+    private int[][] bridge(int ex, int ez) {
+        if (!t6(ex, ez) || thinDegree(ex, ez) != 1) return null;
+        int fx = 0, fz = 0; // towards the track it comes from
+        for (int[] d : DIRS) {
+            if (t6(ex + d[0], ez + d[1])) {
+                fx = d[0];
+                fz = d[1];
+            }
+        }
+        int bx = NONE, bz = NONE, best = Integer.MAX_VALUE;
+        for (int dz = -BRIDGE; dz <= BRIDGE; dz++) {
+            for (int dx = -BRIDGE; dx <= BRIDGE; dx++) {
+                int m = Math.abs(dx) + Math.abs(dz);
+                if (m < 2 || m > BRIDGE) continue;
+                int ahead = -(dx * fx + dz * fz);
+                if (ahead < 0) continue; // behind the end: its own track
+                int tx = ex + dx, tz = ez + dz;
+                if (!t6(tx, tz) || thinDegree(tx, tz) != 2) continue;
+                int score = m * 16 - ahead;
+                if (score < best && path(ex, ez, tx, tz) != null) {
+                    best = score;
+                    bx = tx;
+                    bz = tz;
+                }
+            }
+        }
+        return bx == NONE ? null : path(ex, ez, bx, bz);
+    }
+
+    /** A 4-connected line from (ex, ez) to (tx, tz) over free rail way columns, both ends excluded, or null. */
+    private int[][] path(int ex, int ez, int tx, int tz) {
+        int n = Math.abs(tx - ex) + Math.abs(tz - ez) - 1;
+        int sx = Integer.signum(tx - ex), sz = Integer.signum(tz - ez);
+        int[][] p = new int[n][];
+        int cx = ex, cz = ez;
+        for (int i = 0; i < n; i++) {
+            boolean xs;
+            if (cx == tx) xs = false;
+            else if (cz == tz) xs = true;
+            else {
+                // step that stays nearest the straight line
+                long ax = Math.abs((long) (cx + sx - ex) * (tz - ez) - (long) (cz - ez) * (tx - ex));
+                long az = Math.abs((long) (cx - ex) * (tz - ez) - (long) (cz + sz - ez) * (tx - ex));
+                xs = ax <= az;
+            }
+            if (xs) cx += sx;
+            else cz += sz;
+            if (!railWay(cx, cz) || t6(cx, cz)) return null;
+            p[i] = new int[] {cx, cz};
+        }
+        // no other track beside the join
+        for (int[] q : p) {
+            for (int[] d : DIRS) {
+                int ax = q[0] + d[0], az = q[1] + d[1];
+                if (t6(ax, az) && !(ax == ex && az == ez) && !(ax == tx && az == tz)) return null;
+            }
+        }
+        return p;
+    }
+
+    /** On the join of a track's end within {@link #BRIDGE} (see {@link #bridge}). */
+    private boolean bridged(int x, int z) {
+        if (t6(x, z) || !railWay(x, z)) return false;
+        int k = g.index(x, z);
+        if (joins[k] != UNSET) return joins[k] == 1;
+        boolean on = false;
+        for (int dz = -BRIDGE + 1; dz <= BRIDGE - 1 && !on; dz++) {
+            for (int dx = -BRIDGE + 1; dx <= BRIDGE - 1 && !on; dx++) {
+                if (Math.abs(dx) + Math.abs(dz) >= BRIDGE) continue;
+                int[][] p = bridge(x + dx, z + dz);
+                if (p == null) continue;
+                for (int[] q : p) on |= q[0] == x && q[1] == z;
+            }
+        }
+        joins[k] = on ? 1 : 0;
+        return on;
+    }
+
+    /** The thinned centres plus the joins: the track graph. */
     private boolean c1(int x, int z) {
-        if (!c0(x, z)) return false;
-        boolean n = c0(x, z - 1), s = c0(x, z + 1), e = c0(x + 1, z), w = c0(x - 1, z);
-        int deg = (n ? 1 : 0) + (s ? 1 : 0) + (e ? 1 : 0) + (w ? 1 : 0);
-        if (deg < 3) return true;
-        if (deg == 4) return false;
-        // three neighbours: one through pair plus one extra side; drop when the extra side is north or west
-        if (e && w) return !n;
-        return !w;
+        return t6(x, z) || bridged(x, z);
+    }
+
+    private int degree(int x, int z) {
+        int n = 0;
+        for (int[] d : DIRS) if (c1(x + d[0], z + d[1])) n++;
+        return n;
     }
 
     private boolean c2(int x, int z) {
         if (!c1(x, z)) return false;
-        int deg = (c1(x, z - 1) ? 1 : 0) + (c1(x, z + 1) ? 1 : 0) + (c1(x + 1, z) ? 1 : 0) + (c1(x - 1, z) ? 1 : 0);
-        return deg <= 2;
+        int deg = degree(x, z);
+        if (deg <= 2) return true;
+        return deg == 3;
     }
 
     /** Shortest track kept: where tracks merge, the thinning leaves short pieces that lead nowhere. */
@@ -320,6 +473,48 @@ public final class TransportPlan {
         return m;
     }
 
+    private static final int[] OPP = {1, 0, 3, 2};
+    /** How far a switch looks back along its branch for the side the branch comes from. */
+    static final int SWITCH_WALK = 6;
+
+    /**
+     * The two neighbours a rail joins (bit mask as {@link #links}): its track neighbours, or at a switch (three) the
+     * branch and the side of the through track it runs on to, away from where the branch comes from. Vanilla rails
+     * have no switch block; a curve with a straight rail meeting its outside is what a player builds instead.
+     */
+    private int track(int x, int z) {
+        int m = links(x, z);
+        if (Integer.bitCount(m) != 3) return m;
+        int stem = 0;
+        for (int d = 0; d < 4; d++) if ((m & 1 << d) != 0 && (m & 1 << OPP[d]) == 0) stem = d;
+        // a switch beside a switch: the two join each other
+        int a = stem <= 1 ? 2 : 0, b = OPP[a];
+        boolean sa = Integer.bitCount(links(x + DIRS[a][0], z + DIRS[a][1])) == 3;
+        boolean sb = Integer.bitCount(links(x + DIRS[b][0], z + DIRS[b][1])) == 3;
+        if (sa != sb) return 1 << stem | 1 << (sa ? a : b);
+        int px = x, pz = z, cx = x + DIRS[stem][0], cz = z + DIRS[stem][1];
+        for (int step = 1; step < SWITCH_WALK; step++) {
+            int cm = links(cx, cz);
+            if (Integer.bitCount(cm) != 2) break;
+            int nx = NONE, nz = NONE;
+            for (int e = 0; e < 4; e++) {
+                int qx = cx + DIRS[e][0], qz = cz + DIRS[e][1];
+                if ((cm & 1 << e) != 0 && (qx != px || qz != pz)) {
+                    nx = qx;
+                    nz = qz;
+                }
+            }
+            px = cx;
+            pz = cz;
+            cx = nx;
+            cz = nz;
+        }
+        boolean ns = stem <= 1; // the through track runs east-west
+        int delta = ns ? cx - x : cz - z;
+        int side = ns ? (delta > 0 ? 3 : 2) : (delta > 0 ? 0 : 1);
+        return 1 << stem | 1 << side;
+    }
+
     private static boolean curve(int m) {
         return Integer.bitCount(m) == 2 && m != 3 && m != 12;
     }
@@ -333,7 +528,7 @@ public final class TransportPlan {
         int k = g.index(x, z);
         if (railLevel[k] != UNSET) return railLevel[k];
         int lvl = preLevel(x, z);
-        int m = links(x, z);
+        int m = track(x, z);
         if (Integer.bitCount(m) == 2 && !curve(m)) {
             int a = -1, b = -1;
             for (int d = 0; d < 4; d++) {
@@ -347,7 +542,7 @@ public final class TransportPlan {
     }
 
     private int preLevel(int x, int z) {
-        int m = links(x, z);
+        int m = track(x, z);
         if (!curve(m)) return railBase(x, z);
         int lvl = railBase(x, z);
         for (int d = 0; d < 4; d++) {
@@ -355,7 +550,7 @@ public final class TransportPlan {
             int px = x, pz = z, cx = x + DIRS[d][0], cz = z + DIRS[d][1];
             for (int step = 1; step <= CHAIN_WALK; step++) {
                 lvl = Math.max(lvl, railBase(cx, cz));
-                int cm = links(cx, cz);
+                int cm = track(cx, cz);
                 if (!curve(cm)) break;
                 int nx = NONE, nz = NONE;
                 for (int e = 0; e < 4; e++) {
@@ -377,7 +572,7 @@ public final class TransportPlan {
 
     /** Shape joining exactly the track neighbours; a straight rail ascends towards a neighbour one level higher. */
     public Rail railShape(int x, int z) {
-        int m = links(x, z);
+        int m = track(x, z);
         boolean n = (m & 1) != 0, s = (m & 2) != 0, e = (m & 4) != 0, w = (m & 8) != 0;
         if (curve(m)) {
             if (n) return e ? Rail.NORTH_EAST : Rail.NORTH_WEST;

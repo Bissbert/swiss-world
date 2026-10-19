@@ -29,7 +29,16 @@ final class Voxels {
     final boolean[] slab, tunnelWay, openRoad, railWay, wayCol;
     final int[] originalTop;
 
+    /** The grid a chunk is built with, from its north-west corner. */
+    interface Grids {
+        ColumnGrid grid(int x, int z);
+    }
+
     Voxels(SwdCell cell, int x0, int z0, int x1, int z1, int y0, int y1) {
+        this((x, z) -> Cells.grid(cell, x, z, TransportPlan.MARGIN), x0, z0, x1, z1, y0, y1);
+    }
+
+    Voxels(Grids grids, int x0, int z0, int x1, int z1, int y0, int y1) {
         this.x0 = x0;
         this.z0 = z0;
         this.y0 = y0;
@@ -51,7 +60,7 @@ final class Voxels {
         originalTop = new int[nx * nz];
         for (int cx = Math.floorDiv(x0, 16); cx <= Math.floorDiv(x1, 16); cx++) {
             for (int cz = Math.floorDiv(z0, 16); cz <= Math.floorDiv(z1, 16); cz++) {
-                ColumnGrid g = Cells.grid(cell, cx * 16, cz * 16, TransportPlan.MARGIN);
+                ColumnGrid g = grids.grid(cx * 16, cz * 16);
                 TransportPlan t = new TransportPlan(g);
                 for (int x = Math.max(x0, cx * 16); x <= Math.min(x1, cx * 16 + 15); x++) {
                     for (int z = Math.max(z0, cz * 16); z <= Math.min(z1, cz * 16 + 15); z++) column(g, t, x, z);
