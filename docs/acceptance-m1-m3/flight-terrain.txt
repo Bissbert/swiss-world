@@ -1,0 +1,8 @@
+== flight terrain-thunersee: from (-1500.0,-1300.0,800.0) by (-4900.0,0.0) at 30.0 m/s (163 s planned); load 29.1
+bot: spawn: minecraft:overworld flat=False | spawn: swissworld:switzerland flat=True | walked to -6400.0 -1300.0 800.0 in 163.3s
+tick query samples 83: avg MSPT mean 6.9 max 19.3; P95 median 23.4 max 58.0; P99 max 335.3 ms
+share of samples with avg MSPT > 50 ms: 0 %
+chunks generated during flight: 9601
+max chunks waiting 0, aborted (placeholders) 0
+log: 0 StallGuard lines, 0 placeholder lines
+status after: cells 64/64 cached, 0 pending · chunks 54283 generated (6.8 ms/chunk), 0 waiting, 0 aborted · heap 3447/8192 MB · coverage loaded

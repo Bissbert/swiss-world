@@ -1,0 +1,5 @@
+start rail (23, -1433, -561); 345 rails reachable; furthest along oracle path: index 257/25337 at x 280 z -607 (LV95 E 2633180 N 1171206)
+goal reached: False
+2 dead ends in the reachable network; nearest to the furthest point:
+  dead end (277, -1433, -605) shape north_south -> north   LV95 E 2633178 N 1171204
+  dead end (-17, -1433, -555) shape east_west -> west   LV95 E 2632884 N 1171154

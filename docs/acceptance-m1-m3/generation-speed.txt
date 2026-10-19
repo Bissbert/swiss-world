@@ -1,0 +1,36 @@
+gen-A-aare.log: batch  24: 21 chunks    1.7s    82.4 ms/chunk wall load 90.2
+gen-A-aare.log: after:  cells 7/64 cached, 0 pending · chunks 4630 generated (16.8 ms/chunk), 0 waiting, 0 aborted · heap 2584/8192 MB · coverage loaded
+gen-A-aare.log: TOTAL 1173 chunks requested, 1556 newly generated, wall 146.0s (124.5 ms/chunk wall), fill() 22.5 ms/chunk for this run, load 90.2
+gen-A-aareschlucht.log: batch  30: 39 chunks    3.2s    83.2 ms/chunk wall load 57.2
+gen-A-aareschlucht.log: after:  cells 15/64 cached, 0 pending · chunks 7921 generated (12.2 ms/chunk), 0 waiting, 0 aborted · heap 2862/8192 MB · coverage loaded
+gen-A-aareschlucht.log: TOTAL 1479 chunks requested, 2183 newly generated, wall 125.9s (85.1 ms/chunk wall), fill() 4.8 ms/chunk for this run, load 57.2
+gen-A-dams.log: batch  14: 5 chunks    1.7s   330.2 ms/chunk wall load 64.3
+gen-A-dams.log: after:  cells 26/64 cached, 0 pending · chunks 10798 generated (10.8 ms/chunk), 0 waiting, 0 aborted · heap 2414/8192 MB · coverage loaded
+gen-A-dams.log: TOTAL 677 chunks requested, 2877 newly generated, wall 62.0s (91.6 ms/chunk wall), fill() 6.9 ms/chunk for this run, load 64.3
+gen-A-falls.log: batch   4: 13 chunks    1.1s    81.6 ms/chunk wall load 78.5
+gen-A-falls.log: after:  cells 9/64 cached, 0 pending · chunks 5347 generated (15.4 ms/chunk), 0 waiting, 0 aborted · heap 2885/8192 MB · coverage loaded
+gen-A-falls.log: TOTAL 205 chunks requested, 717 newly generated, wall 11.7s (57.1 ms/chunk wall), fill() 6.4 ms/chunk for this run, load 78.5
+gen-A-handegg-fall.log: batch   0: 46 chunks    1.4s    29.4 ms/chunk wall load 73.4
+gen-A-handegg-fall.log: after:  cells 10/64 cached, 0 pending · chunks 5569 generated (15.0 ms/chunk), 0 waiting, 0 aborted · heap 2682/8192 MB · coverage loaded
+gen-A-handegg-fall.log: TOTAL 46 chunks requested, 222 newly generated, wall 2.5s (53.3 ms/chunk wall), fill() 5.4 ms/chunk for this run, load 73.4
+gen-A-harder.log: batch   4: 33 chunks    5.6s   169.4 ms/chunk wall load 93.9
+gen-A-harder.log: after:  cells 5/64 cached, 0 pending · chunks 2449 generated (14.4 ms/chunk), 0 waiting, 0 aborted · heap 1130/8192 MB · coverage loaded
+gen-A-harder.log: TOTAL 289 chunks requested, 625 newly generated, wall 29.1s (100.6 ms/chunk wall), load 93.9
+gen-A-interlaken.log: batch  17: 1 chunks    0.0s    38.5 ms/chunk wall load 50.1
+gen-A-interlaken.log: after:  cells 3/64 cached, 0 pending · chunks 1824 generated (14.6 ms/chunk), 0 waiting, 0 aborted · heap 2707/8192 MB · coverage loaded
+gen-A-interlaken.log: TOTAL 1089 chunks requested, 1680 newly generated, wall 142.3s (130.7 ms/chunk wall), load 50.1
+gen-A-lake.log: batch   0: 25 chunks    1.3s    51.3 ms/chunk wall load 73.4
+gen-A-lake.log: after:  cells 11/64 cached, 0 pending · chunks 5738 generated (15.0 ms/chunk), 0 waiting, 0 aborted · heap 1962/8192 MB · coverage loaded
+gen-A-lake.log: TOTAL 25 chunks requested, 169 newly generated, wall 2.4s (94.7 ms/chunk wall), fill() 15.0 ms/chunk for this run, load 73.4
+gen-A-rail.log: batch 141: 10 chunks    1.7s   171.4 ms/chunk wall load 54.7
+gen-A-rail.log: after:  cells 64/64 cached, 0 pending · chunks 43471 generated (6.6 ms/chunk), 0 waiting, 0 aborted · heap 3926/8192 MB · coverage loaded
+gen-A-rail.log: TOTAL 6778 chunks requested, 24851 newly generated, wall 530.1s (78.2 ms/chunk wall), fill() 5.3 ms/chunk for this run, load 54.7
+gen-A-road.log: batch  55: 32 chunks    1.9s    58.4 ms/chunk wall load 31.1
+gen-A-road.log: after:  cells 33/64 cached, 0 pending · chunks 18620 generated (8.3 ms/chunk), 0 waiting, 0 aborted · heap 1577/8192 MB · coverage loaded
+gen-A-road.log: TOTAL 2672 chunks requested, 7822 newly generated, wall 213.5s (79.9 ms/chunk wall), fill() 4.8 ms/chunk for this run, load 31.1
+gen-A-seam.log: batch   4: 33 chunks    6.7s   203.9 ms/chunk wall load 100.9
+gen-A-seam.log: after:  cells 7/64 cached, 0 pending · chunks 3074 generated (13.9 ms/chunk), 0 waiting, 0 aborted · heap 1880/8192 MB · coverage loaded
+gen-A-seam.log: TOTAL 289 chunks requested, 625 newly generated, wall 34.7s (120.1 ms/chunk wall), load 100.9
+gen-B.log: batch  34: 35 chunks    1.6s    44.8 ms/chunk wall load 25.1
+gen-B.log: after:  cells 7/64 cached, 0 pending · chunks 2931 generated (12.4 ms/chunk), 0 waiting, 0 aborted · heap 1786/8192 MB · coverage loaded
+gen-B.log: TOTAL 1667 chunks requested, 2931 newly generated, wall 121.1s (72.7 ms/chunk wall), fill() 12.4 ms/chunk for this run, load 25.1

@@ -1,0 +1,2 @@
+walker from (26650, -1380, -3099): 16572 positions; furthest path index 702/702 at x 27307 z -2522 (LV95 E 2660208 N 1173122); goal reached: True
+tunnel columns on path: 0, not reached by walker: 0

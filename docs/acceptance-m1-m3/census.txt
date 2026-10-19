@@ -1,0 +1,13 @@
+  all entities within 128: Test passed, count: 88; hostiles {'zombie': 28, 'skeleton': 17, 'creeper': 20, 'spider': 7, 'witch': 1}
+t=    1s hostiles within 128: 73, inside building volumes: 64
+  all entities within 128: Test passed, count: 77; hostiles {'zombie': 23, 'skeleton': 15, 'creeper': 13, 'spider': 8, 'witch': 1}
+t=   31s hostiles within 128: 60, inside building volumes: 55
+  all entities within 128: Test passed, count: 88; hostiles {'zombie': 12, 'skeleton': 27, 'creeper': 25, 'spider': 7}
+t=   61s hostiles within 128: 71, inside building volumes: 63
+  all entities within 128: Test passed, count: 78; hostiles {'zombie': 10, 'skeleton': 30, 'creeper': 17, 'spider': 3}
+t=   92s hostiles within 128: 60, inside building volumes: 52
+  all entities within 128: Test passed, count: 82; hostiles {'zombie': 15, 'skeleton': 32, 'creeper': 8, 'spider': 6, 'zombie_villager': 1}
+t=  122s hostiles within 128: 62, inside building volumes: 54
+  all entities within 128: Test passed, count: 91; hostiles {'zombie': 23, 'skeleton': 25, 'creeper': 12, 'spider': 10, 'witch': 1}
+t=  153s hostiles within 128: 71, inside building volumes: 66
+== census at (0.0,-1431.0,-100.0) for 3.0 min: max hostiles 73, max inside buildings 66; inside e.g. [('zombie', 30, -1434, -118), ('zombie', 15, -1433, -64), ('zombie', 11, -1433, -61), ('zombie', 2, -1433, -58), ('zombie', 0, -1433, -55), ('zombie', 41, -1435, -71), ('zombie', 40, -1435, -66), ('zombie', -14, -1434, -48)]

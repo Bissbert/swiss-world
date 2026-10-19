@@ -69,7 +69,7 @@ Unchanged from v2: lazy generation outward from an admin-set origin, data fetche
 ## 2. Scale: 1:1 (confirmed)
 
 - Switzerland is 41,285 km², about 161 M chunks. With lazy generation, only visited areas are generated and saved.
-- **World save growth:** roughly 8–40 KB per chunk in a tall dimension (unverified, measured in M1), i.e. **~30–150 MB per km² explored**.
+- **World save growth:** measured in the M1–M3 acceptance sweep (`docs/acceptance-m1-m3.md`): **4–7.5 KB per fully generated chunk, i.e. ~16–30 MB per km² explored** (town 19, mountain/forest 27–30, lake 16, dams 16 MB/km²). Flying adds proto-chunk margins: the acceptance world held ~61,000 generated chunks in 505 MB of region files.
   - That's outside the 20 GB mod budget, as you said.
   - `/swiss admin status` reports it so you can watch it.
 
@@ -267,7 +267,7 @@ Target: **≤ 0.5 MB/km² on average** (measured in M0).
 | Margin | ~2 GB | |
 | **Total** | **≤ 20 GB** | Warning at 80 %. When full, fully generated cells are evicted first. |
 
-**Not counted** (your decision): the dimension's region files, ~30–150 MB per km² explored (unverified). `/swiss admin status` reports it.
+**Not counted** (your decision): the dimension's region files, ~16–30 MB per km² explored (measured, `docs/acceptance-m1-m3.md`). `/swiss admin status` reports it.
 
 **Option for later:** if M0 shows that all of Switzerland fits in ≤ ~12 GB of cells (i.e. ≤ 0.3 MB/km²), a one-time full preprocessing would remove the runtime dependency on swisstopo.
 
@@ -472,7 +472,7 @@ All development runs against a **local dev server and client** with the same Neo
 - **Speed:**
   - MSPT < 50 while flying at elytra speed with prefetch on.
   - No pending chunks within render distance on terrain-only areas.
-- **World growth:** measure region-file MB per km² (fill in §2).
+- **World growth:** measure region-file MB per km² (fill in §2). Measured: 16–30 MB/km², 4–7.5 KB/chunk (`docs/acceptance-m1-m3.md`).
 - **Sky/fog check** at Interlaken (y ≈ −1432) and at Grimsel, with and without Iris. Decide whether §10a is needed.
 - **Snow** starts around the predicted altitude.
 
