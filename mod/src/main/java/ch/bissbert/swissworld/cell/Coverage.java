@@ -13,11 +13,14 @@ public record Coverage(int eMinKm, int nMinKm, int width, int height, byte[] gri
 
     public static Coverage read(Path file) throws IOException {
         byte[] d = Files.readAllBytes(file);
+        if (d.length < 24) throw new IOException("truncated coverage file");
         ByteBuffer b = ByteBuffer.wrap(d).order(ByteOrder.LITTLE_ENDIAN);
         if (!"SWCV".equals(new String(d, 0, 4, StandardCharsets.US_ASCII)) || (b.getShort(4) & 0xFFFF) != 1) {
             throw new IOException("bad coverage file");
         }
         int e = b.getInt(8), n = b.getInt(12), w = b.getInt(16), h = b.getInt(20);
+        // a short file would otherwise read as zeros = ocean
+        if (w < 0 || h < 0 || d.length < 24 + (long) w * h) throw new IOException("truncated coverage file");
         byte[] g = java.util.Arrays.copyOfRange(d, 24, 24 + w * h);
         return new Coverage(e, n, w, h, g);
     }
