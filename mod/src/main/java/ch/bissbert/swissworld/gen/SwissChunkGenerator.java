@@ -70,7 +70,7 @@ public final class SwissChunkGenerator extends ChunkGenerator {
      * The widest look-out is {@link ch.bissbert.swissworld.gen.surface.TransportPlan#MARGIN}: it smooths ways and
      * follows rail tracks that far.
      */
-    public static final int CELL_MARGIN = 24;
+    public static final int CELL_MARGIN = 26;
 
     public SwissChunkGenerator(BiomeSource biomeSource) {
         super(biomeSource);

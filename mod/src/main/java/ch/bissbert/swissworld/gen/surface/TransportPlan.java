@@ -7,7 +7,8 @@ import java.util.Arrays;
 /**
  * Roads, rails and tunnels laid out from {@link ColumnGrid} data only, so that two chunks sharing a border agree on
  * every block. Each decision is a pure function of the columns within a fixed distance; there is no iteration.
- * Every look-up stays within {@link #MARGIN} of the chunk (the longest chain, a tunnel wall over a rail, reaches about 18).
+ * Every look-up stays within {@link #MARGIN} of the chunk (the longest chain, a tunnel wall over a rail track whose
+ * centre line a crossing way broke, reaches about 25).
  * <ul>
  *   <li>Profile: a weighted mean of the deck heights of the same kind of way within {@link #ROAD_RADIUS} (roads) or
  *       {@link #RAIL_RADIUS} (rails). A mean over a disc keeps a constant grade and removes the cross slope, the
@@ -22,7 +23,7 @@ import java.util.Arrays;
  */
 public final class TransportPlan {
     /** Grid margin this plan needs: {@code new ColumnGrid(.., MARGIN)}. */
-    public static final int MARGIN = 24;
+    public static final int MARGIN = 26;
     static final int ROAD_RADIUS = 5, RAIL_RADIUS = 4;
     /** How far a culvert or a water-side constraint ramps the way up: one half block (road) or block (rail) per column. */
     static final int ROAD_RAMP = 6, RAIL_RAMP = 4;
@@ -273,8 +274,20 @@ public final class TransportPlan {
     /** A rail centre, or a gap of one column inside a rail way with centres on all four sides (two tracks touching). */
     private boolean c00(int x, int z) {
         if (c0(x, z)) return true;
+        for (int[] d : DIAG) {
+            // the corner of a diagonal step whose both corners another way took (overlay.py: later wins)
+            if (c0(x + d[0], z) && c0(x, z + d[1]) && !c0(x + d[0], z + d[1]) && corner(x, z, x + d[0], z + d[1])) {
+                return true;
+            }
+        }
         for (int[] d : DIRS) if (!c0(x + d[0], z + d[1])) return false;
         return railWay(x, z);
+    }
+
+    /** Of a step's two corners, (x, z) takes the track before (ox, oz): rail way first, then the southern one. */
+    private boolean corner(int x, int z, int ox, int oz) {
+        int a = railWay(x, z) ? 1 : 0, b = railWay(ox, oz) ? 1 : 0;
+        return a != b ? a > b : z > oz;
     }
 
     /**
@@ -610,28 +623,73 @@ public final class TransportPlan {
     }
 
     private static final int[] OPP = {1, 0, 3, 2};
-    /** How far a switch looks back along its branch for the side the branch comes from. */
+    /** How far a switch looks along each of its arms (see {@link #arm}). */
     static final int SWITCH_WALK = 6;
 
     /**
      * The two neighbours a rail joins (bit mask as {@link #links}): its track neighbours, or at a switch (three) the
-     * branch and the side of the through track it runs on to, away from where the branch comes from. Vanilla rails
-     * have no switch block; a curve with a straight rail meeting its outside is what a player builds instead.
+     * two arms that run on most nearly in a straight line (a line steps sideways at a switch where it jogs between
+     * parallel tracks), so a line runs on unbroken past every branch; the branch ends beside it. Vanilla rails have no
+     * switch block (a powered T junction turns, an unpowered one keeps its shape), so the branch is the side that
+     * gives way. Two exceptions: an arm that ends within {@link #SWITCH_WALK} rails is a stub and gives way instead,
+     * and of two arms that meet again at the same switch (a short loop, where two tracks drawn side by side were
+     * thinned apart) the longer one gives way, so both switches of the loop route the line the same way.
      */
     private int track(int x, int z) {
         int m = links(x, z);
         if (Integer.bitCount(m) != 3) return m;
-        int stem = 0;
-        for (int d = 0; d < 4; d++) if ((m & 1 << d) != 0 && (m & 1 << OPP[d]) == 0) stem = d;
-        // a switch beside a switch: the two join each other
-        int a = stem <= 1 ? 2 : 0, b = OPP[a];
-        boolean sa = Integer.bitCount(links(x + DIRS[a][0], z + DIRS[a][1])) == 3;
-        boolean sb = Integer.bitCount(links(x + DIRS[b][0], z + DIRS[b][1])) == 3;
-        if (sa != sb) return 1 << stem | 1 << (sa ? a : b);
-        int px = x, pz = z, cx = x + DIRS[stem][0], cz = z + DIRS[stem][1];
-        for (int step = 1; step < SWITCH_WALK; step++) {
+        int[][] arm = new int[4][];
+        for (int d = 0; d < 4; d++) if ((m & 1 << d) != 0) arm[d] = arm(x, z, d);
+        int stubs = 0, stub = -1;
+        for (int d = 0; d < 4; d++) {
+            if (arm[d] != null && arm[d][0] == ARM_END) {
+                stubs++;
+                stub = d;
+            }
+        }
+        if (stubs == 1) return m & ~(1 << stub);
+        for (int d = 0; d < 4; d++) {
+            for (int e = d + 1; e < 4; e++) {
+                if (arm[d] == null || arm[e] == null || arm[d][0] != ARM_SWITCH || arm[e][0] != ARM_SWITCH) continue;
+                if (arm[d][2] != arm[e][2] || arm[d][3] != arm[e][3] || arm[d][1] == arm[e][1]) continue;
+                return m & ~(1 << (arm[d][1] > arm[e][1] ? d : e));
+            }
+        }
+        // the two arms that run on most nearly in a straight line, seen from where their walks end
+        int drop = -1;
+        double best = Double.MAX_VALUE;
+        for (int d = 0; d < 4; d++) {
+            if (arm[d] == null) continue;
+            int a = -1, b = -1;
+            for (int e = 0; e < 4; e++) {
+                if (e == d || arm[e] == null) continue;
+                if (a < 0) a = e;
+                else b = e;
+            }
+            double ax = arm[a][2] - x, az = arm[a][3] - z, bx = arm[b][2] - x, bz = arm[b][3] - z;
+            double cos = (ax * bx + az * bz) / Math.sqrt((ax * ax + az * az) * (bx * bx + bz * bz));
+            boolean through = OPP[a] == b;
+            if (cos < best - 1e-9 || Math.abs(cos - best) <= 1e-9 && through) {
+                best = cos;
+                drop = d;
+            }
+        }
+        return m & ~(1 << drop);
+    }
+
+    private static final int ARM_OPEN = 0, ARM_END = 1, ARM_SWITCH = 2;
+
+    /**
+     * Walks a switch's arm in direction d for up to {@link #SWITCH_WALK} rails: {kind, steps, x, z} where kind is
+     * {@link #ARM_END} (the track ends), {@link #ARM_SWITCH} (another switch, at x, z) or {@link #ARM_OPEN}.
+     */
+    private int[] arm(int x, int z, int d) {
+        int px = x, pz = z, cx = x + DIRS[d][0], cz = z + DIRS[d][1];
+        for (int step = 1; step <= SWITCH_WALK; step++) {
             int cm = links(cx, cz);
-            if (Integer.bitCount(cm) != 2) break;
+            int n = Integer.bitCount(cm);
+            if (n <= 1) return new int[] {ARM_END, step, cx, cz};
+            if (n >= 3) return new int[] {ARM_SWITCH, step, cx, cz};
             int nx = NONE, nz = NONE;
             for (int e = 0; e < 4; e++) {
                 int qx = cx + DIRS[e][0], qz = cz + DIRS[e][1];
@@ -645,10 +703,7 @@ public final class TransportPlan {
             cx = nx;
             cz = nz;
         }
-        boolean ns = stem <= 1; // the through track runs east-west
-        int delta = ns ? cx - x : cz - z;
-        int side = ns ? (delta > 0 ? 3 : 2) : (delta > 0 ? 0 : 1);
-        return 1 << stem | 1 << side;
+        return new int[] {ARM_OPEN, SWITCH_WALK, cx, cz};
     }
 
     private static boolean curve(int m) {
@@ -1060,6 +1115,19 @@ public final class TransportPlan {
         return true;
     }
 
+    /** A rail block on this column's deck (outside a tunnel, not under a road bridge). */
+    private boolean trackOnDeck(int x, int z) {
+        return !OverlayPlan.railUnderBridge(g, x, z) && rail(x, z) && gap(x, z) == NONE && !cut(x, z);
+    }
+
+    /**
+     * A bridge railing on this column: none where the track runs, since a diagonal track's staircase touches the edges
+     * of a narrow rail bridge, and a wall there would cut the line.
+     */
+    public boolean railing(int x, int z) {
+        return OverlayPlan.railing(g, x, z) && !(railWay(x, z) && trackOnDeck(x, z));
+    }
+
     /** A road or rail column outside a tunnel: embankment or cut, culvert roof over water, deck, slab or rail. */
     private void wayColumn(int x, int z, int bottom, Sink out) {
         boolean bridge = g.flag(x, z, ColumnGrid.BRIDGE);
@@ -1088,12 +1156,12 @@ public final class TransportPlan {
             }
         }
         out.set(deck, road ? Part.SURFACE : Part.BALLAST);
-        if (OverlayPlan.railing(g, x, z)) {
+        if (trackOnDeck(x, z)) {
+            out.set(deck + 1, Part.RAIL);
+        } else if (OverlayPlan.railing(g, x, z)) {
             out.set(deck + 1, Part.RAILING);
         } else if (road && roadSlab(x, z)) {
             out.set(deck + 1, Part.SLAB);
-        } else if (!underBridge && rail(x, z) && gap(x, z) == NONE && !cut(x, z)) {
-            out.set(deck + 1, Part.RAIL);
         }
     }
 
@@ -1124,7 +1192,16 @@ public final class TransportPlan {
                 if (centre && lit) out.set(ceil - 1, Part.LANTERN);
             } else {
                 out.set(floor, Part.FLOOR);
-                if (rail(x, z) && railLevel(x, z) == floor) out.set(floor + 1, Part.RAIL);
+                if (rail(x, z)) {
+                    // the corner of a track's staircase where a crossing way cut the bore: the rail keeps its own level
+                    int lvl = railLevel(x, z);
+                    if (lvl >= lo && lvl + 1 < ceil) {
+                        for (int y = lvl + 1; y <= floor; y++) out.set(y, Part.AIR);
+                        for (int y = floor + 1; y < lvl; y++) out.set(y, Part.FLOOR);
+                        if (lvl != floor) out.set(lvl, Part.BALLAST);
+                        out.set(lvl + 1, Part.RAIL);
+                    }
+                }
             }
         }
         // a stream over a shallow bore keeps its bed: the lining's top block under the water is bed material
