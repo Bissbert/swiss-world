@@ -78,7 +78,20 @@ class PlaceLookupTest {
         assertTrue(PlaceLookup.failure(new CompletionException(new SidecarClient.IndexNotReady("building")))
                 .contains("still being prepared"));
         assertTrue(PlaceLookup.failure(new CompletionException(new ConnectException("Connection refused")))
-                .contains("not reachable (Connection refused)"));
+                .contains("not reachable (connection refused)"));
+        ConnectException ce = new ConnectException(null);
+        ce.initCause(new java.nio.channels.ClosedChannelException());
+        assertTrue(PlaceLookup.failure(new CompletionException(ce)).endsWith("(connection refused)."));
+        assertTrue(PlaceLookup.failure(new IOException("sidecar /place -> HTTP 500")).contains("(sidecar /place -> HTTP 500)"));
+    }
+
+    @Test
+    void completionKeepsNamesStartingWithTheInput() {
+        Place galgen = new Place("Galgen Zofingen", "historic site", 1, 2, Double.NaN, null);
+        assertEquals(List.of(ZOFINGEN), PlaceLookup.forCompletion(List.of(galgen, ZOFINGEN), "zof"));
+        assertEquals(List.of(GENEVE), PlaceLookup.forCompletion(List.of(GENEVE), "Genf"));
+        assertEquals(List.of(galgen), PlaceLookup.forCompletion(List.of(galgen), "Galgen"));
+        assertEquals(List.of(galgen), PlaceLookup.forCompletion(List.of(galgen), "richt")); // nothing starts with it
     }
 
     @Test

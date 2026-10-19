@@ -12,8 +12,9 @@ Needs an offline-mode server with network-compression-threshold=-1. Op the bot w
                          real client, which freezes in unloaded chunks); the server's "moved wrongly" correction acts as
                          the ground (the next packet then says on ground, so fall damage applies). Prints the y once a second, health changes, the action bar and death
     respawn              request a respawn after death
+    complete:<command>   ask for tab completion of a command line (no leading slash), print the suggestions
 
-Chat is printed as "chat: ..."; URLs in click events are printed as "link: ...". Login and respawn packets print
+Chat is printed as "chat: ..."; URLs and commands in click events are printed as "link: ...". Login and respawn packets print
 "spawn: <dimension> flat=<isFlat>" (the client's sky horizon depends on isFlat).
 """
 
@@ -98,7 +99,7 @@ def component(b: Buf) -> tuple[str, list[str]]:
     out: list[tuple[str, str]] = []
     nbt_strings(b, b.unpack("b")[0], out, "text")
     text = "".join(v if k in ("text", "") else f"<{v}>" for k, v in out if k in ("text", "", "translate"))
-    return text, [v for k, v in out if v.startswith("http")]
+    return text, [v for k, v in out if k == "value" and v.startswith(("http", "/"))]
 
 
 class Bot:
@@ -235,6 +236,15 @@ class Bot:
                 b.take(10)
                 debug, flat = b.unpack("??")
                 print(f"spawn: {dim} flat={flat}", flush=True)
+            elif pid == 0x10:  # command suggestions: id, start, length, then (match, optional tooltip)*
+                b.varint(), b.varint(), b.varint()
+                matches = []
+                for _ in range(b.varint()):
+                    m = b.string()
+                    if b.unpack("?")[0]:
+                        m += " [" + component(b)[0] + "]"
+                    matches.append(m)
+                print("suggestions:", " | ".join(matches) if matches else "(none)", flush=True)
             elif pid == 0x6C:
                 text, links = component(b)
                 print("chat:", text, flush=True)
@@ -287,6 +297,9 @@ def main() -> None:
         if kind == "cmd":
             bot.command(arg)
             time.sleep(0.5)
+        elif kind == "complete":
+            bot.send(0x0B, varint(1) + string("/" + arg))
+            time.sleep(1.5)
         elif kind == "wait":
             time.sleep(float(arg))
         elif kind == "fall":

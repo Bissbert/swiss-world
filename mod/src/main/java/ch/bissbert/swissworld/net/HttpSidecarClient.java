@@ -28,7 +28,8 @@ public final class HttpSidecarClient implements SidecarClient {
 
     public HttpSidecarClient(String baseUrl, Executor executor) {
         this.base = URI.create(baseUrl.endsWith("/") ? baseUrl : baseUrl + "/");
-        this.http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(3)).executor(executor).build();
+        this.http = HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1) // no h2c upgrade attempts against uvicorn
+                .connectTimeout(Duration.ofSeconds(3)).executor(executor).build();
     }
 
     @Override

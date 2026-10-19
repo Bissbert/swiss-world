@@ -73,9 +73,12 @@ public final class SwissCommands {
     private static final SuggestionProvider<CommandSourceStack> PLACE_SUGGESTIONS = (ctx, b) -> {
         String typed = b.getRemaining();
         return PLACES.suggest(typed).thenApply(list -> {
-            for (Place p : list) {
-                b.suggest(p.name(), Component.literal(PlaceLookup.label(p)));
-                if (p.matched() != null && !p.matched().equals(p.name())) b.suggest(p.matched(), Component.literal(PlaceLookup.label(p)));
+            String k = PlaceLookup.key(typed);
+            for (Place p : PlaceLookup.forCompletion(list, typed)) {
+                // "Berthoud" completes to the alias it matched, not to "Burgdorf"
+                boolean alias = p.matched() != null && !p.matched().equals(p.name()) && PlaceLookup.key(p.matched()).startsWith(k);
+                if (!alias || PlaceLookup.key(p.name()).startsWith(k)) b.suggest(p.name(), Component.literal(PlaceLookup.label(p)));
+                if (alias) b.suggest(p.matched(), Component.literal(PlaceLookup.label(p)));
             }
             return b.build();
         });

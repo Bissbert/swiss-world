@@ -200,8 +200,16 @@ None. The real cells copied from the shared store (layers TERR/SURF/WLVL/WKND/OC
   found, "still being prepared" (sidecar 503), "sidecar not reachable".
 - Tab completion: `PlaceLookup.suggest`, never blocks the server: 1.5 s HTTP timeout, the suggestion future gives up
   after 400 ms (empty), the late answer still fills a 256-entry, 5 min TTL cache keyed on the folded prefix.
-  Skips one letter and numbers. Aliases (Genf) are suggested next to the name.
+  Skips one letter and numbers. The client sorts suggestions alphabetically (rank is lost), so only names that
+  start with the input are offered; an alias is offered when it is what matched ("Berthoud", tooltip "Burgdorf").
 - `/swiss admin origin place <name>`: checks "not locked" before the lookup and again (changeOrigin) after it.
+- Headless test (private sidecar 8096, server 25700, `tools/bot.py` now has `complete:<cmd>`): Interlaken, Grimsel
+  (→ Grimselpass), Zofingen, zurich, Zürich, Biel (→ Biel/Bienne), Genf and Ginevra (→ Genève) all arrived on the
+  ground; xyzzyq → not found; sidecar stopped → "not reachable"; index missing → "still being prepared", then
+  built from the raw cache in 8 s. Completion answers within the 400 ms. `origin place` set the origin on a fresh
+  world and was refused once locked.
+- Seen, not fixed: city cells (Zürich) take > 2 min to build the first time, so the first goto times out (120 s);
+  urban chunks generate at 1–4 s each. `stop` waits for chunks whose cells are still being built.
 
 ## M2 notes
 

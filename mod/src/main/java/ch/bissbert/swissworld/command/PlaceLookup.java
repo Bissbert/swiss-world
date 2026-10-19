@@ -95,6 +95,18 @@ public final class PlaceLookup {
                 .completeOnTimeout(List.of(), SUGGEST_WAIT_MS, TimeUnit.MILLISECONDS);
     }
 
+    /**
+     * The client sorts suggestions alphabetically, so the sidecar's ranking is lost there; keep only names that start
+     * with what was typed ("Zofingen", not "Galgen Zofingen"), unless that leaves nothing.
+     */
+    static List<Place> forCompletion(List<Place> list, String typed) {
+        String k = key(typed);
+        List<Place> starts = list.stream()
+                .filter(p -> key(p.name()).startsWith(k) || p.matched() != null && key(p.matched()).startsWith(k))
+                .toList();
+        return starts.isEmpty() ? list : starts;
+    }
+
     int cachedCount() {
         synchronized (cache) {
             return cache.size();
@@ -120,13 +132,16 @@ public final class PlaceLookup {
 
     /** Message for a failed lookup: index still building, or sidecar unreachable. */
     static String failure(Throwable err) {
-        Throwable t = err;
-        while (t.getCause() != null && t.getCause() != t) t = t.getCause();
-        if (t instanceof SidecarClient.IndexNotReady) {
-            return "The place index is still being prepared (the first use downloads swissNAMES3D). Try again in a minute.";
+        String why = null;
+        for (Throwable t = err; t != null; t = t.getCause() == t ? null : t.getCause()) {
+            if (t instanceof SidecarClient.IndexNotReady) {
+                return "The place index is still being prepared (the first use downloads swissNAMES3D). Try again in a minute.";
+            }
+            if (t instanceof UnsupportedOperationException) return "Place lookup is not available.";
+            if (why == null && t instanceof java.net.ConnectException) why = "connection refused";
+            if (why == null && t instanceof java.net.http.HttpTimeoutException) why = "timed out";
+            if (t.getCause() == null && why == null) why = t.getMessage() != null ? t.getMessage() : t.getClass().getSimpleName();
         }
-        if (t instanceof UnsupportedOperationException) return "Place lookup is not available.";
-        String m = t.getMessage() != null ? t.getMessage() : t.getClass().getSimpleName();
-        return "Place lookup failed: the data sidecar is not reachable (" + m + ").";
+        return "Place lookup failed: the data sidecar is not reachable (" + why + ").";
     }
 }
