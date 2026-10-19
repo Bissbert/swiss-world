@@ -11,7 +11,7 @@ export SWISSWORLD_STORE=$SWISSDATA_STORE          # read by mod runServer (syste
 - **Raw cache.**
   - Upstream files are stored at `$SWISSDATA_RAW/<host>/<path>`.
   - Always download through `swissdata.fetch.fetch(cfg, url)`. It handles the lock, `.part` and atomic rename, so parallel agents never fetch the same file twice.
-- **Store.** It holds `cells/*.swd`, `coverage.bin` and `manifest.json`.
+- **Store.** It holds `cells/*.swd`, `coverage.bin` and `manifest.json`, plus `gwr/` (archived GWR snapshots: never evicted, and must be kept and backed up with the store).
   - Only `sidecar-core` code writes cells and the manifest.
   - Builders contribute layers through `swissdata/build.py`.
 - **Never download:**

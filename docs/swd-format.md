@@ -187,7 +187,8 @@ columnCount × column:
 | 2 | Hochhaus | 8 | Treibhaus |
 | 3 | Sakrales Gebaeude | 9 | Mauer gross |
 | 4 | Im Bau | 10 | Bruecke gedeckt |
-| 5 | Gebaeude unsichtbar | | |
+| 5 | Gebaeude unsichtbar | 11 | Offenes Gebaeude |
+|  |  | 12 | Flugdach |
 
 The mod derives walls, floors, stairs and roof shapes from spans and neighbours. A building that crosses a cell border has spans in each cell and the same `gid` everywhere.
 
@@ -217,5 +218,7 @@ Extra keys the sidecar writes:
 
 - `sources.altiNeighbours`: `{"E-N": itemId | null}`, the neighbouring ALTI tiles used for edge nodes. A rebuild needs them to reproduce identical edges.
 - `cells.<key>.evicted`: an ISO timestamp, set when the file was evicted. The entry and its `sources` stay. A cell is **ready** only when the file exists **and** it has a manifest entry without `evicted`.
+
+- `sources.gwr`: the GWR snapshot used for the BTBL attributes, `gwr_<cantons>_<export date>`. This pin is **soft**: upstream keeps no old snapshots, so the sidecar archives each one it uses under `<store>/gwr/<id>.npz`. A rebuild uses the pinned snapshot while that archive exists; otherwise it uses the newest archived snapshot and records its id. Only GWR attributes (gwrCategory, gwrClass, gwrPeriod, floors) can change that way; geometry never does. It is the only soft pin.
 
 **`sources` is never removed**, even when a cell file is evicted. A rebuild uses exactly these upstream item ids, so seams can't appear between rebuilt and saved areas.
