@@ -122,7 +122,7 @@ public final class TerrainStage implements GenStage {
     }
 
     /** SURF class -> top block (docs/swd-format.md §4). Water columns get their bed here; WaterStage adds the water. */
-    static BlockState surface(int surf) {
+    public static BlockState surface(int surf) {
         return switch (surf) {
             case 4 -> STONE;
             case 5, 15 -> GRAVEL;
