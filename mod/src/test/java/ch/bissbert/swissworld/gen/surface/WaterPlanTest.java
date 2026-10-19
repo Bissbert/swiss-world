@@ -51,11 +51,27 @@ class WaterPlanTest {
         assertFalse(up.falls());
         assertEquals(-1403, down.sourceTop());
         assertEquals(-1400, down.fallTop());
-        assertTrue(down.fedTop());
         // banks only up to each column's own source level
         assertEquals(-1400, WaterPlan.bankTop(g, -1, 0));
         assertEquals(-1403, WaterPlan.bankTop(g, 1, 1));
         assertEquals(-1400, WaterPlan.bankTop(g, 0, 1));
         assertEquals(ColumnGrid.NONE, WaterPlan.bankTop(g, 0, 2));
+    }
+
+    @Test
+    void waterfallFallsOnlyBelowAFeedingSource() {
+        SwdCell c = Cells.flat(590);
+        // a waterfall column whose WLVL is above every neighbour: just the pool, no unfed falling water
+        Cells.water(c, 0, 0, 600, WaterPlan.WATERFALL);
+        ColumnGrid g = Cells.grid(c, 0, 0);
+        WaterPlan.Fill f = WaterPlan.fill(g, 0, 0);
+        assertEquals(g.ground(0, 0) + 1, f.sourceTop());
+        assertFalse(f.falls());
+        // fed from a river above to the east: falls up to that river's level
+        Cells.water(c, 1, 0, 600, 2);
+        g = Cells.grid(c, 0, 0);
+        f = WaterPlan.fill(g, 0, 0);
+        assertEquals(-1400, f.fallTop());
+        assertTrue(f.falls());
     }
 }

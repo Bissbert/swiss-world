@@ -84,12 +84,21 @@ public final class TreePlan {
         for (int i = -REACH; i <= REACH; i++) {
             for (int j = -REACH; j <= REACH; j++) {
                 int cx = x + i, cz = z + j;
-                if (g.overlay(cx, cz) != 0 || g.flags(cx, cz) != 0) return false;
+                if (surfaceOverlay(g, cx, cz)) return false;
                 if (Math.abs(i) <= 2 && Math.abs(j) <= 2 && g.hasBuilding(cx, cz)) return false;
                 if (Math.abs(i) <= 1 && Math.abs(j) <= 1 && g.source(cx, cz) != ColumnGrid.NONE) return false;
             }
         }
         return true;
+    }
+
+    /** Rock above a tunnel's roof (with this much to spare) is open ground for plants. */
+    static final int TUNNEL_COVER = 10;
+
+    /** The column has an overlay at the surface; a tunnel deep enough below the ground does not count. */
+    public static boolean surfaceOverlay(ColumnGrid g, int x, int z) {
+        if (g.overlay(x, z) == 0 && g.flags(x, z) == 0) return false;
+        return !(g.flag(x, z, ColumnGrid.TUNNEL) && g.deck(x, z) + TUNNEL_COVER < g.ground(x, z));
     }
 
     /** Species by SURF and altitude; null above the tree line. {@code r} is uniform in [0, 1). */

@@ -13,8 +13,8 @@ Milestone 1: WaterStage, OverlayStage, VegetationStage in `mod/src/main/java/ch/
 
 ### Water
 - Sources fill from ground + 1 up to `floor(toY(WLVL))`. Lakes are flat. Rivers step wherever the sidecar steps WLVL.
-- **Drop rule.** A column whose cardinal neighbour has a higher source level U gets falling water (level 8) up to U − 1 and one flowing block (level 1) at U. This matches vanilla's own steady state at a step, so a block update reaching it changes nothing.
-- **WKND 6 (waterfall).** My reading: a waterfall column is a 1-block source pool on its ground, with falling water above it up to max(its own WLVL, a higher neighbour's source).
+- **Drop rule.** A column whose cardinal neighbour has a higher source level U gets falling water (level 8) up to U − 1 and one flowing block (level 1) at U. For a straight step this is vanilla's own steady state, so an update leaves it alone. Only the unit tests cover this; the fixture has no river steps. See "What's left" for diagonal steps.
+- **WKND 6 (waterfall).** My reading: a waterfall column is a 1-block source pool on its ground, with falling water above it only up to a higher neighbour's source level. Its own WLVL never raises it, because falling water with no source beside its top drains on the first update.
 - **Banks.** A dry column next to a higher source is filled from its ground up to that source level: stone, with gravel on top. This includes ocean columns, which is how border lakes keep their level behind a solid rim (PLAN §13).
 - No fluid ticks are scheduled. Blocks go in with `ProtoChunk.setBlockState(.., false)`, which (checked in the 1.21.1 source) only updates light and heightmaps, and nothing is marked for post-processing.
 - In-game, after forcing updates at the rim and lake edge and waiting 10 s, nothing had flowed.
@@ -53,6 +53,7 @@ Milestone 1: WaterStage, OverlayStage, VegetationStage in `mod/src/main/java/ch/
 - **Rails:** only on class 8 + bit2. The shape comes from the four neighbouring rail centres: a straight pair first, then a curve, then pointing at the single neighbour; an isolated rail runs N–S. A straight rail ascends where the next deck is exactly one block higher. Vanilla rails only reshape when a redstone source changes next to them, so the shapes stay as placed. Class 9 (rack) gets a bed only.
 
 ### Vegetation
+- **Tunnels and vegetation:** a tunnel column whose deck is more than 10 blocks below the ground counts as open ground, so mountains above tunnels keep their trees and ground cover.
 - **Tree positions:** one candidate per 4 m LV95 grid square, jittered by hash and kept with a probability that depends on SURF:
 
   | SURF | Keep probability |
@@ -93,11 +94,17 @@ Milestone 1: WaterStage, OverlayStage, VegetationStage in `mod/src/main/java/ch/
 - `mod/src/main/java/ch/bissbert/swissworld/gen/SwissChunkGenerator.java` (mod-core): added `CELL_MARGIN = 8`, and `fillFromNoise` now loads the cells under the chunk's corners widened by that margin. Without this, a chunk next to an aligned cell edge (z = −400 + 2000k) cannot see its neighbour columns, and banks and trees across the edge would depend on load order. `ColumnGrid.MARGIN` refers to this constant.
 
 ## For other workstreams
-- **mod-core:** the dimension uses `minecraft:plains` as its default biome, so vanilla features (oak trees, flowers, lakes and springs *with* fluid ticks) may still run in the decoration step. None turned up in the fixture checks, but if they do they would break the "no flowing water" guarantee. Proposal: a biome with no features, or skip `applyBiomeDecoration` in SwissChunkGenerator.
+- **mod-core:** `SwissChunkGenerator` does not override `applyBiomeDecoration`, and the dimension uses `minecraft:plains`. Plains features therefore run on top of our blocks: oak trees, flowers, and `spring_water`, which schedules fluid ticks. I did not check for them in-game. They break the "no flowing water" and "deterministic vegetation" guarantees. Proposal: a featureless biome, or an empty `applyBiomeDecoration` override.
 - **sidecar-tlm:**
   - Rail centre lines (OFLG bit2) must be 4-connected, with no diagonal-only steps, or the derived shapes break.
   - Ramps up to a bridge (OELV) should rise ≤ 1 m per column; the fixture's bridge ends have a 5–7-block step, which I left as it is (it is data).
   - Roads crossing water need bit0 or OELV; otherwise they are skipped.
+
+## What's left
+- **Diagonal or cornered river steps.** Vanilla turns flowing water with ≥ 2 source neighbours, on solid ground or a source, into a source (`FlowingFluid.getNewLiquid`). On a 1-block step whose lower column touches two upper sources (a step running diagonally in plan view, or turning a corner), the level-1 block becomes a source on its first update and spreads over the lower river and its banks. Possible fix: raise such lower columns to the upper level, or bank them. This needs real river data to tune.
+- **Untested in-game, because the fixture has none of them:** river steps, waterfalls, tunnels, kerbs (bit3), dams, rack beds, platforms, steps, orchards, vineyards, glacier, bushes.
+- **Real cells,** once sidecar-tlm data exist.
+- **Vanilla decoration** (mod-core, see above).
 
 ## Contract proposals
 None. No contract file was changed.
@@ -109,4 +116,4 @@ None. No contract file was changed.
 - **Rail:** rail at (−200, −1364, −390) on gravel at −1365.
 - **Forest:** 430 spruce logs and 3,452 leaves in x −380…−360, z 200…240; no oak or birch logs there.
 - **Stability:** setblocks next to the rim and lake edge, then a 10 s wait: the rim stayed dry and the lake source unchanged.
-- **Unit tests:** `WaterPlanTest`, `OverlayPlanTest`, `TreePlanTest` (`./gradlew build` passes).
+- **Unit tests:** `WaterPlanTest`, `OverlayPlanTest`, `TreePlanTest` (`./gradlew build` passes). The waterfall and tunnel-cover changes came after the in-game run. They are covered by unit tests, and the fixture has neither feature.

@@ -86,4 +86,23 @@ class TreePlanTest {
         }
         assertFalse(TreePlan.shape(Species.SPRUCE, 1).isEmpty());
     }
+
+    @Test
+    void treesGrowOverADeepTunnelButNotNextToARoad() {
+        SwdCell c = Cells.flat(700);
+        for (int z = -16; z < 32; z++) {
+            Cells.surf(c, 0, z, 2);
+            Cells.surf(c, 1, z, 2);
+            Cells.overlay(c, 0, z, 3, ColumnGrid.TUNNEL, 650); // 50 m under the forest
+            Cells.overlay(c, 10, z, 3, 0, Double.NaN);
+        }
+        ColumnGrid g = Cells.grid(c, 0, 0);
+        assertFalse(TreePlan.surfaceOverlay(g, 0, 0));
+        assertTrue(TreePlan.surfaceOverlay(g, 10, 0));
+        assertTrue(TreePlan.allowed(g, 1, 0));
+        assertFalse(TreePlan.allowed(g, 8, 0));
+        // a shallow tunnel still blocks
+        Cells.overlay(c, 0, 0, 3, ColumnGrid.TUNNEL, 695);
+        assertTrue(TreePlan.surfaceOverlay(Cells.grid(c, 0, 0), 0, 0));
+    }
 }

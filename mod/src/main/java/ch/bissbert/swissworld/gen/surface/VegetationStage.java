@@ -70,7 +70,7 @@ public final class VegetationStage implements GenStage {
     /** Ground cover, rows and ice of one column. Plants go only onto grass with air above. */
     private static void column(ChunkAccess chunk, ColumnGrid g, int x, int z, BlockPos.MutableBlockPos pos) {
         int surf = g.surf(x, z);
-        if (g.overlay(x, z) != 0 || g.flags(x, z) != 0 || g.hasBuilding(x, z) || g.source(x, z) != ColumnGrid.NONE) return;
+        if (TreePlan.surfaceOverlay(g, x, z) || g.hasBuilding(x, z) || g.source(x, z) != ColumnGrid.NONE) return;
         int ground = g.ground(x, z);
         if (g.top(x, z) != ground) return;
         long e = g.east(x), n = g.north(z);

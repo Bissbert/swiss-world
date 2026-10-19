@@ -8,7 +8,9 @@ package ch.bissbert.swissworld.gen.surface;
  *       sides at its own level: a dry neighbour that is lower gets a bank up to that level ({@link #bankTop}).</li>
  *   <li>A drop (river step, waterfall): the lower column gets falling water up to just below the upper source level
  *       and one flowing block (level 1) at it. Non-source water above water never spreads sideways.</li>
- *   <li>A waterfall column (WKND 6) is a one-block pool on its ground with falling water up to its WLVL.</li>
+ *   <li>A waterfall column (WKND 6) is a one-block pool on its ground; it falls only below a higher neighbouring
+ *       source. Falling water with no source beside its top would drain on the first update, so WLVL alone never
+ *       raises it.</li>
  * </ul>
  */
 public final class WaterPlan {
@@ -16,8 +18,11 @@ public final class WaterPlan {
 
     private WaterPlan() {}
 
-    /** Water of one column. Sources from {@code ground + 1} to {@code sourceTop}, falling above, up to {@code fallTop}. */
-    public record Fill(int sourceTop, int fallTop, boolean fedTop) {
+    /**
+     * Water of one column: sources from {@code ground + 1} to {@code sourceTop}, falling water above, and a flowing
+     * block (level 1) at {@code fallTop}, level with the neighbouring source that feeds it.
+     */
+    public record Fill(int sourceTop, int fallTop) {
         /** No falling part when {@code fallTop <= sourceTop}. */
         public boolean falls() {
             return fallTop > sourceTop;
@@ -50,10 +55,6 @@ public final class WaterPlan {
     public static Fill fill(ColumnGrid g, int x, int z) {
         int s = sourceLevel(g, x, z);
         if (s == ColumnGrid.NONE) return null;
-        int u = neighbourSource(g, x, z);
-        int own = g.source(x, z);
-        int fallTop = Math.max(u, own);
-        if (fallTop <= s) return new Fill(s, s, false);
-        return new Fill(s, fallTop, fallTop == u);
+        return new Fill(s, Math.max(s, neighbourSource(g, x, z)));
     }
 }
