@@ -7,7 +7,8 @@ import java.util.Arrays;
 /**
  * Roads, rails and tunnels laid out from {@link ColumnGrid} data only, so that two chunks sharing a border agree on
  * every block. Each decision is a pure function of the columns within a fixed distance; there is no iteration.
- * Every look-up stays within {@link #MARGIN} of the chunk (the longest chain, a tunnel wall over a rail, reaches about 18).
+ * Every look-up stays within {@link #MARGIN} of the chunk (the longest chain, a tunnel wall over a rail track whose
+ * centre line a crossing way broke, reaches about 25).
  * <ul>
  *   <li>Profile: a weighted mean of the deck heights of the same kind of way within {@link #ROAD_RADIUS} (roads) or
  *       {@link #RAIL_RADIUS} (rails). A mean over a disc keeps a constant grade and removes the cross slope, the
@@ -22,7 +23,7 @@ import java.util.Arrays;
  */
 public final class TransportPlan {
     /** Grid margin this plan needs: {@code new ColumnGrid(.., MARGIN)}. */
-    public static final int MARGIN = 24;
+    public static final int MARGIN = 26;
     static final int ROAD_RADIUS = 5, RAIL_RADIUS = 4;
     /** How far a culvert or a water-side constraint ramps the way up: one half block (road) or block (rail) per column. */
     static final int ROAD_RAMP = 6, RAIL_RAMP = 4;
@@ -273,8 +274,20 @@ public final class TransportPlan {
     /** A rail centre, or a gap of one column inside a rail way with centres on all four sides (two tracks touching). */
     private boolean c00(int x, int z) {
         if (c0(x, z)) return true;
+        for (int[] d : DIAG) {
+            // the corner of a diagonal step whose both corners another way took (overlay.py: later wins)
+            if (c0(x + d[0], z) && c0(x, z + d[1]) && !c0(x + d[0], z + d[1]) && corner(x, z, x + d[0], z + d[1])) {
+                return true;
+            }
+        }
         for (int[] d : DIRS) if (!c0(x + d[0], z + d[1])) return false;
         return railWay(x, z);
+    }
+
+    /** Of a step's two corners, (x, z) takes the track before (ox, oz): rail way first, then the southern one. */
+    private boolean corner(int x, int z, int ox, int oz) {
+        int a = railWay(x, z) ? 1 : 0, b = railWay(ox, oz) ? 1 : 0;
+        return a != b ? a > b : z > oz;
     }
 
     /**
@@ -1137,7 +1150,16 @@ public final class TransportPlan {
                 if (centre && lit) out.set(ceil - 1, Part.LANTERN);
             } else {
                 out.set(floor, Part.FLOOR);
-                if (rail(x, z) && railLevel(x, z) == floor) out.set(floor + 1, Part.RAIL);
+                if (rail(x, z)) {
+                    // the corner of a track's staircase where a crossing way cut the bore: the rail keeps its own level
+                    int lvl = railLevel(x, z);
+                    if (lvl >= lo && lvl + 1 < ceil) {
+                        for (int y = lvl + 1; y <= floor; y++) out.set(y, Part.AIR);
+                        for (int y = floor + 1; y < lvl; y++) out.set(y, Part.FLOOR);
+                        if (lvl != floor) out.set(lvl, Part.BALLAST);
+                        out.set(lvl + 1, Part.RAIL);
+                    }
+                }
             }
         }
         // a stream over a shallow bore keeps its bed: the lining's top block under the water is bed material

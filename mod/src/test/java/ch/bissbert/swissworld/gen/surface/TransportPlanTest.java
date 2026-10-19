@@ -11,6 +11,8 @@ import ch.bissbert.swissworld.gen.surface.Voxels.B;
 import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class TransportPlanTest {
     private static final int RAIL = ColumnGrid.RAIL, TUNNEL = ColumnGrid.TUNNEL;
@@ -657,6 +659,47 @@ class TransportPlanTest {
         // the path still runs over the hill
         assertEquals(B.SOLID, v.at(1, -1380, -1));
         assertEquals(B.AIR, v.at(1, -1379, -1));
+    }
+
+    /**
+     * A diagonal track (staircase running south-east) with a one column wide path crossing it to the north-east: the
+     * path takes one column of the staircase (overlay.py: later wins), so two centres touch only at their corners. In
+     * the open and in a tunnel the staircase keeps every step (Brienz line, 1485/-1111).
+     */
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void diagonalTrackKeepsTheStepACrossingPathTook(boolean tunnel) {
+        SwdCell c = Cells.flat(600);
+        if (tunnel) {
+            Voxels.terrain(c, (x, z) -> {
+                double a = Math.abs(x + z) / 2.0;
+                return a >= 30 ? 600 : a > 20 ? 600 + 2 * (30 - a) : 620;
+            });
+        }
+        for (int i = -50; i <= 50; i++) {
+            boolean t = tunnel && Math.abs(i) <= 22;
+            double h = tunnel ? 600 + 0.3 * i : 600; // the tunnel climbs, so its rail steps up beside the floor
+            for (int j = -3; j <= 4; j++) Cells.overlay(c, i + j, i, OverlayPlan.RAIL_BED, t ? TUNNEL : 0, h);
+            for (int j = 0; j <= 1; j++) Cells.overlay(c, i + j, i, OverlayPlan.RAIL_BED, RAIL | (t ? TUNNEL : 0), h);
+        }
+        for (int k = -30; k <= 30; k++) Cells.overlay(c, k, 1 - k, 6, 0, Double.NaN);
+        Voxels v = new Voxels(c, -40, -40, 40, 40, -1420, -1370);
+        List<String> bad = new ArrayList<>(railFaults(v));
+        // the step the path took keeps its rail, perhaps on its other corner (0, 1); on the level every step does (a
+        // climbing staircase drops a corner where it ascends)
+        if (!hasRail(v, 1, 0) && !hasRail(v, 0, 1)) bad.add("no rail at the crossing");
+        for (int i = -15; i <= 15 && !tunnel; i++) {
+            for (int x = i; x <= i + 1; x++) {
+                boolean found = hasRail(v, x, i) || x == 1 && i == 0 && hasRail(v, 0, 1);
+                if (!found) bad.add("no rail at " + x + "," + i);
+            }
+        }
+        assertTrue(bad.isEmpty(), () -> "faults: " + bad);
+    }
+
+    private static boolean hasRail(Voxels v, int x, int z) {
+        for (int y = v.y0; y < v.y0 + v.ny; y++) if (v.at(x, y, z) == B.RAIL) return true;
+        return false;
     }
 
     /**
