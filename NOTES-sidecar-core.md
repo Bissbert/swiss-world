@@ -341,8 +341,13 @@ Tests: crowns at −6.25…+6.25 m from an E-W and an N-S seam with radii 2.5/4/
   `SWISSDATA_KEEP_RAW=1` is set **explicitly** (`Config.keep_surface_raw`; unlike the ALTI COGs, the dev
   default does not keep them). With `KEEP_RAW=1` the test bbox needs ~1,286 × 15 MB ≈ 19 GB, too close to the
   20 GB limit next to the current 5.1 GB raw.
-- Store: cells grow by CNPY (137-481 KB) + TTOP (35-177 KB), so forest cells go from ~0.4 MB to ~1 MB. My
-  estimate for the 1,286 shared cells is ~0.5 GB → ~1.1 GB.
+- Store: cells grow by CNPY (137-481 KB) + TTOP (35-177 KB), so forest cells go from ~0.4 MB to ~1 MB.
+  Estimate for the test bbox: CNPY+TTOP bytes fitted linearly on the forest mix share of the 4 probe cells
+  (≈ 96 KB + 595 KB × share). The mean share over the 1,260 dev-area cells is 0.224, which gives ≈ 229 KB per
+  cell, an upper bound since alpine cells have nearly no canopy. 1,190 cells: +~0.27 GB, so the store goes from
+  459 MB to ~0.75 GB.
+- Raw DSM eviction is the default (`keep_surface_raw` False unless `SWISSDATA_KEEP_RAW=1`). The tile is also
+  deleted when reading it fails (`finally`), and a test covers both cases.
 - **A shared-store rebuild re-downloads ~19 GB of DSM** (transient, deleted per cell), ~1,286 × 15 MB.
   Not run: the coordinator holds it while mod-core benchmarks.
 - On demand, every newly built cell now downloads ~15 MB more, which adds latency for a player exploring new ground.
