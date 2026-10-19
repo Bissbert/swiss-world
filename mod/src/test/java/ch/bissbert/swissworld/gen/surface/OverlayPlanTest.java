@@ -73,4 +73,31 @@ class OverlayPlanTest {
         assertEquals(Rail.EAST_WEST, OverlayPlan.railShape(g, 1, 0));
         assertEquals(Rail.EAST_WEST, OverlayPlan.railShape(g, 2, 0));
     }
+
+    @Test
+    void railUnderARoadBridgeLiesOnTheTerrainAndKeepsPiersAway() {
+        SwdCell c = Cells.flat(600);
+        // a road bridge running east-west at 610 m, z -2..2, over a railway running north-south at x 0
+        for (int x = -20; x <= 20; x++) {
+            for (int z = -2; z <= 2; z++) Cells.overlay(c, x, z, 3, ColumnGrid.BRIDGE | (x == 0 ? ColumnGrid.RAIL : 0), 610);
+        }
+        for (int z = -10; z <= 10; z++) if (z < -2 || z > 2) Cells.overlay(c, 0, z, OverlayPlan.RAIL_BED, ColumnGrid.RAIL, Double.NaN);
+        ColumnGrid g = Cells.grid(c, 0, 0);
+        assertTrue(OverlayPlan.railUnderBridge(g, 0, 0));
+        assertFalse(OverlayPlan.railUnderBridge(g, 1, 0));
+        assertFalse(OverlayPlan.railUnderBridge(g, 0, 5)); // plain rail bed
+        assertTrue(OverlayPlan.railCentre(g, 0, 0));
+        assertEquals(-1390, g.deck(0, 0));
+        assertEquals(-1400, OverlayPlan.railBed(g, 0, 0));
+        assertEquals(OverlayPlan.railBed(g, 0, 5), OverlayPlan.railBed(g, 0, 0));
+        assertEquals(Rail.NORTH_SOUTH, OverlayPlan.railShape(g, 0, 0));
+        assertEquals(Rail.NORTH_SOUTH, OverlayPlan.railShape(g, 0, -3));
+        // piers every 12 m of E, but none within 2 columns of the track
+        int pierX = g.xAt(Math.floorDiv(g.east(0), 12) * 12);
+        if (Math.abs(pierX) <= OverlayPlan.TRACK_CLEARANCE) {
+            assertFalse(OverlayPlan.pier(g, pierX, 0));
+            pierX += 12;
+        }
+        assertTrue(OverlayPlan.pier(g, pierX, 0));
+    }
 }

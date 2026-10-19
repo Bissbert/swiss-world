@@ -51,6 +51,7 @@ Milestone 1: WaterStage, OverlayStage, VegetationStage in `mod/src/main/java/ch/
   - Under water the lake bed stays closed.
   - Glowstone set into the roof where `(3x + 5z) mod 37 == 0` and there is rock above.
 - **Rails:** only on class 8 + bit2. The shape comes from the four neighbouring rail centres: a straight pair first, then a curve, then pointing at the single neighbour; an isolated rail runs N–S. A straight rail ascends where the next deck is exactly one block higher. Vanilla rails only reshape when a redstone source changes next to them, so the shapes stay as placed. Class 9 (rack) gets a bed only.
+- **Rail under a road bridge** (swd-format §5 on main acccce9: bridge bit + road class 1–7 + bit2): the road deck stays at OELV. The rail goes on gravel ballast at the terrain top under it, provided there is at least one free block below the beam. Rail shapes and slopes use the rail's bed height, so the track runs straight on under the bridge. No pier within 2 columns of such a track.
 
 ### Vegetation
 - **Tunnels and vegetation:** a tunnel column whose deck is more than 10 blocks below the ground counts as open ground, so mountains above tunnels keep their trees and ground cover.

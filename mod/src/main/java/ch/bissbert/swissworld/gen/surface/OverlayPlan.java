@@ -7,6 +7,8 @@ public final class OverlayPlan {
     static final int PIER_SPACING = 12;
     /** How far along each axis {@link #pier} looks to find the bridge's direction. */
     private static final int RUN_PROBE = 4;
+    /** Columns kept free of piers on each side of a rail under a road bridge. */
+    static final int TRACK_CLEARANCE = 2;
 
     private OverlayPlan() {}
 
@@ -20,28 +22,40 @@ public final class OverlayPlan {
         }
     }
 
-    /** Columns that get a rail block: class-8 rail centre line (rack railways, class 9, get a bed only). */
+    /** Columns that get a rail block: class-8 rail centre line, or a rail under a road bridge (rack, class 9, gets a bed only). */
     public static boolean railCentre(ColumnGrid g, int x, int z) {
-        return g.present(x, z) && g.overlay(x, z) == RAIL_BED && g.flag(x, z, ColumnGrid.RAIL);
+        if (!g.present(x, z) || !g.flag(x, z, ColumnGrid.RAIL)) return false;
+        return g.overlay(x, z) == RAIL_BED || railUnderBridge(g, x, z);
+    }
+
+    /** swd-format §5: bridge bit + road class 1-7 + rail bit: the road deck is at OELV, the rail on the terrain below. */
+    public static boolean railUnderBridge(ColumnGrid g, int x, int z) {
+        int cls = g.overlay(x, z);
+        return g.present(x, z) && cls >= 1 && cls <= 7 && g.flag(x, z, ColumnGrid.BRIDGE) && g.flag(x, z, ColumnGrid.RAIL);
+    }
+
+    /** The block the rail rests on: the deck, or the terrain top under a road bridge. */
+    public static int railBed(ColumnGrid g, int x, int z) {
+        return railUnderBridge(g, x, z) ? g.top(x, z) : g.deck(x, z);
     }
 
     /**
      * Shape from the neighbouring rail centres (north is -z): a straight pair first, then a curve, then a dead end
      * pointing at its one neighbour; an isolated rail runs north-south. A straight rail ascends towards a neighbour
-     * whose deck is one block higher (more is a gap the data should not have).
+     * whose {@link #railBed} is one block higher (more is a gap the data should not have).
      */
     public static Rail railShape(ColumnGrid g, int x, int z) {
         boolean n = railCentre(g, x, z - 1), s = railCentre(g, x, z + 1);
         boolean e = railCentre(g, x + 1, z), w = railCentre(g, x - 1, z);
-        int up = g.deck(x, z) + 1;
+        int up = railBed(g, x, z) + 1;
         if ((n || s) && !(e || w) || n && s) {
-            if (n && g.deck(x, z - 1) == up) return Rail.ASCENDING_NORTH;
-            if (s && g.deck(x, z + 1) == up) return Rail.ASCENDING_SOUTH;
+            if (n && railBed(g, x, z - 1) == up) return Rail.ASCENDING_NORTH;
+            if (s && railBed(g, x, z + 1) == up) return Rail.ASCENDING_SOUTH;
             return Rail.NORTH_SOUTH;
         }
         if ((e || w) && !(n || s) || e && w) {
-            if (e && g.deck(x + 1, z) == up) return Rail.ASCENDING_EAST;
-            if (w && g.deck(x - 1, z) == up) return Rail.ASCENDING_WEST;
+            if (e && railBed(g, x + 1, z) == up) return Rail.ASCENDING_EAST;
+            if (w && railBed(g, x - 1, z) == up) return Rail.ASCENDING_WEST;
             return Rail.EAST_WEST;
         }
         if (n) return e ? Rail.NORTH_EAST : Rail.NORTH_WEST;
@@ -61,10 +75,16 @@ public final class OverlayPlan {
 
     /**
      * A bridge column on a pier line: every {@link #PIER_SPACING} m along the bridge, across its full width. The
-     * bridge runs along whichever axis has more bridge columns nearby.
+     * bridge runs along whichever axis has more bridge columns nearby. No pier within {@link #TRACK_CLEARANCE} of a
+     * rail under the bridge.
      */
     public static boolean pier(ColumnGrid g, int x, int z) {
         if (!bridge(g, x, z)) return false;
+        for (int i = -TRACK_CLEARANCE; i <= TRACK_CLEARANCE; i++) {
+            for (int j = -TRACK_CLEARANCE; j <= TRACK_CLEARANCE; j++) {
+                if (railUnderBridge(g, x + i, z + j)) return false;
+            }
+        }
         int alongX = 0, alongZ = 0;
         for (int d = 1; d <= RUN_PROBE; d++) {
             if (bridge(g, x + d, z)) alongX++;

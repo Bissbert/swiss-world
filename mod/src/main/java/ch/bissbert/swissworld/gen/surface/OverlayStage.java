@@ -84,10 +84,16 @@ public final class OverlayStage implements GenStage {
 
         if (cls == 0) return;
         set(chunk, pos, x, deck, z, surface(g, x, z, cls, deck));
+        boolean underBridge = OverlayPlan.railUnderBridge(g, x, z);
+        if (underBridge && top + 1 < deck - 1) {
+            // swd-format §5: a rail on a ballast bed on the terrain, under the road deck and its beam
+            set(chunk, pos, x, top, z, BALLAST);
+            set(chunk, pos, x, top + 1, z, rail(g, x, z));
+        }
         if (OverlayPlan.railing(g, x, z)) {
             set(chunk, pos, x, deck + 1, z, railing(g, x, z));
-        } else if (OverlayPlan.railCentre(g, x, z)) {
-            set(chunk, pos, x, deck + 1, z, Blocks.RAIL.defaultBlockState().setValue(RailBlock.SHAPE, RailShape.valueOf(OverlayPlan.railShape(g, x, z).name())));
+        } else if (OverlayPlan.railCentre(g, x, z) && !underBridge) {
+            set(chunk, pos, x, deck + 1, z, rail(g, x, z));
         } else if (cls == 10) {
             set(chunk, pos, x, deck + 1, z, KERB);
         } else if (cls <= 4 && g.flag(x, z, ColumnGrid.EDGE)) {
@@ -109,6 +115,10 @@ public final class OverlayStage implements GenStage {
             case 13 -> Blocks.GRASS_BLOCK.defaultBlockState();
             default -> SMOOTH; // 10 platform, 11 dam crest, 12 runway, 14 parking
         };
+    }
+
+    private static BlockState rail(ColumnGrid g, int x, int z) {
+        return Blocks.RAIL.defaultBlockState().setValue(RailBlock.SHAPE, RailShape.valueOf(OverlayPlan.railShape(g, x, z).name()));
     }
 
     /** Stairs climbing towards the highest step neighbour; a landing (no higher neighbour) is a full block. */
