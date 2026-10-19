@@ -189,6 +189,20 @@ None. The real cells copied from the shared store (layers TERR/SURF/WLVL/WKND/OC
   - Not exercised live: ender pearl and elytra (both go through the same hold), real client visuals.
 - Bot harness (`tools/bot.py`): no collision (a server correction counts as landing, so fall damage applies), ignores the gravity attribute, doesn't swim. So it drifts a few blocks between pins, and it drowned after a release 325 blocks above Lake Geneva; a real client would swim.
 
+## /swiss goto <place> (2026-10-19)
+
+- `goto` has two children: `a b` (doubles) first, then `place` (greedy string). On a full parse of both,
+  Brigadier keeps the first registered, so numbers stay coordinates (`GotoGrammarTest`). "46.68, 7.87" lands in
+  `place`; `PlaceLookup.twoNumbers` hands it to `goTo`.
+- The lookup is async (`SidecarClient.places`, `GET /place`, 5 s timeout); the answer is handled in
+  `server.execute`, the player looked up again by UUID; then the normal `travel` (prefetch, wait, teleport).
+  Messages: "Going to Zofingen (town), LV95 E … N …, 439 m", "also: …" (≤ 3, click runs `/swiss goto E N`), not
+  found, "still being prepared" (sidecar 503), "sidecar not reachable".
+- Tab completion: `PlaceLookup.suggest`, never blocks the server: 1.5 s HTTP timeout, the suggestion future gives up
+  after 400 ms (empty), the late answer still fills a 256-entry, 5 min TTL cache keyed on the folded prefix.
+  Skips one letter and numbers. Aliases (Genf) are suggested next to the name.
+- `/swiss admin origin place <name>`: checks "not locked" before the lookup and again (changeOrigin) after it.
+
 ## M2 notes
 
 - Sea and ocean fish spawns at y −1807.

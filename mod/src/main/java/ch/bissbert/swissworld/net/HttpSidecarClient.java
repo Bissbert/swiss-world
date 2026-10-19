@@ -6,6 +6,8 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import java.io.IOException;
 import java.net.URI;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -58,6 +60,43 @@ public final class HttpSidecarClient implements SidecarClient {
     @Override
     public CompletableFuture<JsonObject> status() {
         return send(HttpRequest.newBuilder(base.resolve("status")).timeout(TIMEOUT).GET().build());
+    }
+
+    @Override
+    public CompletableFuture<List<Place>> places(String query, int limit, Duration timeout) {
+        URI uri = base.resolve("place?q=" + URLEncoder.encode(query, StandardCharsets.UTF_8) + "&limit=" + limit);
+        HttpRequest req = HttpRequest.newBuilder(uri).timeout(timeout).GET().build();
+        return http.sendAsync(req, HttpResponse.BodyHandlers.ofString()).thenApply(r -> {
+            if (r.statusCode() == 503) throw new CompletionException(new IndexNotReady(errorOf(r.body())));
+            if (r.statusCode() / 100 != 2) {
+                throw new CompletionException(new IOException("sidecar /place -> HTTP " + r.statusCode()));
+            }
+            return parsePlaces(JsonParser.parseString(r.body()).getAsJsonObject());
+        });
+    }
+
+    private static String errorOf(String body) {
+        try {
+            JsonObject o = JsonParser.parseString(body).getAsJsonObject();
+            return o.has("error") && !o.get("error").isJsonNull() ? o.get("error").getAsString() : "not ready";
+        } catch (RuntimeException e) {
+            return "not ready";
+        }
+    }
+
+    static List<Place> parsePlaces(JsonObject o) {
+        List<Place> out = new ArrayList<>();
+        if (!o.has("results")) return out;
+        for (JsonElement el : o.getAsJsonArray("results")) {
+            JsonObject p = el.getAsJsonObject();
+            if (!p.has("name") || !p.has("e") || !p.has("n")) continue;
+            out.add(new Place(p.get("name").getAsString(),
+                    p.has("kind") ? p.get("kind").getAsString() : "place",
+                    p.get("e").getAsDouble(), p.get("n").getAsDouble(),
+                    p.has("h") && !p.get("h").isJsonNull() ? p.get("h").getAsDouble() : Double.NaN,
+                    p.has("matched") && !p.get("matched").isJsonNull() ? p.get("matched").getAsString() : null));
+        }
+        return out;
     }
 
     private HttpRequest post(String path, JsonObject body) {

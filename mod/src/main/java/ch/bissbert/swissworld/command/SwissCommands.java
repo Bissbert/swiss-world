@@ -8,6 +8,7 @@ import ch.bissbert.swissworld.cell.CellCache;
 import ch.bissbert.swissworld.cell.SwdCell;
 import ch.bissbert.swissworld.cell.SwissCoords;
 import ch.bissbert.swissworld.cell.Wgs84;
+import ch.bissbert.swissworld.net.SidecarClient.Place;
 import ch.bissbert.swissworld.world.ReturnPos;
 import ch.bissbert.swissworld.world.SwissOrigin;
 import com.google.gson.JsonObject;
@@ -15,6 +16,8 @@ import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.DoubleArgumentType;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.LongArgumentType;
+import com.mojang.brigadier.arguments.StringArgumentType;
+import com.mojang.brigadier.suggestion.SuggestionProvider;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import java.io.IOException;
@@ -23,6 +26,7 @@ import java.nio.file.Path;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
@@ -32,6 +36,7 @@ import net.minecraft.commands.Commands;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.HoverEvent;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
@@ -62,6 +67,20 @@ public final class SwissCommands {
 
     private record Pending(ChunkPos chunk, double x, double y, double z, float yRot, float xRot, int startTick) {}
 
+    private static final PlaceLookup PLACES = new PlaceLookup(SwissRuntime::sidecar, System::currentTimeMillis);
+
+    /** Tab completion for place names; the future completes off-thread, the server never waits for it. */
+    private static final SuggestionProvider<CommandSourceStack> PLACE_SUGGESTIONS = (ctx, b) -> {
+        String typed = b.getRemaining();
+        return PLACES.suggest(typed).thenApply(list -> {
+            for (Place p : list) {
+                b.suggest(p.name(), Component.literal(PlaceLookup.label(p)));
+                if (p.matched() != null && !p.matched().equals(p.name())) b.suggest(p.matched(), Component.literal(PlaceLookup.label(p)));
+            }
+            return b.build();
+        });
+    };
+
     private SwissCommands() {}
 
     public static void register(CommandDispatcher<CommandSourceStack> d) {
@@ -74,14 +93,20 @@ public final class SwissCommands {
                         .then(Commands.argument("a", DoubleArgumentType.doubleArg())
                                 .then(Commands.argument("b", DoubleArgumentType.doubleArg())
                                         .executes(c -> goTo(c.getSource().getPlayerOrException(),
-                                                DoubleArgumentType.getDouble(c, "a"), DoubleArgumentType.getDouble(c, "b"))))))
+                                                DoubleArgumentType.getDouble(c, "a"), DoubleArgumentType.getDouble(c, "b")))))
+                        // registered after "a": on a tie Brigadier keeps the first, so two numbers stay coordinates
+                        .then(Commands.argument("place", StringArgumentType.greedyString()).suggests(PLACE_SUGGESTIONS)
+                                .executes(c -> goToPlace(c.getSource().getPlayerOrException(), StringArgumentType.getString(c, "place")))))
                 .then(Commands.literal("admin").requires(s -> s.hasPermission(2))
                         .then(Commands.literal("status").executes(c -> status(c.getSource())))
                         .then(Commands.literal("origin")
                                 .executes(c -> showOrigin(c.getSource()))
                                 .then(Commands.argument("e", LongArgumentType.longArg(2_480_000, 2_840_000))
                                         .then(Commands.argument("n", LongArgumentType.longArg(1_070_000, 1_300_000))
-                                                .executes(SwissCommands::setOrigin))))
+                                                .executes(SwissCommands::setOrigin)))
+                                .then(Commands.literal("place")
+                                        .then(Commands.argument("name", StringArgumentType.greedyString()).suggests(PLACE_SUGGESTIONS)
+                                                .executes(c -> setOriginPlace(c.getSource(), StringArgumentType.getString(c, "name"))))))
                         .then(Commands.literal("prefetch")
                                 .executes(c -> prefetch(c.getSource(), SwissConfig.STARTUP_RADIUS.get()))
                                 .then(Commands.argument("radius", IntegerArgumentType.integer(0, 20_000))
@@ -126,7 +151,7 @@ public final class SwissCommands {
             e = a < 1_000_000 ? a + 2_000_000 : a;
             n = b < 1_000_000 ? b + 1_000_000 : b;
         }
-        if (e < 2_480_000 || e > 2_840_000 || n < 1_070_000 || n > 1_300_000) {
+        if (!insideLv95(e, n)) {
             p.sendSystemMessage(Component.literal(String.format(Locale.ROOT,
                     "LV95 E %.0f N %.0f is outside Switzerland. Use LV95 (E N), LV03 or WGS84 (lat lon).", e, n)).withStyle(ChatFormatting.RED));
             return 0;
@@ -135,7 +160,64 @@ public final class SwissCommands {
         double x = Math.floor(e - c.e0()) + 0.5, z = Math.floor(c.n0() - n) + 0.5;
         p.sendSystemMessage(Component.literal(String.format(Locale.ROOT, "Going to LV95 E %.0f N %.0f (x %.0f, z %.0f)", e, n, Math.floor(x), Math.floor(z)))
                 .withStyle(ChatFormatting.GRAY));
+        return travelLv95(p, e, n);
+    }
+
+    private static boolean insideLv95(double e, double n) {
+        return e >= 2_480_000 && e <= 2_840_000 && n >= 1_070_000 && n <= 1_300_000;
+    }
+
+    private static int travelLv95(ServerPlayer p, double e, double n) {
+        SwissCoords c = SwissRuntime.coords();
+        double x = Math.floor(e - c.e0()) + 0.5, z = Math.floor(c.n0() - n) + 0.5;
         return travel(p, new Pending(new ChunkPos(BlockPos.containing(x, 0, z)), x, Double.NaN, z, p.getYRot(), p.getXRot(), p.server.getTickCount()));
+    }
+
+    /**
+     * {@code /swiss goto <place>}: swissNAMES3D lookup through the sidecar, answered on the server thread once it
+     * returns; then the same prefetch-and-wait {@link #travel} as coordinates. Up to three alternatives are listed,
+     * clickable.
+     */
+    private static int goToPlace(ServerPlayer player, String query) {
+        double[] ab = PlaceLookup.twoNumbers(query);
+        if (ab != null) return goTo(player, ab[0], ab[1]);
+        if (PENDING.containsKey(player.getUUID())) return travel(player, PENDING.get(player.getUUID()));
+        MinecraftServer server = player.server;
+        UUID id = player.getUUID();
+        PLACES.find(query, 4).whenComplete((list, err) -> server.execute(() -> {
+            ServerPlayer p = server.getPlayerList().getPlayer(id);
+            if (p == null) return;
+            if (err != null) {
+                p.sendSystemMessage(Component.literal(PlaceLookup.failure(err)).withStyle(ChatFormatting.RED));
+                return;
+            }
+            Place best = list.stream().filter(pl -> insideLv95(pl.e(), pl.n())).findFirst().orElse(null);
+            if (best == null) {
+                p.sendSystemMessage(Component.literal(PlaceLookup.notFound(query)).withStyle(ChatFormatting.RED));
+                return;
+            }
+            p.sendSystemMessage(Component.literal(PlaceLookup.going(best)).withStyle(ChatFormatting.GRAY));
+            MutableComponent also = alternatives(list, best);
+            if (also != null) p.sendSystemMessage(also);
+            travelLv95(p, best.e(), best.n());
+        }));
+        return 1;
+    }
+
+    /** "also: [Zofingen (station)] [...]", each one a click on /swiss goto E N; null when there are none. */
+    private static MutableComponent alternatives(List<Place> list, Place best) {
+        MutableComponent also = Component.literal("also: ").withStyle(ChatFormatting.GRAY);
+        int shown = 0;
+        for (Place pl : list) {
+            if (pl == best || !insideLv95(pl.e(), pl.n()) || shown == 3) continue;
+            String cmd = String.format(Locale.ROOT, "/swiss goto %.0f %.0f", pl.e(), pl.n());
+            if (shown > 0) also.append(Component.literal(", ").withStyle(ChatFormatting.GRAY));
+            also.append(Component.literal(PlaceLookup.label(pl)).withStyle(st -> st.withColor(ChatFormatting.AQUA).withUnderlined(true)
+                    .withClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND, cmd))
+                    .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT, Component.literal(cmd)))));
+            shown++;
+        }
+        return shown == 0 ? null : also;
     }
 
     private static int travel(ServerPlayer p, Pending t) {
@@ -304,6 +386,38 @@ public final class SwissCommands {
             return 0;
         }
         ctx.getSource().sendSuccess(() -> Component.literal("Origin set to E " + e + " N " + n), true);
+        return 1;
+    }
+
+    /**
+     * {@code /swiss admin origin place <name>}: the origin at a named place. Same rule as E N: only while the origin is
+     * not locked (fresh world, nothing generated yet); checked again on the server thread after the lookup.
+     */
+    private static int setOriginPlace(CommandSourceStack s, String name) {
+        SwissOrigin o = SwissRuntime.origin();
+        if (o == null || o.locked()) {
+            s.sendFailure(Component.literal("The origin is locked: chunks were already generated. "
+                    + "/swiss admin reset confirm deletes the dimension at the next start."));
+            return 0;
+        }
+        MinecraftServer server = s.getServer();
+        PLACES.find(name, 1).whenComplete((list, err) -> server.execute(() -> {
+            if (err != null) {
+                s.sendFailure(Component.literal(PlaceLookup.failure(err)));
+                return;
+            }
+            Place best = list.stream().filter(pl -> insideLv95(pl.e(), pl.n())).findFirst().orElse(null);
+            if (best == null) {
+                s.sendFailure(Component.literal(PlaceLookup.notFound(name)));
+                return;
+            }
+            long e = Math.round(best.e()), n = Math.round(best.n());
+            if (!SwissRuntime.changeOrigin(e, n)) {
+                s.sendFailure(Component.literal("The origin got locked meanwhile: chunks were already generated."));
+                return;
+            }
+            s.sendSuccess(() -> Component.literal("Origin set to " + PlaceLookup.label(best) + ", E " + e + " N " + n), true);
+        }));
         return 1;
     }
 
