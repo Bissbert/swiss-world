@@ -163,14 +163,15 @@ def sheet_from_solids(item: str, bodies: list[tuple[dict, np.ndarray]],
     top_m = np.array([t[:, :, 2].max() if len(t) else np.nan for t in body_tris])
     volume = np.array([voxel.solid_volume(t) for t in body_tris])
 
-    # building unit (GEBAEUDEEINHEIT) -> bodies; each roof skin belongs to the unit's body nearest to it
+    # building unit (GEBAEUDEEINHEIT) -> bodies; each roof skin belongs to the unit's body nearest to it.
+    # Sheets of the 2020 schema have no GEBAEUDEEINHEIT; there a roof skin carries its body's UUID.
     unit_ids: dict[str, int] = {}
-    body_unit = np.array([unit_ids.setdefault(p["GEBAEUDEEINHEIT"] or p["UUID"], len(unit_ids))
+    body_unit = np.array([unit_ids.setdefault(p.get("GEBAEUDEEINHEIT", p["UUID"]) or p["UUID"], len(unit_ids))
                           for p, _ in bodies], dtype=np.int64)
     centres = np.array([t.reshape(-1, 3)[:, :2].mean(axis=0) if len(t) else (np.nan, np.nan) for t in body_tris])
     roof_body = np.full(len(roofs), -1, dtype=np.int64)
     for r, (p, t) in enumerate(roofs):
-        unit = unit_ids.get(p["GEBAEUDEEINHEIT"] or "")
+        unit = unit_ids.get(p.get("GEBAEUDEEINHEIT", p["UUID"]) or "")
         if unit is None or len(t) == 0:
             continue
         cand = np.flatnonzero(body_unit == unit)

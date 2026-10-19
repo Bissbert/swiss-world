@@ -129,6 +129,11 @@ Production stores start empty, so this is dev-only. The fix is the reset describ
 - `sidecar/.dockerignore`: new.
 - `sidecar/swissdata/buildings.py`, `gwr.py` (sidecar-buildings): the cache temp file name carries pid and
   thread id, since parallel rebuild workers may write the same sheet/GWR cache at once. No logic change.
+- `sidecar/swissdata/buildings.py` `sheet_from_solids` (sidecar-buildings): sheets of the **2020 schema**
+  (e.g. `…_2020_1249-24`, `…_2020_1250-13`, `…_2020_1251-11`, south-east of the test range) have no
+  `GEBAEUDEEINHEIT` column, which raised `KeyError` and failed 49 cells. When the column is absent, a roof
+  skin is linked by UUID, which in that schema equals its body's UUID (checked on 1250-13). Sheets with
+  the column behave exactly as before. Test: `test_sheet_of_2020_schema_links_roofs_by_uuid`.
 
 ## Shared store
 
@@ -202,3 +207,39 @@ The TLM extract (`tlm.EXTRACT_BBOX` = 2626–2674 × 1152–1183 km) covers ever
 margin west of E2626. Features lying entirely west of 2626 000 are missing for a builder that looks beyond
 the cell edge of column E2626. Features that cross into the cell are complete (bbox filter keeps whole
 features).
+
+### Rebuild run (2026-10-19, shared store, 8 worker processes, no server running)
+
+- Baseline copy of the store (cells, manifest, lru) in the session scratchpad before the run.
+- `--all`: 1,286 cells selected. **Origin area (195 cells) done after 211 s**, everything after 865 s.
+  - 1,237 cells rebuilt.
+  - 49 failed on the 2020-schema sheets (see above), all at N1154–1155 E2650–2672 and E2672 N1156–1158.
+    They kept their old file and entry.
+  - After the fix, `--bbox 2650 1154 2672 1155` and `--bbox 2672 1156 2672 1158` rebuilt exactly those 49
+    in 51 s. **Total ≈ 916 s.**
+- **Store:**
+  - 1,286 cells, 478,777,695 bytes, i.e. **≈ 372 KB per cell**; it was 304 KB terrain-only.
+  - Median 372 KB, min 67 KB, max 1.41 MB (Interlaken, 959 buildings).
+  - manifest.json is 1.0 MB.
+- **Sources:**
+  - Every entry now has `alti, altiNeighbours, bathy, buildings, gwr, tlm`.
+  - `tlm` = `swisstlm3d_2026-02`; `gwr` = `gwr_be_2026-10-19`.
+  - `buildings` is non-empty in 1,220 cells; `bathy` is non-empty in 70.
+  - All old pins are unchanged against the baseline.
+- **TERR vs baseline:**
+  - identical in 184 cells;
+  - changed only in the 1,102 cells that contain water (WKND), which is the water builder's carving and
+    bathymetry;
+  - **0 dry cells changed**, so the ALTI pins held.
+- **Seams:** all 2,497 shared TERR edges are byte-identical after the water carving too.
+- **Other checks:**
+  - `lru.json` is identical to the baseline (touch=False);
+  - the manifest `bytes` matches each file;
+  - no temp files are left in `cells/`;
+  - 38,839 buildings in total.
+- **New downloads:** ≈ 100 MB (raw went from 5,044,504 KB to 5,142,192 KB), all swissBUILDINGS3D per-sheet
+  gdb.zip.
+  - The whole range needs 120 sheets (≈ 174 MB); 4 were there before, and sidecar-buildings had fetched more.
+  - Some sheets lie outside the WGS84 box, in the brief's LV95 range (same precedent as ALTI).
+  - No country-wide item.
+- Memory: 8 workers peaked at ≈ 4 GB RSS in total (trial run).
