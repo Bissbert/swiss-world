@@ -150,6 +150,11 @@ class BuildingPlanTest {
         assertSame(fromWest, fromEast);
         assertSame(fromWest, BuildingPlan.of(view(west, east), west, west.buildings().get(0)));
         assertTrue(asked[0] <= 4, "memoised fallback, asked " + asked[0]);
+        // the cache must not hand the half-known plan to a view that has both cells
+        BuildingPlan half = Buildings.plan(view(west), west, west.buildings().get(0));
+        BuildingPlan full = Buildings.plan(view(west, east), west, west.buildings().get(0));
+        assertFalse(half.rooms().equals(full.rooms()), "home-only plan differs");
+        assertEquals(fromWest.rooms(), full.rooms());
     }
 
     static void assertSame(BuildingPlan a, BuildingPlan b) {
