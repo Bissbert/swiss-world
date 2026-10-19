@@ -326,6 +326,13 @@ Tests: crowns at −6.25…+6.25 m from an E-W and an N-S seam with radii 2.5/4/
 - Times are compute only, with the DSM already on disk (DSM read ≈ 1 s), plus a ~15 MB download per cell.
   Earlier full builds were ~2.7 s per cell per worker, so canopy adds ~1-2 s.
 - Kinds: 2642_1161 is 95 % conifer, 2631_1171 is 76 % broadleaf, matching the mix raster.
+- Rebuild path: `python -m swissdata.rebuild --bbox 2632 1170 2632 1170` run twice on the private store. No
+  `PinChanged`; `surface` and `forestMix` stay pinned; the file is byte-identical (same sha256) to the first build.
+- A pinned `forestMix` is re-emitted as is (no STAC query), so a BAFU re-release cannot raise `PinChanged`.
+  The file in raw stays the pinned one as long as raw is kept.
+- The deleted DSM leaves its empty `.lock` file in raw, like the ALTI COGs (1,346 there).
+- Java: the mod's reader has no CNPY/TTOP code yet (grep), so the Java tests only prove that the new tags are
+  skipped. The TTOP byte layout has not been cross-checked by a Java decoder.
 - Previews: `.data-cache/previews/{2632_1170,2652_1170,2631_1171,2642_1161}_CNPY.png` (CNPY plus a 200 m zoom
   with tops, crowns and kinds).
 

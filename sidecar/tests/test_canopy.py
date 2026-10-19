@@ -210,3 +210,7 @@ def test_builder_deletes_dsm_unless_kept(tmp_path, monkeypatch):
         r = canopy.CanopyBuilder().build(2632, 1170, cfg, partial, pinned)
         assert dsm_file.exists() == keep and r.trees == []
         assert r.sources["forestMix"] == "landesforstinventar-waldmischungsgrad@2023-10-31"
+    # a pinned forest mix release is kept, without asking STAC for the current one
+    monkeypatch.setattr(canopy, "forest_mix_pin", lambda: pytest.fail("STAC must not be queried"))
+    r = canopy.CanopyBuilder().build(2632, 1170, cfg, partial, pinned | {"forestMix": "x@2023-01-01"})
+    assert r.sources["forestMix"] == "x@2023-01-01"
