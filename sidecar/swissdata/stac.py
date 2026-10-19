@@ -16,6 +16,7 @@ from .fetch import get_json
 STAC = "https://data.geo.admin.ch/api/stac/v1"
 ASSETS = "https://data.geo.admin.ch"
 ALTI = "ch.swisstopo.swissalti3d"
+SURFACE = "ch.swisstopo.swisssurface3d-raster"
 BOUNDARIES = "ch.swisstopo.swissboundaries3d"
 
 # Test bbox (WGS84) that dev runs must stay inside, plus the LV95 test range the plan names
@@ -24,8 +25,7 @@ DEV_BBOX_WGS84 = (7.80, 46.56, 8.39, 46.80)
 # inclusive km: the plan's test range and mod-core's origin area (which reaches one column further west)
 DEV_RANGES_LV95 = [(2628, 1154, 2672, 1181), (2626, 1164, 2640, 1176)]
 
-_ALTI_ID = re.compile(r"^swissalti3d_(\d{4})_(\d{4})-(\d{4})$")
-_BLOCK = 8  # km; one STAC query resolves an aligned 8×8 km block of ALTI tiles
+_BLOCK = 8  # km; one STAC query resolves an aligned 8×8 km block of tiles
 
 
 def lv95_to_wgs84_bbox(e0: float, n0: float, e1: float, n1: float) -> tuple[float, float, float, float]:
@@ -70,11 +70,19 @@ def alti_href(item_id: str) -> str:
     return f"{ASSETS}/{ALTI}/{item_id}/{item_id}_2_2056_5728.tif"
 
 
-class AltiIndex:
-    """Newest swissALTI3D item per 1 km tile. Tiles are resolved in aligned 8×8 km blocks, one paginated
-    bbox query each, so a bulk build costs ~1 query per 64 tiles. Thread-safe; results are cached."""
+def surface_href(item_id: str) -> str:
+    """The 0.5 m COG of a swissSURFACE3D Raster item (the DSM), derived from the id like alti_href."""
+    return f"{ASSETS}/{SURFACE}/{item_id}/{item_id}_0.5_2056_5728.tif"
 
-    def __init__(self):
+
+class TileIndex:
+    """Newest item per 1 km tile of a tiled collection whose ids are <prefix>_<year>_<e>-<n>. Tiles are resolved
+    in aligned 8×8 km blocks, one paginated bbox query each, so a bulk build costs ~1 query per 64 tiles.
+    Only items that have an asset ending in `asset_suffix` count. Thread-safe; results are cached."""
+
+    def __init__(self, collection: str, prefix: str, asset_suffix: str):
+        self._collection, self._suffix = collection, asset_suffix
+        self._id = re.compile(rf"^{re.escape(prefix)}_(\d{{4}})_(\d{{4}})-(\d{{4}})$")
         self._newest: dict[tuple[int, int], str | None] = {}
         self._lock = threading.Lock()
 
@@ -88,14 +96,28 @@ class AltiIndex:
     def _resolve_block(self, be: int, bn: int) -> None:
         found: dict[tuple[int, int], str] = {}
         bbox = lv95_to_wgs84_bbox(be * 1000, bn * 1000, (be + _BLOCK) * 1000, (bn + _BLOCK) * 1000)
-        for f in items(ALTI, bbox):
-            m = _ALTI_ID.match(f["id"])
+        for f in items(self._collection, bbox):
+            m = self._id.match(f["id"])
             if not m:
                 continue
             tile = (int(m.group(2)), int(m.group(3)))
-            if any(k.endswith("_2_2056_5728.tif") for k in f.get("assets", {})):
+            if any(k.endswith(self._suffix) for k in f.get("assets", {})):
                 # ids differ only in the year, so the lexicographic max is the newest
                 found[tile] = max(found.get(tile, ""), f["id"])
         for e in range(be, be + _BLOCK):
             for n in range(bn, bn + _BLOCK):
                 self._newest[(e, n)] = found.get((e, n))
+
+
+class AltiIndex(TileIndex):
+    """Newest swissALTI3D item (with a 2 m COG) per tile."""
+
+    def __init__(self):
+        super().__init__(ALTI, "swissalti3d", "_2_2056_5728.tif")
+
+
+class SurfaceIndex(TileIndex):
+    """Newest swissSURFACE3D Raster item (0.5 m DSM COG) per tile."""
+
+    def __init__(self):
+        super().__init__(SURFACE, "swisssurface3d-raster", "_0.5_2056_5728.tif")

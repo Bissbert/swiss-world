@@ -32,9 +32,15 @@ _DIR = struct.Struct("<4sIQQQ")
 _BTBL_ENTRY = struct.Struct("<QQHHHHBBHHHiiii")
 _SPAN = struct.Struct("<HHHBB")
 _COL = struct.Struct("<HHB")
+_TTOP_ENTRY = struct.Struct("<HHBBBB")
 
 U16_LAYERS = {"TERR", "WLVL", "OELV"}
-U8_LAYERS = {"SURF", "WKND", "OCLS", "OFLG", "INSD"}
+U8_LAYERS = {"SURF", "WKND", "OCLS", "OFLG", "INSD", "CNPY"}
+
+KIND_UNKNOWN = 0
+KIND_CONIFER = 1
+KIND_BROADLEAF = 2
+KIND_LARCH = 3
 
 
 def encode_height(h_m: np.ndarray | float) -> np.ndarray:
@@ -78,6 +84,15 @@ class Span:
 
 
 @dataclass
+class Tree:
+    dx: int
+    dz: int
+    height_m: int  # above TERR at the top column, 2..255
+    crown_dm: int = 0  # crown radius in decimetres, 0 = unknown
+    kind: int = KIND_UNKNOWN
+
+
+@dataclass
 class Cell:
     e_km: int
     n_km: int
@@ -85,6 +100,8 @@ class Cell:
     buildings: list[Building] = field(default_factory=list)
     # (dx, dz) -> spans
     spans: dict[tuple[int, int], list[Span]] = field(default_factory=dict)
+    # None = no TTOP (the mod places trees statistically); [] = canopy data, but no trees in this cell
+    trees: list[Tree] | None = None
 
     @property
     def border(self) -> bool:
@@ -143,6 +160,18 @@ def _decode_bspn(data: bytes) -> dict[tuple[int, int], list[Span]]:
     return res
 
 
+def _encode_ttop(trees: list[Tree]) -> bytes:
+    out = bytearray(struct.pack("<I", len(trees)))
+    for t in sorted(trees, key=lambda t: (t.dz, t.dx)):
+        out += _TTOP_ENTRY.pack(t.dx, t.dz, t.height_m, t.crown_dm, t.kind, 0)
+    return bytes(out)
+
+
+def _decode_ttop(data: bytes) -> list[Tree]:
+    (n,) = struct.unpack_from("<I", data, 0)
+    return [Tree(*_TTOP_ENTRY.unpack_from(data, 4 + i * _TTOP_ENTRY.size)[:5]) for i in range(n)]
+
+
 def _layer_bytes(tag: str, arr: np.ndarray) -> bytes:
     if tag in U16_LAYERS:
         expected = (TERR_N, TERR_N) if tag == "TERR" else (CELL, CELL)
@@ -161,13 +190,15 @@ def encode(cell: Cell) -> bytes:
     if "TERR" not in cell.layers or "SURF" not in cell.layers:
         raise ValueError("TERR and SURF are required")
     blobs: list[tuple[str, bytes]] = []
-    order = ["TERR", "SURF", "WLVL", "WKND", "OCLS", "OELV", "OFLG", "INSD"]
+    order = ["TERR", "SURF", "WLVL", "WKND", "OCLS", "OELV", "OFLG", "INSD", "CNPY"]
     for tag in order:
         if tag in cell.layers:
             blobs.append((tag, _layer_bytes(tag, cell.layers[tag])))
     if cell.buildings:
         blobs.append(("BTBL", _encode_btbl(cell.buildings)))
         blobs.append(("BSPN", _encode_bspn(cell.spans)))
+    if cell.trees is not None:
+        blobs.append(("TTOP", _encode_ttop(cell.trees)))
     flags = FLAG_BORDER if "INSD" in cell.layers else 0
     header = _HEADER.pack(MAGIC, FORMAT_VERSION, flags, cell.e_km, cell.n_km, len(blobs), 0)
     offset = _HEADER.size + _DIR.size * len(blobs)
@@ -209,6 +240,8 @@ def decode(data: bytes) -> Cell:
             cell.buildings = _decode_btbl(blob)
         elif tag == "BSPN":
             cell.spans = _decode_bspn(blob)
+        elif tag == "TTOP":
+            cell.trees = _decode_ttop(blob)
         # unknown tags are ignored by contract
     return cell
 
