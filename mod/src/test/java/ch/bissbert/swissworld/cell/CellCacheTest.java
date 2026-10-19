@@ -143,11 +143,13 @@ class CellCacheTest {
     }
 
     @Test
-    void abortWaitingCompletesOnlyCurrentlyPending() {
+    void abortWaitingHoldsUntilResumed() {
         CellCache c = cache();
         CompletableFuture<CellCache.Result> f = c.get(E, N);
         assertEquals(1, c.abortWaiting());
         assertEquals(CellCache.Status.ABORTED, f.join().status());
+        assertEquals(CellCache.Status.ABORTED, c.get(E + 1, N).join().status());
+        c.resumeWaiting();
         CompletableFuture<CellCache.Result> later = c.get(E, N);
         assertFalse(later.isDone());
         assertEquals(1, c.pendingCount());

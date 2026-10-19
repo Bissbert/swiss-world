@@ -43,6 +43,7 @@ final class SwissEvents {
         });
         bus.addListener((RegisterCommandsEvent e) -> SwissCommands.register(e.getDispatcher()));
         bus.addListener((ServerTickEvent.Post e) -> {
+            StallGuard.tickEnded();
             SwissCommands.tick(e.getServer());
             PlayerPrefetch.tick(e.getServer());
         });

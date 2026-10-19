@@ -58,7 +58,7 @@ public final class CellCache {
     private final Map<Long, Pending> pending = new ConcurrentHashMap<>();
     private volatile Coverage coverage;
     private long coverageMtime = Long.MIN_VALUE, coverageCheckedAt = Long.MIN_VALUE;
-    private volatile boolean aborted;
+    private volatile boolean aborted, holding;
     private volatile ScheduledExecutorService poller;
 
     // sidecar health, only touched by the poller and request callbacks (synchronized on this)
@@ -149,10 +149,10 @@ public final class CellCache {
     public CompletableFuture<Result> get(int eKm, int nKm) {
         SwdCell hit = getIfPresent(eKm, nKm);
         if (hit != null) return CompletableFuture.completedFuture(new Result(Status.READY, hit));
-        if (aborted) return CompletableFuture.completedFuture(Result.ABORTED);
+        if (aborted || holding) return CompletableFuture.completedFuture(Result.ABORTED);
         if (coverageState(eKm, nKm) == Coverage.OUTSIDE) return CompletableFuture.completedFuture(Result.OUTSIDE);
         Pending p = pending.computeIfAbsent(key(eKm, nKm), k -> new Pending(eKm, nKm));
-        if (aborted) finish(p, Result.ABORTED); // raced with abortPending()
+        if (aborted || holding) finish(p, Result.ABORTED); // raced with abortPending() or abortWaiting()
         else io.execute(() -> tryLoad(p));
         // a copy, so a caller cancelling or completing its future can't affect other chunks waiting for the same cell
         return p.future.copy();
@@ -164,14 +164,23 @@ public final class CellCache {
         for (Pending p : pending.values()) finish(p, Result.ABORTED);
     }
 
-    /** Completes the cells pending right now with ABORTED; later requests wait as usual. Returns how many. */
+    /**
+     * Completes the cells pending right now with ABORTED, and all requests until {@link #resumeWaiting()} too.
+     * Returns how many were pending.
+     */
     public int abortWaiting() {
+        holding = true;
         int n = 0;
         for (Pending p : pending.values()) {
             finish(p, Result.ABORTED);
             n++;
         }
         return n;
+    }
+
+    /** Ends {@link #abortWaiting()}: later requests wait for their cells as usual. */
+    public void resumeWaiting() {
+        holding = false;
     }
 
     private void tryLoad(Pending p) {

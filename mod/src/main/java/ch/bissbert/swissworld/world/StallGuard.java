@@ -18,10 +18,13 @@ import net.minecraft.server.level.ServerChunkCache;
  * watchdog kills the server after max-tick-time. Once a second this checks whether the current tick has run longer
  * than {@code stallAbortSeconds} while the server thread sits in {@link ServerChunkCache#getChunk} and chunks are
  * pending; then the pending cells are aborted, exactly like at shutdown: those chunks complete empty and are
- * downgraded on save ({@link AbortedChunks}), so they generate properly once they are loaded again.
+ * downgraded on save ({@link AbortedChunks}), so they generate properly once they are loaded again. Until that tick
+ * ends ({@link #tickEnded}), cells that are not loaded yet are aborted at once, so a large forceload finishes in
+ * one go instead of stalling again on every new cell.
  */
 public final class StallGuard {
     private static ScheduledExecutorService timer;
+    private static volatile boolean holding;
 
     private StallGuard() {}
 
@@ -42,13 +45,21 @@ public final class StallGuard {
 
     private static void check(MinecraftServer server) {
         int limitS = SwissConfig.STALL_ABORT_S.get();
-        if (limitS <= 0 || !server.isRunning() || SwissRuntime.PENDING_CHUNKS.get() == 0) return;
+        if (holding || limitS <= 0 || !server.isRunning() || SwissRuntime.PENDING_CHUNKS.get() == 0) return;
         long stalledMs = (Util.getNanos() - server.getNextTickTime()) / 1_000_000;
         if (stalledMs < limitS * 1000L || !waitsForChunk(server.getRunningThread())) return;
+        holding = true;
         int cells = SwissRuntime.cells().abortWaiting();
         SwissWorld.LOGGER.warn("Server thread waited {} s for a chunk whose cells are missing (sidecar {}); gave up {} "
                         + "pending cell(s): those chunks stay empty until reloaded and are not saved as generated",
                 stalledMs / 1000, SwissRuntime.cells().sidecarDown() ? "down" : "slow", cells);
+    }
+
+    /** Server tick end: the stuck tick is over, cells are waited for again. */
+    public static void tickEnded() {
+        if (!holding) return;
+        holding = false;
+        SwissRuntime.cells().resumeWaiting();
     }
 
     private static boolean waitsForChunk(Thread thread) {
