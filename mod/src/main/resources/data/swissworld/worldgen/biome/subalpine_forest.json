@@ -103,6 +103,12 @@
       "swissworld:ore_redstone",
       "swissworld:ore_lapis",
       "swissworld:ore_diamond"
+    ],
+    [],
+    [],
+    [],
+    [
+      "minecraft:freeze_top_layer"
     ]
   ]
 }

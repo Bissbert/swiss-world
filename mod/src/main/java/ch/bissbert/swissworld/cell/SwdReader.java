@@ -35,7 +35,8 @@ public final class SwdReader {
         int eKm = b.getInt(8), nKm = b.getInt(12), count = b.getInt(16);
 
         short[] terr = null, wlvl = null, oelv = null;
-        byte[] surf = null, wknd = null, ocls = null, oflg = null, insd = null;
+        byte[] surf = null, wknd = null, ocls = null, oflg = null, insd = null, cnpy = null;
+        List<SwdCell.Tree> trees = null;
         List<SwdCell.Building> buildings = List.of();
         Map<Integer, SwdCell.Span[]> spans = Map.of();
 
@@ -61,13 +62,15 @@ public final class SwdReader {
                 case "OCLS" -> ocls = u8(blob, tag);
                 case "OFLG" -> oflg = u8(blob, tag);
                 case "INSD" -> insd = u8(blob, tag);
+                case "CNPY" -> cnpy = u8(blob, tag);
+                case "TTOP" -> trees = ttop(blob);
                 case "BTBL" -> buildings = btbl(blob);
                 case "BSPN" -> spans = bspn(blob);
                 default -> { } // unknown tags are ignored by contract
             }
         }
         if (terr == null || surf == null) throw new IOException("TERR and SURF are required");
-        return new SwdCell(eKm, nKm, terr, surf, wlvl, wknd, ocls, oelv, oflg, insd, buildings, spans);
+        return new SwdCell(eKm, nKm, terr, surf, wlvl, wknd, ocls, oelv, oflg, insd, buildings, spans, cnpy, trees);
     }
 
     private static byte[] inflate(byte[] data, int off, int len, int raw) throws IOException {
@@ -116,6 +119,19 @@ public final class SwdReader {
                     b.getInt(), b.getInt(), b.getInt(), b.getInt()));
         }
         return res;
+    }
+
+    private static List<SwdCell.Tree> ttop(byte[] blob) throws IOException {
+        ByteBuffer b = ByteBuffer.wrap(blob).order(ByteOrder.LITTLE_ENDIAN);
+        int n = b.getInt();
+        if (blob.length != 4 + 8L * n) throw new IOException("TTOP: bad size");
+        List<SwdCell.Tree> res = new ArrayList<>(n);
+        for (int i = 0; i < n; i++) {
+            int dx = b.getShort() & 0xFFFF, dz = b.getShort() & 0xFFFF;
+            res.add(new SwdCell.Tree(dx, dz, b.get() & 0xFF, b.get() & 0xFF, b.get() & 0xFF));
+            b.get(); // reserved
+        }
+        return List.copyOf(res);
     }
 
     private static Map<Integer, SwdCell.Span[]> bspn(byte[] blob) {
