@@ -2,7 +2,7 @@
 
 ## Status
 
-M1 is merged (main `bb9e79f`). M1.1 (snow, CNPY/TTOP, tick re-measurement) is on `mod-core` on top of it. `./gradlew build` passes with 48 tests.
+M1 is merged (main `bb9e79f`). M1.1 (snow, CNPY/TTOP, tick re-measurement) is on `mod-core` on top of it. `./gradlew build` passes with 51 tests (M2 fix 1 below).
 Dev evidence comes from `mod/run` on ports 25640/25641, with private stores only:
 
 - `/tmp/swissworld-mod-core` holds the fake sidecar's synthetic cells.
@@ -114,6 +114,8 @@ None. The real cells copied from the shared store (layers TERR/SURF/WLVL/WKND/OC
 
 - `mod/build.gradle`: `testImplementation` slf4j, so CellCache tests can log.
 - `tools/fake_sidecar.py`: a dev-only fake of the control plane. It writes synthetic cells and a synthetic coverage.bin, and refuses to run on the shared store.
+- `mod/build.gradle`: Minecraft on the unit-test classpath (`addModdingDependenciesTo(sourceSets.test)`) for the vanilla-pack comparison; the `swissworld.vanillaPack` run property.
+- `mod/src/main/templates/META-INF/neoforge.mods.toml`: the `[[mixins]]` entry. `META-INF/accesstransformer.cfg`: `PalettedContainer.data` and `PalettedContainer$Data` public.
 - `tools/bot.py`: a headless 1.21.1 offline client for smoke tests (commands, waits, straight-line flights).
 
 ## Dev pitfalls
@@ -123,9 +125,26 @@ None. The real cells copied from the shared store (layers TERR/SURF/WLVL/WKND/OC
 - The sidecar URL for dev is in `mod/run/defaultconfigs/swissworld-server.toml` (port 25642 = fake sidecar).
 - Spectators don't make chunks tick, so weather and snow tests need creative or survival.
 
+## M2 fix 1: single-value pack fast path (2026-10-19)
+
+- `world/SectionPacking` + `mixin/PalettedContainerMixin` (HEAD of `PalettedContainer.pack`): a container whose palette is a `SingleValuePalette` is packed as `PackedData(List.of(value), Optional.empty())` without the vanilla HashMapPalette rebuild and the 4096-entry scan. A refilled container (single value but a larger palette) and mixed containers stay on vanilla code, so the output does not depend on the shortcut being taken.
+- Byte identity: `SectionPackingTest` compares palette, storage and the codec's JsonOps output with vanilla `pack` (the test classpath has MC but no mixins). In game, two fresh worlds (`level-seed=4242`, same forceload + bot route; `SWISSWORLD_VANILLA_PACK=true` vs default) gave 3045 full chunks each. 2894 hash-identical; in the other 151 every differing section has different *blocks* (ore swaps, the known decoration-order noise); **0 sections with the same content but different encoding**, and every biome container identical.
+- Server tick, same route (ow1 east 1 km, sw1 east 1 km, ow2 south, sw2 south at 20 m/s), loadavg 15–25 from other workstreams. P95 = median of 5 s windows; max over the leg:
+
+| leg | before P95 med / max | after P95 med / max | before P99 med | after P99 med |
+|---|---|---|---|---|
+| sw1 | 27.7 / 42.7 ms | 9.5 / 15.0 ms | 50.8 ms | 24.2 ms |
+| sw2 | 25.1 / 49.9 ms | 10.9 / 12.3 ms | 73.8 ms | 20.9 ms |
+| ow1 | 23.4 / 141.2 ms | 27.9 / 52.6 ms | 70.1 ms | 56.8 ms |
+| ow2 | 10.2 / 39.6 ms | 12.1 / 39.4 ms | 26.8 ms | 27.6 ms |
+
+  Switzerland's P95 falls ~2.5×; the overworld is unchanged within noise (its sections are rarely single-value).
+- Spreading chunk unloads: **not done, not needed.** `ChunkMap.processUnloads` already only saves while the tick has time left (`hasMoreTime`), forcing more only above a 2000-chunk backlog, plus at most 20 `saveChunkIfNeeded` per tick in spare time. The old ~50 ms P95 was spare-time saving filling the budget, not a stall; with the fast path that saving is cheap.
+- `-Dswissworld.vanillaPack=true` (run config: `SWISSWORLD_VANILLA_PACK=true`) turns the fast path off for A/B checks.
+
 ## M2 notes
 
 - Sea and ocean fish spawns at y −1807.
 - Sky/fog colours at real altitudes, which need a client check.
-- The pack fast path and the other save fixes, see "Tick times, M1.1".
+- The pack fast path is done (see above); the all-air-section idea was dropped.
 - Ores: ore veins (`ore_veins` noise) are not reproduced.

@@ -1,0 +1,12 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "ch.bissbert.swissworld.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [
+    "PalettedContainerMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
