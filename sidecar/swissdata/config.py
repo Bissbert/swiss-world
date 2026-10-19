@@ -18,6 +18,9 @@ class Config:
     store_cap_bytes: int = 12_000_000_000
     scratch_cap_bytes: int = 2_000_000_000
     keep_raw: bool = True  # dev default; production sets SWISSDATA_KEEP_RAW=0
+    # swissSURFACE3D tiles (12-16 MB each, ~18 GB for the test bbox) are deleted after extraction even in dev,
+    # unless SWISSDATA_KEEP_RAW=1 is set explicitly
+    keep_surface_raw: bool = False
     dev_bbox: bool = True  # dev default: never touch tiles outside the test bbox; production sets SWISSDATA_DEV_BBOX=0
 
     @staticmethod
@@ -31,6 +34,7 @@ class Config:
             scratch=p("SWISSDATA_SCRATCH", _REPO / ".data-cache" / "scratch"),
             max_downloads=min(4, int(os.environ.get("SWISSDATA_MAX_DOWNLOADS", "2"))),
             keep_raw=os.environ.get("SWISSDATA_KEEP_RAW", "1") != "0",
+            keep_surface_raw=os.environ.get("SWISSDATA_KEEP_RAW") == "1",
             dev_bbox=os.environ.get("SWISSDATA_DEV_BBOX", "1") != "0",
             store_cap_bytes=int(os.environ.get("SWISSDATA_STORE_CAP_BYTES", "12000000000")),
         )

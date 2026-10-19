@@ -13,6 +13,7 @@ import numpy as np
 
 from . import swd
 from .buildings import BuildingsBuilder
+from .canopy import CanopyBuilder
 from .config import Config
 from .landcover import LandcoverBuilder
 from .overlay import OverlayBuilder
@@ -25,6 +26,7 @@ class LayerResult:
     buildings: list[swd.Building] = field(default_factory=list)
     spans: dict[tuple[int, int], list[swd.Span]] = field(default_factory=dict)
     sources: dict[str, object] = field(default_factory=dict)  # merged into manifest "sources"
+    trees: list[swd.Tree] | None = None  # TTOP; None = not emitted
 
 
 class LayerBuilder(Protocol):
@@ -51,10 +53,11 @@ class DefaultSurface:
 from .alti import AltiTerrain  # noqa: E402
 from .coverage import BorderMask  # noqa: E402
 
-# Order matters: terrain (core) -> tlm (land cover, water, overlays, bathymetry into TERR) -> buildings -> defaults.
+# Order matters: terrain (core) -> tlm (land cover, water, overlays, bathymetry into TERR) -> buildings -> canopy
+# (masks the columns of all of these) -> defaults.
 # Each workstream inserts its builder here; keep DefaultSurface last.
 BUILDERS: list[LayerBuilder] = [AltiTerrain(), BorderMask(), WaterBuilder(), LandcoverBuilder(), OverlayBuilder(),
-                                BuildingsBuilder(), DefaultSurface()]
+                                BuildingsBuilder(), CanopyBuilder(), DefaultSurface()]
 
 
 def assemble(e_km: int, n_km: int, cfg: Config, pinned: dict[str, object] | None = None,
@@ -69,8 +72,12 @@ def assemble(e_km: int, n_km: int, cfg: Config, pinned: dict[str, object] | None
             acc.layers[tag] = arr
         if r.buildings:
             acc.buildings, acc.spans = r.buildings, r.spans
+        if r.trees is not None:
+            if "TTOP" not in b.tags:
+                raise ValueError(f"{b.name} emitted undeclared table TTOP")
+            acc.trees = r.trees
         acc.sources.update(r.sources)
-    cell = swd.Cell(e_km, n_km, layers=acc.layers, buildings=acc.buildings, spans=acc.spans)
+    cell = swd.Cell(e_km, n_km, layers=acc.layers, buildings=acc.buildings, spans=acc.spans, trees=acc.trees)
     return cell, acc.sources
 
 
