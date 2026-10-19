@@ -12,6 +12,7 @@ from typing import Protocol
 import numpy as np
 
 from . import swd
+from .buildings import BuildingsBuilder
 from .config import Config
 
 
@@ -45,7 +46,7 @@ class DefaultSurface:
 
 # Order matters: terrain (core) -> tlm (land cover, water, overlays, bathymetry into TERR) -> buildings -> defaults.
 # Each workstream inserts its builder here; keep DefaultSurface last.
-BUILDERS: list[LayerBuilder] = [DefaultSurface()]
+BUILDERS: list[LayerBuilder] = [BuildingsBuilder(), DefaultSurface()]
 
 
 def assemble(e_km: int, n_km: int, cfg: Config, pinned: dict[str, object] | None = None,
