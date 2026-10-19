@@ -84,16 +84,17 @@ Milestone 1: WaterStage, OverlayStage, VegetationStage in `mod/src/main/java/ch/
 - **Real trees (TTOP, swd-format §6a):** a cell with a `TTOP` table gets exactly its trees and no statistical placement. The kind maps to a species: conifer → spruce (larch from 2,000 m), larch → larch, broadleaf → oak or birch by hash, unknown → by SURF and altitude (never dropped; under 4 m → bush). Height is `height_m`; the crown radius is `crown_dm` / 10, or derived from the height when 0. A real tree is skipped only where its own column is not dry open land (water, bank, overlay, building).
 - **TTOP interface:** `TreeData.of(ctx)` reads `SwdCell.trees()` / `hasTrees()` (mod-core's reader, merged in 0bba118); `TreeTops` wraps the sorted list without copying and looks trees up by binary search per row. My own TTOP/CNPY parser is gone (the reader owns parsing). CNPY is not yet used for placement.
 - **Statistical heights:** forest SURF 1–3 below 2,000 m: 18–35 m; everything else (sparse, urban, meadow, larch band): 8–20 m; fruit trees 4–7 m.
-- **Shapes scale with height and crown radius:** spruce is a tiered cone from 0.3 h; larch a sparse cone from 0.35 h; oak an ellipsoid centred at 0.62 h with a spreading trunk; birch a narrow ellipsoid. Default radius: spruce 1 + 0.12 h, larch/birch 1 + 0.1 h, oak 0.22 h. Wide crowns get horizontal branch logs (axis x/z), so no leaf is more than 6 from a log. Example: a 35 m fixture spruce (radius 5) has 46 logs and 745 leaves.
-- **Cross-chunk trees:** I chose clipping over decoration. Every chunk lists all trees whose crown can reach it, in a fixed order, and places only the blocks inside itself: all logs first, then leaves, and only into air. Crowns skip building columns, and over a road or rail they keep 5 blocks above the deck. Neighbouring chunks therefore complete each other's trees from the same data. Unit tests check that two neighbouring chunks agree, including with the widest crowns.
-- **REACH (CELL_MARGIN unchanged at 8):** real-tree crowns are clamped to `REACH = MARGIN − 1 = 7`, because a trunk's `top()` (bank check) looks one column further. Statistical trees check 3 columns around their trunk, so their crowns are capped at `STAT_REACH = MARGIN − 3 = 5`. Wider crowns would need a larger CELL_MARGIN.
-- **Leaves:** distance = vanilla distance, found by a breadth-first walk from the tree's logs through its own leaves (6-connected). Leaves the walk does not reach within 6 are left out, so as placed no leaf decays and an update changes no distance (unit test for all species, heights 2–40 and radii 1–7). Bushes have no log and use persistent leaves. Where two trees overlap, an update may raise a leaf's distance, but never above 6 next to its own logs.
-- **Ground cover:**
-  - short grass and flowers on meadow, urban green and alpine pasture (alpine flower set above 1,500 m, nothing above 2,600 m);
-  - ferns in forests;
-  - grass and sweet berry bushes in sparse areas;
-  - grass in orchards.
-  - Plants are only placed on grass_block with air above.
+- **Site-adaptive trees (TreeGrower, replaces the template shapes):** every tree is grown procedurally, seeded by its world position, from a `Site`:
+  - **room** in 8 directions: free space shared with each neighbour within 12 m in proportion to their crowns (weight free·√h), minus a 0.5-block gap, stopped before buildings; crowns grow into free space and only meet at their tips;
+  - **free** (how open the tree stands): dense stands self-prune (crown base up to 0.5–0.55 h), solitary and edge trees keep low full crowns, fuller towards the open side;
+  - **slope/aspect** from the terrain ±2 m: tall trees on slopes ≥ 0.6 lean one block downslope, crowns are fuller towards south and downslope (light), the crown base rises on the uphill side;
+  - **altitude**: from 1,800 to 2,200 m trees get shorter (height ×(1 − 0.45 t)), narrower and sparser, and from ~2,040 m wind-flagged (west side cut by up to 75 %); krummholz `PINE` (2–4 m, several bent stems) above 1,700 m in sparse areas and from 2,050 m;
+  - **floor** under the crown (terrain, banks, overlays + 5, buildings): nothing is placed below it.
+- **Archetypes:** spruce: excurrent, whorls every 2–3 blocks with 5–6 drooping branches, needles on the outer 70 % only (hollow interior, gaps between whorls); larch: 4 upturned branches per whorl, half the needles; oak/beech, birch, fruit and willow (`WILLOW` by water below 1,200 m, oak blocks with leaf curtains): space colonisation (Runions et al. 2007) with a hollow attractor shell, limbs as axis-oriented logs, leaf clusters only around branch tips; 2x2 trunk below 0.35 h for trees ≥ 25 m. Bushes: persistent leaves, no log.
+- **Stands:** forest seeds are thinned to realistic densities (keep spruce 0.62, birch 0.55, larch 0.5, oak/willow 0.4 of the 4 m grid, ≈ 350/300/280/220 trees per ha), with gap patches of young trees (3–7 m). Ground cover follows the crowns: where leaves ≥ 3 blocks up shade a column, podzol (conifer forest), ferns and moss carpet, no flowers; in gaps grass, ferns and flowers.
+- **Margin (CELL_MARGIN unchanged at 8):** crowns still stay within `REACH = 7`, so the chunk that places a block always has the tree's trunk cell loaded. Sites are computed only from the tree's own (home) cell through `ColumnGrid.home` (that cell's columns sampled lazily in chunk ± 24, `HOME_MARGIN`), so every chunk computes the identical site regardless of which cells it loaded. Limitation: across a cell border a tree sees its own cell's columns clamped to the border, so neighbours and ground just across the border are estimates (unit test: chunks with different cells loaded agree on the trees by the border).
+- **Leaves:** distance = vanilla distance (breadth-first walk from the tree's logs through its own leaves, > 6 dropped); logs cut off from the foot by clipping are dropped too. Unit test for all 8 archetypes, heights 2–40, random sites (rooms, slopes, altitudes, floor steps, buildings): every leaf's distance equals 1 + the minimum of its neighbours, no floating logs, no duplicate blocks.
+- **Performance** (`TreeBenchTest`, flat cell, 950 chunks, warm JIT): conifer forest 22.4 trees/chunk, plan 0.30 ms + grow 0.94 ms per chunk, 42 µs per tree, 226 blocks per tree; broadleaf forest 16.5 trees/chunk, 0.27 + 0.98 ms, 60 µs per tree. Total ≈ 1.3 ms per dense forest chunk (budget 3 ms). Earlier template shapes: 2.5–4.8 ms per chunk (more, smaller trees).
 - **Vineyards (13):** east–west rows every 3 m N, an oak fence post every 5 m, persistent oak leaves between the posts.
 - **Glacier (6):** the top 3–8 blocks (by hash) become snow_block on top, then 2 packed_ice, then blue_ice.
 
@@ -154,3 +155,18 @@ None. No contract file was changed.
 - **Bridges:** the 2-wide deck at (23971, −3227) has a railing on its south side only; the diagonal footbridge at (14567, −6918) is open along its stepped edge.
 - **Conifer forest:** 178 spruce logs and no oak or birch in a 29×36×29 box at (20080–20108, 580–608).
 - **Glacier:** snow_block over packed_ice over blue_ice (153 / 306 / 344 in a sample box).
+
+## Verification (site-adaptive trees, real cells in a private store `…/scratchpad/store2`, ports 25660/25661)
+Cells copied read-only from the shared store with their manifest entries (2632_1169/1170, 2633_1170, 2633_1165, 2634_1165, 2655_1171, 2663_1166, 2664_1165/1166). Areas 81 × 81 columns, dumped from the region files; renders in `.data-cache/previews/trees_{park,beech,spruce,treeline}_{iso,top}.png`.
+
+| Spot | World x, z | Logs | Leaves | True distance 7 | After 90 s at randomTickSpeed 3000 |
+|---|---|---|---|---|---|
+| Interlaken park (2632_1170) | −550, −150 | 604 | 2,245 | 0 | 1,677 → 1,677 (run before the birch change) |
+| Beech slope (2633_1165, ~680 m) | 550, 4850 | 8,085 | 13,206 | 0 | 13,206 |
+| Dense spruce (2655_1171, ~1,300 m) | 22350, −1150 | 14,072 | 33,584 | 0 | 33,584 |
+| Tree line, Haslital towards Grimsel (2664_1166, ~1,800–2,050 m) | 31300, 4000 | 1,292 | 5,357 | 0 | 5,357 |
+
+- Stored distances that are higher than the true one (a leaf touching another tree's log): 1 / 39 / 106 / 3. Vanilla lowers them on the next neighbour update; none decays.
+- No floating tree fragments inside any area (those at the dump edge have their trunk outside the cut).
+- Spruce forest from above: about a third of the columns are open to the sky; podzol, ferns and moss under the crowns.
+- After the first renders the birch crowns were too thin (bare trunks with tufts), so they got larger leaf clusters and more attractors; park leaves 1,677 → 2,245.
