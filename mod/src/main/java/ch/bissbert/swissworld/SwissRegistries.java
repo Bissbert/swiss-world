@@ -2,6 +2,7 @@ package ch.bissbert.swissworld;
 
 import ch.bissbert.swissworld.gen.SwissBiomeSource;
 import ch.bissbert.swissworld.gen.SwissChunkGenerator;
+import ch.bissbert.swissworld.gen.surface.SnowTopLayerFeature;
 import ch.bissbert.swissworld.world.ReturnPos;
 import com.mojang.serialization.MapCodec;
 import net.minecraft.core.registries.Registries;
@@ -45,5 +46,6 @@ public final class SwissRegistries {
         CHUNK_GENERATORS.register(modBus);
         BIOME_SOURCES.register(modBus);
         ATTACHMENT_TYPES.register(modBus);
+        SnowTopLayerFeature.register(modBus);
     }
 }

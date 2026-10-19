@@ -6,6 +6,8 @@ import ch.bissbert.swissworld.gen.GenContext;
 import ch.bissbert.swissworld.gen.SwissChunkGenerator;
 import ch.bissbert.swissworld.gen.stage.TerrainStage;
 import java.util.Arrays;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * Cell data for a chunk plus {@link #MARGIN} columns around it, sampled once per stage, in block y.
@@ -22,8 +24,17 @@ public final class ColumnGrid {
 
     public static final int BRIDGE = 1, TUNNEL = 2, RAIL = 4, EDGE = 8, DAM_BODY = 16;
 
+    /** Margin of a {@link #home} view around the chunk: far enough for a tree's neighbours and their clearance. */
+    public static final int HOME_MARGIN = 24;
+
     private final SwissCoords coords;
+    private final Cells cells;
     private final int minX, minZ, size;
+    /** A home view: only this cell's data, see {@link #home}. Null for the chunk grid. */
+    private final SwdCell homeCell;
+    /** Columns sampled so far in a lazy view; null when all are sampled up front. */
+    private final boolean[] sampled;
+    private Map<Long, ColumnGrid> homes;
     private final boolean[] present, spans;
     private final int[] ground, source, kind, surf, ocls, oflg, oelv;
     private final double[] metres;
@@ -36,11 +47,23 @@ public final class ColumnGrid {
     }
 
     public ColumnGrid(SwissCoords coords, Cells cells, int chunkMinX, int chunkMinZ) {
+        this(coords, cells, chunkMinX - MARGIN, chunkMinZ - MARGIN, 16 + 2 * MARGIN, null);
+        for (int i = 0; i < size; i++) {
+            for (int j = 0; j < size; j++) {
+                sample(cells, minX + i, minZ + j, j * size + i);
+            }
+        }
+    }
+
+    private ColumnGrid(SwissCoords coords, Cells cells, int minX, int minZ, int size, SwdCell homeCell) {
         this.coords = coords;
-        this.minX = chunkMinX - MARGIN;
-        this.minZ = chunkMinZ - MARGIN;
-        this.size = 16 + 2 * MARGIN;
+        this.cells = cells;
+        this.minX = minX;
+        this.minZ = minZ;
+        this.size = size;
+        this.homeCell = homeCell;
         int n = size * size;
+        sampled = homeCell == null ? null : new boolean[n];
         present = new boolean[n];
         spans = new boolean[n];
         ground = new int[n];
@@ -51,11 +74,31 @@ public final class ColumnGrid {
         oflg = new int[n];
         oelv = new int[n];
         metres = new double[n];
-        for (int i = 0; i < size; i++) {
-            for (int j = 0; j < size; j++) {
-                sample(cells, minX + i, minZ + j, j * size + i);
-            }
-        }
+    }
+
+    /**
+     * The view of the cell containing column (x, z) as a tree there sees it: {@link #HOME_MARGIN} columns around the
+     * chunk, sampled on demand, from that one cell only. Columns of other cells read as the nearest column of the home
+     * cell (terrain and SURF), with no water, overlay or building. The home cell is loaded whenever a chunk looks at a
+     * column in it, so every chunk gets the same answers from this view, whichever other cells it has. Null over ocean.
+     */
+    public ColumnGrid home(int x, int z) {
+        if (homeCell != null) return this;
+        SwdCell cell = cells.at(x, z);
+        if (cell == null) return null;
+        if (homes == null) homes = new HashMap<>();
+        int d = HOME_MARGIN - MARGIN;
+        return homes.computeIfAbsent(((long) cell.eKm() << 32) ^ (cell.nKm() & 0xFFFFFFFFL),
+                k -> new ColumnGrid(coords, (bx, bz) -> cell, minX - d, minZ - d, size + 2 * d, cell));
+    }
+
+    /** The cell km of column x as this grid's data sees it: its home cell in a {@link #home} view. */
+    public int cellE(int x) {
+        return homeCell != null ? homeCell.eKm() : SwissCoords.cellKm(east(x));
+    }
+
+    public int cellN(int z) {
+        return homeCell != null ? homeCell.nKm() : SwissCoords.cellKm(north(z));
     }
 
     public static ColumnGrid of(GenContext ctx) {
@@ -65,6 +108,13 @@ public final class ColumnGrid {
     private void sample(Cells cells, int x, int z, int k) {
         long e = coords.east(x), nn = coords.north(z);
         SwdCell cell = cells.at(x, z);
+        boolean away = false;
+        if (homeCell != null) {
+            long e0 = homeCell.eKm() * 1000L, n0 = homeCell.nKm() * 1000L;
+            away = e < e0 || e > e0 + 999 || nn < n0 || nn > n0 + 999;
+            e = Math.max(e0, Math.min(e0 + 999, e));
+            nn = Math.max(n0, Math.min(n0 + 999, nn));
+        }
         int dx = SwissCoords.dx(e), dz = SwissCoords.dz(nn);
         source[k] = NONE;
         oelv[k] = NONE;
@@ -77,10 +127,11 @@ public final class ColumnGrid {
         double h = cell.terrain(dx + 0.5, dz + 0.5);
         metres[k] = h;
         ground[k] = y(h);
+        surf[k] = cell.surf(dx, dz);
+        if (away) return;
         double w = cell.water(dx, dz);
         if (!Double.isNaN(w) && y(w) > ground[k]) source[k] = y(w);
         kind[k] = cell.waterKind(dx, dz);
-        surf[k] = cell.surf(dx, dz);
         ocls[k] = cell.overlay(dx, dz);
         oflg[k] = cell.overlayFlags(dx, dz);
         double o = cell.overlayElevation(dx, dz);
@@ -98,7 +149,12 @@ public final class ColumnGrid {
         if (i < 0 || j < 0 || i >= size || j >= size) {
             throw new IndexOutOfBoundsException("column " + x + "," + z + " outside the sampled margin");
         }
-        return j * size + i;
+        int k = j * size + i;
+        if (sampled != null && !sampled[k]) {
+            sampled[k] = true;
+            sample(cells, x, z, k);
+        }
+        return k;
     }
 
     public long east(int x) {

@@ -4,19 +4,23 @@ import ch.bissbert.swissworld.gen.GenContext;
 import ch.bissbert.swissworld.gen.GenStage;
 import java.util.List;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.LeavesBlock;
+import net.minecraft.world.level.block.RotatedPillarBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.ChunkAccess;
 
 /**
  * Trees, bushes, ground cover, orchard and vineyard rows, glacier ice by SURF class. Owner: mod-surface.
  * Trees come from {@link TreePlan}: each chunk places the in-chunk blocks of every tree within reach, logs before
- * leaves, and only into air. Everything is keyed by world position, never by RNG state.
+ * leaves, and only into air, before the ground cover (which then knows where the crowns shade the ground). Crowns
+ * stay off building columns and clear of overlays ({@value TreePlan#OVERLAY_CLEARANCE} blocks above the deck).
+ * Everything is keyed by world position, never by RNG state.
  */
 public final class VegetationStage implements GenStage {
-    private static final int SALT_COVER = 21, SALT_FLOWER = 22, SALT_ICE = 23;
+    private static final int SALT_COVER = 21, SALT_FLOWER = 22, SALT_ICE = 23, SALT_PODZOL = 24;
     /** No grass or flowers above this. */
     private static final double COVER_TOP = 2600;
     private static final double ALPINE = 1500;
@@ -29,23 +33,30 @@ public final class VegetationStage implements GenStage {
         ColumnGrid g = ColumnGrid.of(ctx);
         int x0 = chunk.getPos().getMinBlockX(), z0 = chunk.getPos().getMinBlockZ();
         BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+        List<TreePlan.Tree> trees = TreePlan.trees(g, TreeData.of(ctx), x0, z0, x0 + 15, z0 + 15);
+        List<List<TreePlan.Part>> shapes = trees.stream().map(TreePlan::shape).toList();
+        // columns under a crown (leaves at least 3 blocks up): shade plants there
+        boolean[] shade = new boolean[256];
+        for (boolean logs : new boolean[] {true, false}) {
+            for (int i = 0; i < trees.size(); i++) {
+                TreePlan.Tree t = trees.get(i);
+                int base = g.ground(t.x(), t.z()) + 1;
+                for (TreePlan.Part p : shapes.get(i)) {
+                    if (p.log() != logs) continue;
+                    int x = t.x() + p.dx(), z = t.z() + p.dz(), y = base + p.dy();
+                    if (x < x0 || x > x0 + 15 || z < z0 || z > z0 + 15) continue;
+                    if (g.hasBuilding(x, z) || TreePlan.surfaceOverlay(g, x, z) && y <= g.deck(x, z) + TreePlan.OVERLAY_CLEARANCE) continue;
+                    pos.set(x, y, z);
+                    if (!chunk.getBlockState(pos).isAir()) continue;
+                    chunk.setBlockState(pos, block(t.species(), p), false);
+                    if (!p.log() && y >= g.ground(x, z) + 3) shade[(z - z0) * 16 + x - x0] = true;
+                }
+            }
+        }
         for (int lx = 0; lx < 16; lx++) {
             for (int lz = 0; lz < 16; lz++) {
                 int x = x0 + lx, z = z0 + lz;
-                if (g.present(x, z)) column(chunk, g, x, z, pos);
-            }
-        }
-        List<TreePlan.Tree> trees = TreePlan.trees(g, x0, z0, x0 + 15, z0 + 15);
-        for (boolean logs : new boolean[] {true, false}) {
-            for (TreePlan.Tree t : trees) {
-                int base = g.ground(t.x(), t.z()) + 1;
-                for (TreePlan.Part p : TreePlan.shape(t.species(), t.hash())) {
-                    if (p.log() != logs) continue;
-                    int x = t.x() + p.dx(), z = t.z() + p.dz();
-                    if (x < x0 || x > x0 + 15 || z < z0 || z > z0 + 15) continue;
-                    pos.set(x, base + p.dy(), z);
-                    if (chunk.getBlockState(pos).isAir()) chunk.setBlockState(pos, block(t.species(), p), false);
-                }
+                if (g.present(x, z)) column(chunk, g, x, z, shade[lz * 16 + lx], pos);
             }
         }
     }
@@ -53,13 +64,13 @@ public final class VegetationStage implements GenStage {
     private static BlockState block(TreePlan.Species s, TreePlan.Part p) {
         Block log = switch (s) {
             case BIRCH -> Blocks.BIRCH_LOG;
-            case SPRUCE, LARCH -> Blocks.SPRUCE_LOG;
+            case SPRUCE, LARCH, PINE -> Blocks.SPRUCE_LOG;
             default -> Blocks.OAK_LOG;
         };
-        if (p.log()) return log.defaultBlockState();
+        if (p.log()) return log.defaultBlockState().setValue(RotatedPillarBlock.AXIS, Direction.Axis.valueOf(p.axis().name()));
         Block leaves = switch (s) {
             case BIRCH -> Blocks.BIRCH_LEAVES;
-            case SPRUCE, LARCH -> Blocks.SPRUCE_LEAVES;
+            case SPRUCE, LARCH, PINE -> Blocks.SPRUCE_LEAVES;
             default -> Blocks.OAK_LEAVES;
         };
         return p.distance() == 0
@@ -67,8 +78,11 @@ public final class VegetationStage implements GenStage {
                 : leaves.defaultBlockState().setValue(LeavesBlock.DISTANCE, p.distance());
     }
 
-    /** Ground cover, rows and ice of one column. Plants go only onto grass with air above. */
-    private static void column(ChunkAccess chunk, ColumnGrid g, int x, int z, BlockPos.MutableBlockPos pos) {
+    /**
+     * Ground cover, rows and ice of one column. Plants go only onto grass with air above. Forest floor in the shade of
+     * a crown gets ferns and moss (podzol under conifers), no flowers; gaps get grass and flowers.
+     */
+    private static void column(ChunkAccess chunk, ColumnGrid g, int x, int z, boolean shade, BlockPos.MutableBlockPos pos) {
         int surf = g.surf(x, z);
         if (TreePlan.surfaceOverlay(g, x, z) || g.hasBuilding(x, z) || g.source(x, z) != ColumnGrid.NONE) return;
         int ground = g.ground(x, z);
@@ -91,8 +105,14 @@ public final class VegetationStage implements GenStage {
                 }
                 yield r < 0.25 ? Blocks.SHORT_GRASS.defaultBlockState() : null;
             }
-            case 2 -> r < 0.12 ? Blocks.FERN.defaultBlockState() : null;
-            case 1, 3 -> r < 0.08 ? Blocks.SHORT_GRASS.defaultBlockState() : r < 0.12 ? Blocks.FERN.defaultBlockState() : null;
+            case 1, 2, 3 -> {
+                if (!shade) {
+                    if (r < 0.02 && m < COVER_TOP) yield FLOWERS[ColumnHash.below(e, n, SALT_FLOWER, FLOWERS.length)].defaultBlockState();
+                    yield r < 0.3 ? Blocks.SHORT_GRASS.defaultBlockState() : r < 0.36 ? Blocks.FERN.defaultBlockState() : null;
+                }
+                if (surf != 1 && ColumnHash.unit(e, n, SALT_PODZOL) < 0.35) chunk.setBlockState(pos.set(x, ground, z), Blocks.PODZOL.defaultBlockState(), false);
+                yield r < 0.1 ? Blocks.FERN.defaultBlockState() : r < 0.18 ? Blocks.MOSS_CARPET.defaultBlockState() : null;
+            }
             case 14 -> r < 0.2 ? Blocks.SHORT_GRASS.defaultBlockState() : r < 0.23 ? Blocks.SWEET_BERRY_BUSH.defaultBlockState() : null;
             case 12 -> r < 0.3 ? Blocks.SHORT_GRASS.defaultBlockState() : null;
             case 13 -> vine(e, n);
