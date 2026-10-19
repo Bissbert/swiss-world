@@ -31,6 +31,21 @@ class TransportPlanTest {
         return c;
     }
 
+    /** Playtest 2026-10-20 00.10.30: on a cross slope the road's edges stood a half step off its middle. */
+    @Test
+    void roadOnACrossSlopeIsLevelAcross() {
+        SwdCell c = slopedRoad();
+        List<String> ragged = new ArrayList<>();
+        for (int z = -40; z <= 40; z++) {
+            if (Math.abs(z - 7) <= TransportPlan.ROAD_RADIUS + 1) continue; // the spike
+            TransportPlan t = new TransportPlan(Cells.grid(c, 0, Math.floorDiv(z, 16) * 16, TransportPlan.MARGIN));
+            java.util.Set<String> levels = new java.util.TreeSet<>();
+            for (int x = 0; x <= 5; x++) levels.add(t.roadDeck(x, z) + (t.roadSlab(x, z) ? ".5" : ""));
+            if (levels.size() > 1) ragged.add(z + ": " + levels);
+        }
+        assertTrue(ragged.isEmpty(), () -> "rows with more than one level: " + ragged);
+    }
+
     @Test
     void roadClimbsInHalfStepsWithoutBumps() {
         Voxels v = new Voxels(slopedRoad(), -8, -40, 14, 40, -1440, -1370);

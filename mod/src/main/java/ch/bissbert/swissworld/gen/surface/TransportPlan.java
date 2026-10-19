@@ -27,6 +27,9 @@ public final class TransportPlan {
     /** Grid margin this plan needs: {@code new ColumnGrid(.., MARGIN)}. */
     public static final int MARGIN = 36;
     static final int ROAD_RADIUS = 5, RAIL_RADIUS = 4;
+    /** How far a road column looks across its road for the middle whose level it takes. */
+    static final int ROAD_ACROSS = 8;
+    private static final int[][] AXES = {{1, 0}, {0, 1}, {1, 1}, {1, -1}};
     /** How far a culvert or a water-side constraint ramps the way up: one half block (road) or block (rail) per column. */
     static final int ROAD_RAMP = 6, RAIL_RAMP = 4;
     /** A rail bed rises at most one block per CLIMB_RUN columns, raised (never cut) within RAIL_CLIMB columns. */
@@ -199,11 +202,44 @@ public final class TransportPlan {
         return sv / sw;
     }
 
+    /**
+     * The road profile of the column in the middle of the road across this one, so a cross-section is level: the disc
+     * of an edge column is cut off by the road's edge and, on a cross slope, would set the edge a half step off the
+     * middle. Across is the shortest of four axes (two straight, two diagonal) through the road; where no axis is
+     * clearly the shortest (a square or junction) or the road is wider than {@link #ROAD_ACROSS}, the column keeps its
+     * own profile.
+     */
+    private double acrossProfile(int x, int z) {
+        double shortest = Double.MAX_VALUE, longest = 0;
+        int cx = x, cz = z;
+        for (int[] a : AXES) {
+            int p = roadRun(x, z, a[0], a[1]), n = roadRun(x, z, -a[0], -a[1]);
+            double len = (p + n + 1) * (a[0] != 0 && a[1] != 0 ? Math.sqrt(2) : 1);
+            longest = Math.max(longest, len);
+            if (len < shortest) {
+                shortest = len;
+                boolean capped = p == ROAD_ACROSS || n == ROAD_ACROSS;
+                int m = Math.floorDiv(p - n, 2);
+                cx = capped ? x : x + a[0] * m;
+                cz = capped ? z : z + a[1] * m;
+            }
+        }
+        if (longest < 2 * shortest) return profile(x, z, false);
+        return profile(cx, cz, false);
+    }
+
+    /** Road columns of this road in a row from this one in direction (dx, dz), at most {@link #ROAD_ACROSS}. */
+    private int roadRun(int x, int z, int dx, int dz) {
+        int k = 0;
+        while (k < ROAD_ACROSS && road(x + (k + 1) * dx, z + (k + 1) * dz) && !crossing(x, z, x + (k + 1) * dx, z + (k + 1) * dz)) k++;
+        return k;
+    }
+
     /** Road deck in half blocks: {@code 2 * deck + 1} when a bottom slab lies on the deck. */
     private int roadHalf(int x, int z) {
         int k = g.index(x, z);
         if (roadHalf[k] != UNSET) return roadHalf[k];
-        double v = profile(x, z, false);
+        double v = acrossProfile(x, z);
         int cls = g.overlay(x, z);
         int half = slabClass(cls) ? (int) Math.floor(2 * v) : 2 * (int) Math.floor(v);
         // ramp up to the water constraints of road columns nearby, one half block per column
