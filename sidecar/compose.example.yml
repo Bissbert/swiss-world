@@ -1,0 +1,33 @@
+# Example only: merge into the server's compose file. The mod reads cells from the same store volume
+# (read-only) and talks to the sidecar at http://swissdata:8080 (docs/sidecar-api.md).
+services:
+  swissdata:
+    build: ./sidecar  # relative to the repo root
+    image: swissdata:0.1.0
+    restart: unless-stopped
+    environment:
+      SWISSDATA_MAX_DOWNLOADS: "2"
+      SWISSDATA_STORE_CAP_BYTES: "12000000000"
+      SWISSDATA_LOG: INFO
+    volumes:
+      - swissworld-store:/store
+      - swissdata-raw:/raw
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=4).status == 200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 60s
+      retries: 3
+
+  minecraft:
+    # existing server service: add the store volume and the dependency
+    image: itzg/minecraft-server  # placeholder for whatever image the server already uses
+    volumes:
+      - swissworld-store:/data/swissworld-store:ro
+    depends_on:
+      swissdata:
+        condition: service_healthy
+
+volumes:
+  swissworld-store:
+  swissdata-raw:
