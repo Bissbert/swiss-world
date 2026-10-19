@@ -195,23 +195,35 @@ def network(s):
     return seen, ends
 
 
+TUNNEL_DEPTH = 160  # how far under the surface segments looks for a rail (tunnels)
+
+
 def segments(out: Path, step=3):
     """Whole-line continuity: rail coverage along the oracle path and the connected rail pieces it falls into."""
     path = [tuple(p) for p in json.loads((out / "rail-path.json").read_text())]
-    comp_of, comps, cover, gaps, gap0 = {}, [], [], [], None
-    for i in range(0, len(path), step):
-        px, pz = path[i]
-        hit = None
+    comp_of, comps, cover, gaps, gap0, last_y = {}, [], [], [], None, None
+
+    def probe(px, pz, ys_of):
         for dx in range(-2, 3):
             for dz in range(-2, 3):
                 top = acc.top_at(px + dx, pz + dz)
                 if top is None:
                     continue
-                for y in range(top, top - 8, -1):
+                for y in ys_of(top):
                     if rail_at(px + dx, y, pz + dz):
-                        hit = (px + dx, y, pz + dz); break
-                if hit: break
-            if hit: break
+                        return (px + dx, y, pz + dz)
+        return None
+
+    for i in range(0, len(path), step):
+        px, pz = path[i]
+        # near the surface; then (tunnels) beside the last rail's level; then down to TUNNEL_DEPTH under the top
+        hit = probe(px, pz, lambda top: range(top, top - 8, -1))
+        if hit is None and last_y is not None:
+            hit = probe(px, pz, lambda top: range(min(top, last_y + 6), last_y - 7, -1))
+        if hit is None:
+            hit = probe(px, pz, lambda top: range(top - 8, top - TUNNEL_DEPTH, -1))
+        if hit is not None:
+            last_y = hit[1]
         cover.append(hit is not None)
         if hit is None:
             gap0 = i if gap0 is None else gap0
@@ -227,7 +239,7 @@ def segments(out: Path, step=3):
         c[0], c[1] = min(c[0], i), max(c[1], i)
     if gap0 is not None:
         gaps.append((gap0, len(path) - 1))
-    print(f"path {len(path)} px, sampled every {step}: rail within 2 blocks at {sum(cover)}/{len(cover)} "
+    print(f"path {len(path)} px, sampled every {step}: rail within 2 blocks (tunnels included) at {sum(cover)}/{len(cover)} "
           f"({100 * sum(cover) / len(cover):.1f} %); {len(comps)} separate rail pieces along the line")
     big = sorted(comps, key=lambda c: c[1] - c[0], reverse=True)
     print("longest pieces (path index span, rails):", [(c[0], c[1], c[2]) for c in big[:8]])
