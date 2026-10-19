@@ -17,5 +17,6 @@ public final class SwissWorld {
         SwissRegistries.register(modBus);
         container.registerConfig(ModConfig.Type.SERVER, SwissConfig.SPEC);
         SwissEvents.register();
+        modBus.addListener(ch.bissbert.swissworld.world.SwissSpawns::register);
     }
 }
