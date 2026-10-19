@@ -1,0 +1,14 @@
+{
+  "replace": false,
+  "values": [
+    "minecraft:elytra",
+    "minecraft:dragon_egg",
+    "minecraft:nether_star",
+    "minecraft:enchanted_golden_apple",
+    "minecraft:totem_of_undying",
+    "minecraft:heavy_core",
+    "minecraft:trial_key",
+    "minecraft:ominous_trial_key",
+    "minecraft:ominous_bottle"
+  ]
+}

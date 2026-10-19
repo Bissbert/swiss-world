@@ -1,0 +1,11 @@
+{
+  "type": "minecraft:chest",
+  "pools": [
+    {
+      "rolls": 1,
+      "entries": [
+        {"type": "swissworld:auto_mix", "room": "residential_kitchen", "count": {"type": "minecraft:uniform", "min": 3, "max": 7}}
+      ]
+    }
+  ]
+}
