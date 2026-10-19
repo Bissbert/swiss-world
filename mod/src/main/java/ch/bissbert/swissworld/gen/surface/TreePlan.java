@@ -1,28 +1,35 @@
 package ch.bissbert.swissworld.gen.surface;
 
 import ch.bissbert.swissworld.cell.SwdCell;
-import ch.bissbert.swissworld.cell.SwissCoords;
-import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashSet;
+import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
- * Which trees stand where, and their shapes. Pure, see {@link ColumnGrid}.
+ * Which trees stand where, what their spot is like, and their shapes. Pure, see {@link ColumnGrid}.
  * <p>A cell with a {@code TTOP} table (swd-format §6a, via {@link TreeData}) gets exactly its real trees, with their
  * heights and crown radii. Other cells keep the statistical placement: a jittered {@value #GRID} m grid over LV95 (one
  * candidate per grid square, offset and kept by {@link ColumnHash} of the square), so positions depend on world position
  * only; the keep probability depends on SURF, and heights are drawn from realistic ranges (forest
- * {@value #FOREST_MIN}..{@value #FOREST_MAX} m, elsewhere {@value #OPEN_MIN}..{@value #OPEN_MAX} m). Orchards are a
- * fixed {@value #ORCHARD} m lattice. Species follow the data or SURF and the altitude band: broadleaf below
- * {@value #BROADLEAF_TOP} m, mixed up to {@value #MIXED_TOP} m, spruce up to {@value #SPRUCE_TOP} m, sparse larch-like
- * trees up to {@value #TREE_LINE} m.
+ * {@value #FOREST_MIN}..{@value #FOREST_MAX} m, elsewhere {@value #OPEN_MIN}..{@value #OPEN_MAX} m, lower towards the
+ * tree line). Forests have gaps ({@value #PATCH} m patches) with young trees. Orchards are a fixed {@value #ORCHARD} m
+ * lattice. Species follow the data or SURF and the altitude band: broadleaf below {@value #BROADLEAF_TOP} m (willows by
+ * the water), mixed up to {@value #MIXED_TOP} m, spruce up to {@value #SPRUCE_TOP} m, larch and mountain pine up to
+ * {@value #TREE_LINE} m.
+ * <p>Each tree gets a {@link Site}: the free room of its crown in 8 directions (shared out with every neighbour within
+ * {@value #NEAR} m by size, so neighbouring crowns meet at their tips with a gap, and stopped by buildings), slope,
+ * altitude and the solid ground under its crown. {@link TreeGrower} grows the tree for it.
  * <p>Trees cross chunk borders: every chunk enumerates the trees whose crown can reach it and places only the blocks
- * inside itself, so neighbours finish each other's trees from the same data. No crown is wider than {@link #REACH}, just inside
- * the margin the grid samples. A statistical candidate also checks {@value #CLEAR} columns around its trunk, so its crown
- * stays within {@link #STAT_REACH}.
+ * inside itself, so neighbours finish each other's trees from the same data. Whether a tree stands is decided from the
+ * chunk's grid (no crown is wider than {@link #REACH}, inside the margin it samples; a statistical candidate also checks
+ * {@value #CLEAR} columns around its trunk, so its crown stays within {@link #STAT_REACH}). Its site comes from the
+ * {@link ColumnGrid#home home view} of its own cell, which every chunk sees alike: neighbours and ground across a cell
+ * border are guessed from the home cell's data there.
  */
 public final class TreePlan {
     static final int GRID = 4;
@@ -36,18 +43,78 @@ public final class TreePlan {
     static final int CLEAR = 3;
     /** Widest crown of a statistical tree: its clearance check must stay inside the sampled margin. */
     static final int STAT_REACH = ColumnGrid.MARGIN - CLEAR;
+    /** Neighbours this close (m) share the room with a tree. */
+    static final int NEAR = 12;
+    /** Gap (m) left between two crowns where they meet, for light. */
+    static final double GAP = 0.5;
+    /** Free height above a road or rail deck under an overhanging crown. */
+    static final int OVERLAY_CLEARANCE = 5;
     static final double BROADLEAF_TOP = 1000, MIXED_TOP = 1500, SPRUCE_TOP = 2000, TREE_LINE = 2300;
+    /** Mountain pine (krummholz) grows from here on sparse ground, among the larches from {@value #PINE_LARCH} m. */
+    static final double PINE_LOW = 1700, PINE_LARCH = 2050, WILLOW_TOP = 1200;
     static final int FOREST_MIN = 18, FOREST_MAX = 35, OPEN_MIN = 8, OPEN_MAX = 20;
+    /** Forest gaps: one in about {@code 1 / GAP_SHARE} patches of {@value #PATCH} m holds only young trees. */
+    static final int PATCH = 24;
+    static final double GAP_SHARE = 0.12, YOUNG_KEEP = 0.35;
     /** Leaves further than this from a log (vanilla leaf distance) would decay. */
     static final int LEAF_REACH = 6;
-    private static final int SALT_X = 11, SALT_Z = 12, SALT_KEEP = 13, SALT_SPECIES = 14, SALT_SHAPE = 15, SALT_HEIGHT = 16;
+    private static final int SALT_X = 11, SALT_Z = 12, SALT_KEEP = 13, SALT_SPECIES = 14, SALT_SHAPE = 15, SALT_HEIGHT = 16,
+            SALT_GAP = 17, SALT_WILLOW = 18, SALT_THIN = 19;
 
-    public enum Species { OAK, BIRCH, SPRUCE, LARCH, BUSH, FRUIT }
+    public enum Species { OAK, BIRCH, SPRUCE, LARCH, BUSH, FRUIT, PINE, WILLOW }
 
     public enum Axis { X, Y, Z }
 
-    /** A tree standing on column (x, z), {@code height} blocks tall with a crown {@code radius}; {@code hash} drives its shape. */
-    public record Tree(int x, int z, Species species, int height, int radius, long hash) {}
+    /**
+     * A tree standing on column (x, z), {@code height} blocks tall, its crown at most {@code radius} wide; {@code hash}
+     * drives its shape, {@code site} what its spot is like.
+     */
+    public record Tree(int x, int z, Species species, int height, int radius, long hash, Site site) {}
+
+    /**
+     * What a tree's spot is like. {@code room}: how far its crown may reach in the 8 directions (east, south-east,
+     * south, ... with x east and z south), out of {@code free} with nothing around. Terrain {@code metres} and
+     * gradient (m per m, positive: rising to the east / south). {@code floor}: per column within {@link #REACH} of the
+     * trunk, the lowest dy a block of the tree may take there (above the ground, banks, water, the clearance over a
+     * road; {@link Integer#MAX_VALUE} on a building); null clips nothing.
+     */
+    public record Site(float[] room, float free, double metres, double slopeX, double slopeZ, int[] floor) {
+        static final int SIDE = 2 * REACH + 1;
+
+        /** Flat open ground with {@code radius} of room in every direction, nothing to clip. */
+        public static Site open(int radius) {
+            float[] room = new float[8];
+            Arrays.fill(room, radius);
+            return new Site(room, radius, 0, 0, 0, null);
+        }
+
+        public int floor(int dx, int dz) {
+            return floor == null ? 0 : floor[(dz + REACH) * SIDE + dx + REACH];
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            return o instanceof Site s && Arrays.equals(room, s.room) && free == s.free && metres == s.metres
+                    && slopeX == s.slopeX && slopeZ == s.slopeZ && Arrays.equals(floor, s.floor);
+        }
+
+        @Override
+        public int hashCode() {
+            return Arrays.hashCode(room) * 31 + Arrays.hashCode(floor);
+        }
+
+        @Override
+        public String toString() {
+            return "Site" + Arrays.toString(room) + " free " + free + " at " + Math.round(metres) + " m";
+        }
+    }
+
+    /** A tree before its site is known: {@code free} is its crown radius with room all round. */
+    private record Seed(int x, int z, Species species, int height, double free, long hash) {
+        double weight() {
+            return free * Math.sqrt(height);
+        }
+    }
 
     /**
      * One block of a tree relative to the block above its trunk column's ground. A log has its {@code axis}; a leaf's
@@ -75,66 +142,170 @@ public final class TreePlan {
         return trees(g, TreeData.NONE, minX, minZ, maxX, maxZ);
     }
 
-    /** Trees whose crown can reach the columns [minX..maxX] x [minZ..maxZ], in a fixed order. */
+    /** Trees whose crown can reach the columns [minX..maxX] x [minZ..maxZ], in a fixed order, each with its site. */
     public static List<Tree> trees(ColumnGrid g, TreeData data, int minX, int minZ, int maxX, int maxZ) {
-        List<Tree> out = new ArrayList<>();
-        real(g, data, minX - REACH, minZ - REACH, maxX + REACH, maxZ + REACH, out);
-        int ax = minX - STAT_REACH, az = minZ - STAT_REACH, bx = maxX + STAT_REACH, bz = maxZ + STAT_REACH;
+        List<Seed> seeds = seeds(g, data, minX, minZ, maxX, maxZ, REACH, STAT_REACH);
+        Map<ColumnGrid, List<Seed>> pools = new IdentityHashMap<>();
+        List<Tree> out = new ArrayList<>(seeds.size());
+        for (Seed s : seeds) {
+            ColumnGrid v = g.home(s.x(), s.z());
+            // the pool of possible neighbours: every tree the home view sees within NEAR of any tree here
+            List<Seed> pool = pools.computeIfAbsent(v,
+                    k -> seeds(k, data, minX, minZ, maxX, maxZ, REACH + NEAR, REACH + NEAR));
+            Site site = site(v, s, pool);
+            Species sp = wet(v, s) ? Species.WILLOW : s.species();
+            int radius = 1;
+            for (float f : site.room()) radius = Math.max(radius, (int) Math.ceil(f));
+            out.add(new Tree(s.x(), s.z(), sp, s.height(), Math.min(REACH, radius), s.hash(), site));
+        }
+        return out;
+    }
+
+    /**
+     * Trees of view v standing within {@code realPad} (real) or {@code statPad} (statistical, orchards) of the area,
+     * sorted by (x, z).
+     */
+    private static List<Seed> seeds(ColumnGrid v, TreeData data, int minX, int minZ, int maxX, int maxZ, int realPad, int statPad) {
+        List<Seed> out = new ArrayList<>();
+        real(v, data, minX - realPad, minZ - realPad, maxX + realPad, maxZ + realPad, out);
+        int ax = minX - statPad, az = minZ - statPad, bx = maxX + statPad, bz = maxZ + statPad;
         // east grows with x, north shrinks with z
-        long e0 = Math.floorDiv(g.east(ax), GRID), e1 = Math.floorDiv(g.east(bx), GRID);
-        long n0 = Math.floorDiv(g.north(bz), GRID), n1 = Math.floorDiv(g.north(az), GRID);
+        long e0 = Math.floorDiv(v.east(ax), GRID), e1 = Math.floorDiv(v.east(bx), GRID);
+        long n0 = Math.floorDiv(v.north(bz), GRID), n1 = Math.floorDiv(v.north(az), GRID);
         for (long i = e0; i <= e1; i++) {
             for (long j = n0; j <= n1; j++) {
-                int x = g.xAt(i * GRID + ColumnHash.below(i, j, SALT_X, GRID));
-                int z = g.zAt(j * GRID + ColumnHash.below(i, j, SALT_Z, GRID));
-                if (x < ax || x > bx || z < az || z > bz || hasTable(g, data, x, z) || !allowed(g, x, z)) continue;
-                int surf = g.surf(x, z);
-                if (ColumnHash.unit(i, j, SALT_KEEP) >= density(surf)) continue;
-                long e = g.east(x), n = g.north(z);
-                double m = g.metres(x, z);
+                int x = v.xAt(i * GRID + ColumnHash.below(i, j, SALT_X, GRID));
+                int z = v.zAt(j * GRID + ColumnHash.below(i, j, SALT_Z, GRID));
+                if (x < ax || x > bx || z < az || z > bz || hasTable(v, data, x, z) || !allowed(v, x, z)) continue;
+                int surf = v.surf(x, z);
+                long e = v.east(x), n = v.north(z);
+                boolean young = forest(surf) && ColumnHash.unit(Math.floorDiv(e, PATCH), Math.floorDiv(n, PATCH), SALT_GAP) < GAP_SHARE;
+                if (ColumnHash.unit(i, j, SALT_KEEP) >= (young ? YOUNG_KEEP : density(surf))) continue;
+                double m = v.metres(x, z);
                 Species s = species(surf, m, ColumnHash.unit(e, n, SALT_SPECIES));
-                if (s == null) continue;
-                int h = height(s, surf, m, ColumnHash.unit(e, n, SALT_HEIGHT));
-                out.add(new Tree(x, z, s, h, Math.min(STAT_REACH, crown(s, h)), ColumnHash.of(e, n, SALT_SHAPE)));
+                if (s == null || forest(surf) && !young && ColumnHash.unit(i, j, SALT_THIN) >= stand(s)) continue;
+                double r = ColumnHash.unit(e, n, SALT_HEIGHT);
+                int h = young && s != Species.PINE ? 3 + (int) (r * 5) : height(s, surf, m, r);
+                out.add(new Seed(x, z, s, h, Math.min(STAT_REACH, 1.3 * crown(s, h)), ColumnHash.of(e, n, SALT_SHAPE)));
             }
         }
         for (int x = ax; x <= bx; x++) {
             for (int z = az; z <= bz; z++) {
-                long e = g.east(x), n = g.north(z);
+                long e = v.east(x), n = v.north(z);
                 if (Math.floorMod(e, ORCHARD) != 0 || Math.floorMod(n, ORCHARD) != 0) continue;
-                if (g.surf(x, z) != 12 || hasTable(g, data, x, z) || !allowed(g, x, z) || g.metres(x, z) > MIXED_TOP) continue;
-                int h = height(Species.FRUIT, 12, g.metres(x, z), ColumnHash.unit(e, n, SALT_HEIGHT));
-                out.add(new Tree(x, z, Species.FRUIT, h, crown(Species.FRUIT, h), ColumnHash.of(e, n, SALT_SHAPE)));
+                if (v.surf(x, z) != 12 || hasTable(v, data, x, z) || !allowed(v, x, z) || v.metres(x, z) > MIXED_TOP) continue;
+                int h = height(Species.FRUIT, 12, v.metres(x, z), ColumnHash.unit(e, n, SALT_HEIGHT));
+                out.add(new Seed(x, z, Species.FRUIT, h, Math.min(STAT_REACH, 1.3 * crown(Species.FRUIT, h)), ColumnHash.of(e, n, SALT_SHAPE)));
             }
         }
-        out.sort(Comparator.comparingInt(Tree::x).thenComparingInt(Tree::z));
+        out.sort(Comparator.comparingInt(Seed::x).thenComparingInt(Seed::z));
         return out;
+    }
+
+    /**
+     * Share of the forest grid a species fills in a closed stand: about 350 spruces, 280 larches, 220 beeches or oaks,
+     * 300 birches a hectare, so mature crowns have room.
+     */
+    static double stand(Species s) {
+        return switch (s) {
+            case SPRUCE -> 0.62;
+            case LARCH -> 0.5;
+            case OAK, WILLOW -> 0.4;
+            case BIRCH -> 0.55;
+            default -> 1;
+        };
+    }
+
+    private static boolean forest(int surf) {
+        return surf == 1 || surf == 2 || surf == 3;
+    }
+
+    /**
+     * The site of seed s in its home view v: its room shared with the neighbours from {@code pool} (each gets the part
+     * of the distance its size claims, less {@value #GAP}; a neighbour limits the directions within about 68° of it,
+     * as a plane between the two trees would) and cut short before a building; slope; the floor under the crown.
+     */
+    private static Site site(ColumnGrid v, Seed s, List<Seed> pool) {
+        float[] room = new float[8];
+        Arrays.fill(room, (float) s.free());
+        double w = s.weight();
+        for (Seed n : pool) {
+            int dx = n.x() - s.x(), dz = n.z() - s.z();
+            if (dx == 0 && dz == 0 || dx * dx + dz * dz > NEAR * NEAR) continue;
+            double d = Math.sqrt(dx * dx + dz * dz), phi = Math.atan2(dz, dx);
+            double e = d * w / (w + n.weight()) - GAP;
+            for (int i = 0; i < 8; i++) {
+                double c = Math.cos(i * Math.PI / 4 - phi);
+                if (c > 0.38) room[i] = (float) Math.min(room[i], Math.max(1, e / c));
+            }
+        }
+        for (int i = 0; i < 8; i++) {
+            double c = Math.cos(i * Math.PI / 4), sn = Math.sin(i * Math.PI / 4);
+            for (int step = 1; step <= Math.ceil(room[i]); step++) {
+                if (v.hasBuilding(s.x() + (int) Math.round(step * c), s.z() + (int) Math.round(step * sn))) {
+                    room[i] = (float) Math.max(1, Math.min(room[i], step - 1.5));
+                    break;
+                }
+            }
+        }
+        int[] floor = new int[Site.SIDE * Site.SIDE];
+        int ground = v.ground(s.x(), s.z());
+        for (int dz = -REACH; dz <= REACH; dz++) {
+            for (int dx = -REACH; dx <= REACH; dx++) {
+                int x = s.x() + dx, z = s.z() + dz;
+                int f;
+                if (v.hasBuilding(x, z)) {
+                    f = Integer.MAX_VALUE;
+                } else {
+                    int top = Math.max(v.top(x, z), v.source(x, z));
+                    if (surfaceOverlay(v, x, z)) top = Math.max(top, v.deck(x, z) + OVERLAY_CLEARANCE);
+                    f = top - ground;
+                }
+                floor[(dz + REACH) * Site.SIDE + dx + REACH] = f;
+            }
+        }
+        double sx = (v.metres(s.x() + 2, s.z()) - v.metres(s.x() - 2, s.z())) / 4;
+        double sz = (v.metres(s.x(), s.z() + 2) - v.metres(s.x(), s.z() - 2)) / 4;
+        return new Site(room, (float) s.free(), v.metres(s.x(), s.z()), sx, sz, floor);
+    }
+
+    /** A broadleaf tree within 4 m of water below {@value #WILLOW_TOP} m is (mostly) a willow. */
+    private static boolean wet(ColumnGrid v, Seed s) {
+        if (s.species() != Species.OAK && s.species() != Species.BIRCH || s.height() < 5) return false;
+        if (v.metres(s.x(), s.z()) >= WILLOW_TOP || ColumnHash.unit(v.east(s.x()), v.north(s.z()), SALT_WILLOW) >= 0.7) return false;
+        for (int i = -4; i <= 4; i++) {
+            for (int j = -4; j <= 4; j++) {
+                if (v.source(s.x() + i, s.z() + j) != ColumnGrid.NONE) return true;
+            }
+        }
+        return false;
     }
 
     /** The column lies in a cell with a {@code TTOP} table, which replaces the statistical placement there. */
     private static boolean hasTable(ColumnGrid g, TreeData data, int x, int z) {
-        return data.tops(SwissCoords.cellKm(g.east(x)), SwissCoords.cellKm(g.north(z))) != null;
+        return data.tops(g.cellE(x), g.cellN(z)) != null;
     }
 
     /** The {@code TTOP} trees of every cell under [ax..bx] x [az..bz] (at most 2 x 2 cells: the area is < 1 km). */
-    private static void real(ColumnGrid g, TreeData data, int ax, int az, int bx, int bz, List<Tree> out) {
+    private static void real(ColumnGrid g, TreeData data, int ax, int az, int bx, int bz, List<Seed> out) {
         long eMin = g.east(ax), eMax = g.east(bx), nMin = g.north(bz), nMax = g.north(az);
         Set<Long> done = new HashSet<>();
-        for (long e : new long[] {eMin, eMax}) {
-            for (long n : new long[] {nMin, nMax}) {
-                int eKm = SwissCoords.cellKm(e), nKm = SwissCoords.cellKm(n);
+        for (int x : new int[] {ax, bx}) {
+            for (int z : new int[] {az, bz}) {
+                int eKm = g.cellE(x), nKm = g.cellN(z);
                 if (!done.add(((long) eKm << 32) ^ (nKm & 0xFFFFFFFFL))) continue;
                 TreeTops tops = data.tops(eKm, nKm);
                 if (tops == null) continue;
                 long e0 = eKm * 1000L, n0 = nKm * 1000L;
                 for (SwdCell.Tree t : tops.within((int) (eMin - e0), (int) (999 - (nMax - n0)), (int) (eMax - e0), (int) (999 - (nMin - n0)))) {
                     long te = e0 + t.dx(), tn = n0 + 999 - t.dz();
-                    int x = g.xAt(te), z = g.zAt(tn);
-                    if (!standing(g, x, z)) continue;
+                    int x0 = g.xAt(te), z0 = g.zAt(tn);
+                    if (!standing(g, x0, z0)) continue;
                     double r = ColumnHash.unit(te, tn, SALT_SPECIES);
-                    Species s = species(t, g.surf(x, z), g.metres(x, z), r);
+                    Species s = species(t, g.surf(x0, z0), g.metres(x0, z0), r);
                     int radius = t.crownDm() > 0 ? (int) Math.round(t.crownDm() / 10.0) : crown(s, t.heightM());
-                    out.add(new Tree(x, z, s, t.heightM(), Math.max(1, Math.min(REACH, radius)), ColumnHash.of(te, tn, SALT_SHAPE)));
+                    double free = t.crownDm() > 0 ? radius : 1.3 * radius;
+                    out.add(new Seed(x0, z0, s, t.heightM(), Math.max(1, Math.min(REACH, free)), ColumnHash.of(te, tn, SALT_SHAPE)));
                 }
             }
         }
@@ -148,7 +319,7 @@ public final class TreePlan {
 
     /** Species of a real tree: its {@code kind} where known, else by SURF and altitude. Real trees are never dropped. */
     static Species species(SwdCell.Tree t, int surf, double metres, double r) {
-        if (t.heightM() < 4) return Species.BUSH;
+        if (t.heightM() < 4) return metres >= PINE_LOW ? Species.PINE : Species.BUSH;
         Species broadleaf = r < 0.7 ? Species.OAK : Species.BIRCH;
         return switch (t.kind()) {
             case SwdCell.Tree.CONIFER -> metres >= SPRUCE_TOP ? Species.LARCH : Species.SPRUCE;
@@ -156,26 +327,33 @@ public final class TreePlan {
             case SwdCell.Tree.BROADLEAF -> broadleaf;
             default -> {
                 Species s = species(surf, metres, r);
-                yield s == null ? Species.LARCH : s == Species.BUSH ? broadleaf : s;
+                yield s == null || s == Species.PINE ? Species.LARCH : s == Species.BUSH ? broadleaf : s;
             }
         };
     }
 
-    /** Height in blocks of a statistical tree; {@code r} is uniform in [0, 1). */
+    /** Height in blocks of a statistical tree; {@code r} is uniform in [0, 1). Trees shrink by up to 45 % towards the tree line. */
     static int height(Species s, int surf, double metres, double r) {
         int lo, hi;
         if (s == Species.BUSH) return 2;
+        if (s == Species.PINE) return 2 + (int) (r * 3);
         if (s == Species.FRUIT) {
             lo = 4;
             hi = 7;
-        } else if ((surf == 1 || surf == 2 || surf == 3) && metres < SPRUCE_TOP) {
+        } else if (forest(surf) && metres < SPRUCE_TOP) {
             lo = FOREST_MIN;
             hi = FOREST_MAX;
         } else {
             lo = OPEN_MIN;
             hi = OPEN_MAX;
         }
-        return lo + (int) (r * (hi - lo + 1));
+        int h = lo + (int) (r * (hi - lo + 1));
+        return (int) Math.max(4, Math.round(h * (1 - 0.45 * alpine(metres))));
+    }
+
+    /** 0 below 1800 m, rising to 1 at 2200 m: how close to the tree line. */
+    static double alpine(double metres) {
+        return Math.max(0, Math.min(1, (metres - 1800) / 400));
     }
 
     /** Crown radius when the data has none: conifers are slim, oaks wide. */
@@ -184,7 +362,9 @@ public final class TreePlan {
             case SPRUCE -> (int) Math.round(1 + 0.12 * height);
             case LARCH, BIRCH -> (int) Math.round(1 + 0.1 * height);
             case OAK -> (int) Math.round(0.22 * height);
+            case WILLOW -> (int) Math.round(0.25 * height);
             case FRUIT -> height / 2;
+            case PINE -> 2;
             case BUSH -> 1;
         };
         return Math.max(1, Math.min(REACH, r));
@@ -216,7 +396,8 @@ public final class TreePlan {
     /** Species by SURF and altitude; null above the tree line. {@code r} is uniform in [0, 1). */
     static Species species(int surf, double metres, double r) {
         if (metres >= TREE_LINE) return null;
-        if (metres >= SPRUCE_TOP) return Species.LARCH;
+        if (metres >= SPRUCE_TOP) return metres >= PINE_LARCH && r < 0.5 ? Species.PINE : Species.LARCH;
+        if (surf == 14 && metres >= PINE_LOW) return r < 0.5 ? Species.PINE : Species.LARCH;
         if ((surf == 14 || surf == 11) && r < 0.4) return Species.BUSH;
         Species broadleaf = r < 0.7 ? Species.OAK : Species.BIRCH;
         return switch (surf) {
@@ -230,179 +411,11 @@ public final class TreePlan {
     }
 
     public static List<Part> shape(Tree t) {
-        return shape(t.species(), t.height(), t.radius(), t.hash());
+        return TreeGrower.grow(t.species(), t.height(), t.hash(), t.site());
     }
 
-    /**
-     * The tree's blocks: logs first, then leaves with their vanilla distance, found by a breadth-first walk from the
-     * logs through the leaves (as vanilla computes it). Leaves further than {@value #LEAF_REACH} are left out, so as
-     * placed no leaf decays and an update changes no distance. Wide crowns get branch logs to keep that short.
-     */
+    /** The tree grown on open, flat ground with {@code radius} of room all round (the shape without a site). */
     public static List<Part> shape(Species s, int height, int radius, long hash) {
-        Shape b = new Shape(Math.max(1, Math.min(REACH, radius)), Math.max(2, height));
-        switch (s) {
-            case SPRUCE -> b.conifer(Math.max(2, (int) Math.round(0.3 * b.h)), false, hash);
-            case LARCH -> b.conifer(Math.max(2, (int) Math.round(0.35 * b.h)), true, hash);
-            case OAK, FRUIT -> b.broadleaf(0.62, s == Species.FRUIT ? 0.3 : 0.4, true, hash);
-            case BIRCH -> b.broadleaf(0.6, 0.35, false, hash);
-            case BUSH -> b.bush(hash);
-        }
-        return b.parts();
-    }
-
-    /** A tree under construction: a box of (2r + 1)^2 x h cells, each empty, leaf or log. */
-    private static final class Shape {
-        private static final byte EMPTY = 0, LEAF = 1;
-        final int r, h, side;
-        final byte[] cell;
-        final Axis[] axis;
-
-        Shape(int r, int h) {
-            this.r = r;
-            this.h = h;
-            side = 2 * r + 1;
-            cell = new byte[side * side * h];
-            axis = new Axis[cell.length];
-        }
-
-        boolean inside(int dx, int dy, int dz) {
-            return Math.abs(dx) <= r && Math.abs(dz) <= r && dy >= 0 && dy < h;
-        }
-
-        int k(int dx, int dy, int dz) {
-            return (dy * side + dz + r) * side + dx + r;
-        }
-
-        void leaf(int dx, int dy, int dz) {
-            if (inside(dx, dy, dz) && axis[k(dx, dy, dz)] == null) cell[k(dx, dy, dz)] = LEAF;
-        }
-
-        void log(int dx, int dy, int dz, Axis a) {
-            if (!inside(dx, dy, dz)) return;
-            cell[k(dx, dy, dz)] = EMPTY;
-            axis[k(dx, dy, dz)] = a;
-        }
-
-        /** Spruce or larch: tiers of discs narrowing to a single leaf on top, bare below {@code base}. */
-        void conifer(int base, boolean sparse, long hash) {
-            int top = h - 1;
-            base = Math.min(base, top - 1);
-            for (int dy = 0; dy < top; dy++) log(0, dy, 0, Axis.Y);
-            for (int dy = base; dy <= top; dy++) {
-                int t = top - dy;
-                int rr = (int) Math.round(r * (double) t / (top - base));
-                if (t % 3 == 2) rr = Math.max(1, rr - 1); // tiers: each third layer steps in
-                if (t > 0) rr = Math.max(1, rr);
-                for (int dx = -rr; dx <= rr; dx++) {
-                    for (int dz = -rr; dz <= rr; dz++) {
-                        if (dx * dx + dz * dz > rr * rr + rr) continue;
-                        if (sparse && (dx != 0 || dz != 0) && Math.floorMod(ColumnHash.of(hash, dx * 31L + dz, dy), 3L) == 0) continue;
-                        leaf(dx, dy, dz);
-                    }
-                }
-                if (t % 3 == 0 && rr >= 4) branches(dy, rr - 3, 0, hash);
-            }
-        }
-
-        /**
-         * Oak, birch, fruit: an ellipsoid crown centred at {@code centre}·h, from {@code bottom}·h to the top, with a
-         * ragged surface. {@code spreading}: the trunk ends in the crown and branches fan out at three levels.
-         */
-        void broadleaf(double centre, double bottom, boolean spreading, long hash) {
-            int top = h - 1;
-            int cy = Math.min(top - 1, (int) Math.round(centre * top));
-            int lowest = Math.max(1, Math.min(cy, (int) Math.round(bottom * h)));
-            double up = top - cy + 0.5, down = cy - lowest + 0.5, rad = r + 0.5;
-            int trunkTop = spreading ? cy : top - 1;
-            for (int dy = 0; dy <= trunkTop; dy++) log(0, dy, 0, Axis.Y);
-            for (int dy = lowest; dy <= top; dy++) {
-                double v = (dy - cy) / (dy >= cy ? up : down);
-                for (int dx = -r; dx <= r; dx++) {
-                    for (int dz = -r; dz <= r; dz++) {
-                        double f = (dx * dx + dz * dz) / (rad * rad) + v * v;
-                        if (f > 1 || f > 0.7 && (ColumnHash.of(hash, dx * 31L + dz, dy) & 1) == 0) continue;
-                        leaf(dx, dy, dz);
-                    }
-                }
-            }
-            if (r < 4) return;
-            if (spreading) {
-                int third = (int) Math.max(1, Math.round(down / 2));
-                for (int level : new int[] {cy - third, cy, cy + (int) (up / 3)}) branches(level, r - 2, 1, hash ^ level);
-            } else {
-                branches(cy, r - 3, 0, hash);
-            }
-        }
-
-        /** Branch logs from the trunk in the four main and four diagonal directions, climbing one per {@code rise}·3. */
-        void branches(int dy, int length, int rise, long hash) {
-            boolean turn = (hash & 2) == 0; // diagonals on this level, or main directions
-            for (int[] d : new int[][] {{1, 0}, {-1, 0}, {0, 1}, {0, -1}, {1, 1}, {1, -1}, {-1, 1}, {-1, -1}}) {
-                boolean diagonal = d[0] != 0 && d[1] != 0;
-                int n = diagonal ? (int) Math.round(length / Math.sqrt(2)) : length;
-                if (diagonal && !turn && rise == 0) n = Math.max(0, n - 1);
-                for (int i = 1; i <= n; i++) {
-                    int y = dy + (rise == 0 ? 0 : i / 3);
-                    log(d[0] * i, y, d[1] * i, d[0] != 0 ? Axis.X : Axis.Z);
-                }
-            }
-        }
-
-        /** A low cluster of persistent leaves, no log. */
-        void bush(long hash) {
-            for (int dx = -1; dx <= 1; dx++) {
-                for (int dz = -1; dz <= 1; dz++) {
-                    if (Math.abs(dx) + Math.abs(dz) < 2 || !bit(hash, dx, 0, dz)) leaf(dx, 0, dz);
-                }
-            }
-            leaf(0, 1, 0);
-        }
-
-        List<Part> parts() {
-            int[] dist = new int[cell.length];
-            ArrayDeque<Integer> queue = new ArrayDeque<>();
-            boolean anyLog = false;
-            List<Part> out = new ArrayList<>();
-            for (int dy = 0; dy < h; dy++) {
-                for (int dz = -r; dz <= r; dz++) {
-                    for (int dx = -r; dx <= r; dx++) {
-                        int k = k(dx, dy, dz);
-                        if (axis[k] == null) continue;
-                        out.add(new Part(dx, dy, dz, true, 0, axis[k]));
-                        queue.add(k);
-                        anyLog = true;
-                    }
-                }
-            }
-            if (!anyLog) {
-                for (int k = 0; k < cell.length; k++) if (cell[k] == LEAF) dist[k] = -1;
-            }
-            while (!queue.isEmpty()) {
-                int k = queue.poll(), d = dist[k];
-                if (d == LEAF_REACH) continue;
-                int dx = k % side - r, dz = k / side % side - r, dy = k / (side * side);
-                for (int[] n : new int[][] {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}}) {
-                    int x = dx + n[0], y = dy + n[1], z = dz + n[2];
-                    if (!inside(x, y, z)) continue;
-                    int q = k(x, y, z);
-                    if (cell[q] != LEAF || dist[q] != 0) continue;
-                    dist[q] = d + 1;
-                    queue.add(q);
-                }
-            }
-            for (int dy = 0; dy < h; dy++) {
-                for (int dz = -r; dz <= r; dz++) {
-                    for (int dx = -r; dx <= r; dx++) {
-                        int k = k(dx, dy, dz);
-                        if (cell[k] == LEAF && dist[k] != 0) out.add(new Part(dx, dy, dz, false, Math.max(0, dist[k]), null));
-                    }
-                }
-            }
-            return out;
-        }
-    }
-
-    private static boolean bit(long hash, int dx, int dy, int dz) {
-        return (ColumnHash.of(hash, dx * 31L + dz, dy) & 1) == 0;
+        return TreeGrower.grow(s, height, hash, Site.open(Math.max(1, Math.min(REACH, radius))));
     }
 }

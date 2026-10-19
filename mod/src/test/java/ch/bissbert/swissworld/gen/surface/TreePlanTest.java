@@ -36,8 +36,9 @@ class TreePlanTest {
                 }
             }
         }
-        // 100 x 1000 m at one candidate per 16 m^2, 90 % kept, minus the road strip
-        assertTrue(count > 5000 && count < 6000, "trees " + count);
+        // 100 x 1000 m at one candidate per 16 m^2, 90 % kept, thinned to a closed stand (TreePlan.stand), with young
+        // trees in the gaps, minus the road strip
+        assertTrue(count > 2800 && count < 4000, "trees " + count);
         // the chunks also reach into the meadow on both sides, where trees are rare
         assertTrue(meadow < 20, "meadow trees " + meadow);
     }
@@ -65,7 +66,10 @@ class TreePlanTest {
         assertEquals(Species.BIRCH, TreePlan.species(1, 600, 0.9));
         assertEquals(Species.SPRUCE, TreePlan.species(1, 1700, 0.1));
         assertEquals(Species.SPRUCE, TreePlan.species(2, 600, 0.1));
-        assertEquals(Species.LARCH, TreePlan.species(2, 2100, 0.1));
+        assertEquals(Species.PINE, TreePlan.species(2, 2100, 0.1));
+        assertEquals(Species.LARCH, TreePlan.species(2, 2100, 0.9));
+        assertEquals(Species.LARCH, TreePlan.species(2, 2020, 0.1));
+        assertEquals(Species.PINE, TreePlan.species(14, 1800, 0.1));
         assertNull(TreePlan.species(2, 2400, 0.1));
         assertEquals(Species.BUSH, TreePlan.species(14, 600, 0.1));
         assertEquals(0, TreePlan.density(7));
@@ -200,16 +204,19 @@ class TreePlanTest {
     @Test
     void neighbouringChunksAgreeOnLargeCrowns() {
         SwdCell c = forest();
-        // real trees with the widest crowns (8 m in the data, clamped to REACH) on both sides of the chunk border at x = 0 (dx 900), every 3 columns
+        // two solitary real trees with the widest crowns (8 m in the data, clamped to REACH) either side of the chunk
+        // border at x = 0 (dx 900), and a dense stand 13 m away from them along the border
         List<SwdCell.Tree> tops = new ArrayList<>();
+        tops.add(new SwdCell.Tree(900 - TreePlan.REACH, 400, 30, 80, 1));
+        tops.add(new SwdCell.Tree(900 + TreePlan.REACH - 1, 400, 26, 80, 2));
         for (int x = -10; x <= 10; x++) {
-            for (int z = 0; z < 16; z += 3) tops.add(new SwdCell.Tree(900 + x, 400 + z, 25 + (x & 7), 80, x % 2 == 0 ? 1 : 2));
+            for (int z = 13; z < 16; z += 2) tops.add(new SwdCell.Tree(900 + x, 400 + z, 25 + (x & 7), 80, x % 2 == 0 ? 1 : 2));
         }
         TreeData data = table(tops);
         List<Tree> left = TreePlan.trees(Cells.grid(c, -16, 0), data, -16, 0, -1, 15);
         List<Tree> right = TreePlan.trees(Cells.grid(c, 0, 0), data, 0, 0, 15, 15);
         List<Tree> both = left.stream().filter(right::contains).toList();
-        // every tree whose crown reaches both chunks is in both lists, in the same order
+        // every tree whose crown reaches both chunks is in both lists, in the same order, with the same site
         for (Tree t : left) {
             if (t.x() + t.radius() >= 0) assertTrue(right.contains(t), "right chunk misses " + t);
         }
@@ -217,8 +224,10 @@ class TreePlanTest {
             if (t.x() - t.radius() <= -1) assertTrue(left.contains(t), "left chunk misses " + t);
         }
         assertEquals(both, right.stream().filter(left::contains).toList());
-        assertTrue(both.stream().anyMatch(t -> t.x() == TreePlan.REACH - 1 && t.z() == 0) && both.stream().anyMatch(t -> t.x() == -TreePlan.REACH), "the widest crown reaches across");
-        assertTrue(both.stream().allMatch(t -> t.radius() == TreePlan.REACH));
+        assertTrue(both.stream().anyMatch(t -> t.x() == TreePlan.REACH - 1 && t.z() == 0 && t.radius() == TreePlan.REACH), "east crown");
+        assertTrue(both.stream().anyMatch(t -> t.x() == -TreePlan.REACH && t.z() == 0 && t.radius() == TreePlan.REACH), "west crown");
+        // in the stand, a tree's neighbours a metre east and west leave it little room that way (the open side keeps it)
+        assertTrue(both.stream().filter(t -> t.z() >= 13 && Math.abs(t.x()) < 10).allMatch(t -> t.site().room()[0] < 2 && t.site().room()[4] < 2));
         // and they agree on every block of those trees
         for (Tree t : both) assertEquals(TreePlan.shape(t), TreePlan.shape(right.get(right.indexOf(t))));
     }
