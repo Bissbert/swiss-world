@@ -8,6 +8,7 @@ once into a cached .npz (scratch), so all cells on a sheet reuse it.
 - `Roof_solid` holds ~20 cm roof skins linked by GEBAEUDEEINHEIT.
   Where a skin lies outside every body column of its building unit it becomes an eave/overhang span (part 1).
   A skin resting on the body raises the body span to the roof surface; one clearly above it is its own span.
+  Roof skins of a unit without any body (carports, shelters) form their own building row, all overhang spans.
 """
 
 from __future__ import annotations
@@ -58,9 +59,11 @@ OBJEKTART = {
     "Treibhaus": 8,
     "Mauer gross": 9,
     "Bruecke gedeckt": 10,
+    "Offenes Gebaeude": 11,
+    "Flugdach": 12,
 }  # values seen in the test-area sheets; new ones get the next free code
 
-_CACHE_VERSION = 2
+_CACHE_VERSION = 3
 
 
 def sheet_of(item: str) -> str:
@@ -123,7 +126,7 @@ class Sheet:
     part: np.ndarray  # u1
     roof: np.ndarray  # u1 roofFlags
     odd_columns: int = 0
-    orphan_roofs: int = 0
+    orphan_roofs: int = 0  # roof skins without a body, emitted as free-standing roof rows
 
     _ARRAYS = ("uuid", "egid", "objektart", "base_m", "top_m", "volume",
                "building", "e", "n", "bottom", "top", "part", "roof")
@@ -155,32 +158,53 @@ def parse_sheet(path: str, item: str) -> Sheet:
 def sheet_from_solids(item: str, bodies: list[tuple[dict, np.ndarray]],
                       roofs: list[tuple[dict, np.ndarray]]) -> Sheet:
     """bodies/roofs: (properties, triangles) of Building_solid/Roof_solid features."""
-    uuid = np.array([p["UUID"] for p, _ in bodies], dtype=str)
-    egid = np.array([p["EGID"] or 0 for p, _ in bodies], dtype=np.int64)
-    objektart = np.array([OBJEKTART.get(p["OBJEKTART"], 0) for p, _ in bodies], dtype="u2")
     body_tris = [t for _, t in bodies]
-    base_m = np.array([t[:, :, 2].min() if len(t) else np.nan for t in body_tris])
-    top_m = np.array([t[:, :, 2].max() if len(t) else np.nan for t in body_tris])
     volume = np.array([voxel.solid_volume(t) for t in body_tris])
 
     # building unit (GEBAEUDEEINHEIT) -> bodies; each roof skin belongs to the unit's body nearest to it.
     # Sheets of the 2020 schema have no GEBAEUDEEINHEIT; there a roof skin carries its body's UUID.
     unit_ids: dict[str, int] = {}
-    body_unit = np.array([unit_ids.setdefault(p.get("GEBAEUDEEINHEIT", p["UUID"]) or p["UUID"], len(unit_ids))
-                          for p, _ in bodies], dtype=np.int64)
+    body_unit = [unit_ids.setdefault(p.get("GEBAEUDEEINHEIT", p["UUID"]) or p["UUID"], len(unit_ids))
+                 for p, _ in bodies]
     centres = np.array([t.reshape(-1, 3)[:, :2].mean(axis=0) if len(t) else (np.nan, np.nan) for t in body_tris])
     roof_body = np.full(len(roofs), -1, dtype=np.int64)
+    free: dict[str, list[int]] = {}  # unit -> roof skins of a unit without any body
     for r, (p, t) in enumerate(roofs):
-        unit = unit_ids.get(p.get("GEBAEUDEEINHEIT", p["UUID"]) or "")
-        if unit is None or len(t) == 0:
+        if len(t) == 0:
             continue
-        cand = np.flatnonzero(body_unit == unit)
+        unit_key = p.get("GEBAEUDEEINHEIT", p["UUID"]) or p["UUID"]
+        unit = unit_ids.get(unit_key)
+        if unit is None:
+            free.setdefault(unit_key, []).append(r)
+            continue
+        cand = np.flatnonzero(np.asarray(body_unit) == unit)
         c = t.reshape(-1, 3)[:, :2].mean(axis=0)
         b = cand[np.argmin(((centres[cand] - c) ** 2).sum(axis=1))]
         roof_body[r] = b
-        top_m[b] = max(top_m[b], t[:, :, 2].max())
         volume[b] += voxel.solid_volume(t)
-    orphan_roofs = int((roof_body < 0).sum())
+
+    # free-standing roofs (carports, shelters; no Building_solid) become their own rows, one per unit; their
+    # skin is emitted as overhang (roof without walls). Row id = smallest roof UUID of the unit.
+    props = [p for p, _ in bodies]
+    tris = list(body_tris)
+    for unit_key, rr in free.items():
+        b = len(props)
+        roof_body[rr] = b
+        body_unit.append(unit_ids.setdefault(unit_key, len(unit_ids)))
+        first = min(rr, key=lambda r: roofs[r][0]["UUID"])
+        props.append({**roofs[first][0], "EGID": max(roofs[r][0]["EGID"] or 0 for r in rr)})
+        tris.append(np.concatenate([roofs[r][1] for r in rr]))
+        volume = np.append(volume, sum(voxel.solid_volume(roofs[r][1]) for r in rr))
+    body_unit = np.asarray(body_unit, dtype=np.int64)
+    orphan_roofs = sum(len(rr) for rr in free.values())
+
+    uuid = np.array([p["UUID"] for p in props], dtype=str)
+    egid = np.array([p["EGID"] or 0 for p in props], dtype=np.int64)
+    objektart = np.array([OBJEKTART.get(p["OBJEKTART"], 0) for p in props], dtype="u2")
+    base_m = np.array([t[:, :, 2].min() if len(t) else np.nan for t in tris])
+    top_m = np.array([t[:, :, 2].max() if len(t) else np.nan for t in tris])
+    for r in np.flatnonzero(roof_body >= 0):
+        top_m[roof_body[r]] = max(top_m[roof_body[r]], roofs[r][1][:, :, 2].max())
 
     bs = voxel.voxelise(body_tris)
     rs = voxel.voxelise([t for _, t in roofs])
@@ -325,11 +349,10 @@ class BuildingsBuilder:
         else:
             items = find_sheets(e_km, n_km)
         sheets = [load_sheet(cfg, item) for item in items]
-        table = gwr.load(cfg)
+        table, gwr_id = gwr.load_pinned(cfg, (pinned or {}).get("gwr"))
         blds, spans = cell_buildings(e_km, n_km, sheets, table)
         # sources are recorded even for a cell without buildings, so a rebuild never picks newer sheets
-        return LayerResult(buildings=blds, spans=spans,
-                           sources={"buildings": items, "gwr": gwr.source_id(table)})
+        return LayerResult(buildings=blds, spans=spans, sources={"buildings": items, "gwr": gwr_id})
 
 
 # --- preview + CLI ------------------------------------------------------------------------------------------
@@ -376,7 +399,7 @@ def main(argv: list[str]) -> None:
         print(f"{item}: {len(sh.uuid)} buildings, {len(sh.e)} spans, odd columns {sh.odd_columns}, "
               f"orphan roofs {sh.orphan_roofs}, {time.perf_counter() - ts:.1f} s")
     t2 = time.perf_counter()
-    blds, spans = cell_buildings(e_km, n_km, sheets, gwr.load(cfg))
+    blds, spans = cell_buildings(e_km, n_km, sheets, gwr.load_pinned(cfg)[0])
     t3 = time.perf_counter()
     out = cfg.raw.parent / "previews" / f"buildings_{e_km}_{n_km}.png"
     preview(spans, out)
