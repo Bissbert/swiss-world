@@ -2,6 +2,7 @@ package ch.bissbert.swissworld.gen.surface;
 
 import ch.bissbert.swissworld.gen.GenContext;
 import ch.bissbert.swissworld.gen.GenStage;
+import ch.bissbert.swissworld.gen.site.SitePlan;
 import java.util.List;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -31,10 +32,11 @@ public final class VegetationStage implements GenStage {
     @Override
     public void apply(GenContext ctx) {
         ChunkAccess chunk = ctx.chunk;
-        ColumnGrid g = ColumnGrid.of(ctx);
+        SitePlan site = ctx.site();
+        ColumnGrid g = site != null ? site.grid() : ColumnGrid.of(ctx);
         int x0 = chunk.getPos().getMinBlockX(), z0 = chunk.getPos().getMinBlockZ();
         BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
-        List<TreePlan.Tree> trees = TreePlan.trees(g, TreeData.of(ctx), x0, z0, x0 + 15, z0 + 15);
+        List<TreePlan.Tree> trees = site != null ? site.trees(x0, z0) : TreePlan.trees(g, TreeData.of(ctx), x0, z0, x0 + 15, z0 + 15);
         List<List<TreePlan.Part>> shapes = trees.stream().map(TreePlan::shape).toList();
         // columns under a crown (leaves at least 3 blocks up): shade plants there
         boolean[] shade = new boolean[256];

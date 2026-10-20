@@ -25,8 +25,13 @@ public record CellView(SwissCoords coords, GenContext.CellLookup cells) {
         SwdCell at(int x, int z);
     }
 
-    /** The chunk's cells, plus any neighbour a building reaches (see {@link #neighbour}). */
+    /**
+     * The chunk's cells, plus any neighbour a building reaches. In the game the chunk's site plan has loaded every cell
+     * the buildings near its tile reach ({@link ch.bissbert.swissworld.gen.site.SitePlans}), so nothing is read here;
+     * a context without a plan falls back to {@link #neighbour}.
+     */
     public static CellView of(GenContext ctx) {
+        if (ctx.site() != null) return ofColumns(ctx.coords, ctx::cellAt);
         CellCache cache = SwissRuntime.cells();
         return ofColumns(ctx.coords, ctx::cellAt).orElse((e, n) -> neighbour(cache, e, n));
     }

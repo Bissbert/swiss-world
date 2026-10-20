@@ -72,7 +72,7 @@ public final class WaterStage implements GenStage {
     @Override
     public void apply(GenContext ctx) {
         ChunkAccess chunk = ctx.chunk;
-        ColumnGrid g = ColumnGrid.of(ctx);
+        ColumnGrid g = ctx.site() != null ? ctx.site().grid() : ColumnGrid.of(ctx);
         int x0 = chunk.getPos().getMinBlockX(), z0 = chunk.getPos().getMinBlockZ();
         BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
         for (int lx = 0; lx < 16; lx++) {

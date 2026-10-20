@@ -10,6 +10,8 @@ import ch.bissbert.swissworld.gen.building.LootStage;
 import ch.bissbert.swissworld.gen.ground.GroundTextureStage;
 import ch.bissbert.swissworld.gen.ground.SnowStage;
 import ch.bissbert.swissworld.gen.site.GenStats;
+import ch.bissbert.swissworld.gen.site.SitePlan;
+import ch.bissbert.swissworld.gen.site.SitePlans;
 import ch.bissbert.swissworld.gen.site.WriteTrace;
 import ch.bissbert.swissworld.gen.stage.TerrainStage;
 import ch.bissbert.swissworld.gen.surface.OverlayStage;
@@ -17,9 +19,7 @@ import ch.bissbert.swissworld.gen.surface.VegetationStage;
 import ch.bissbert.swissworld.gen.surface.WaterStage;
 import com.mojang.serialization.MapCodec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import net.minecraft.Util;
 import net.minecraft.core.BlockPos;
@@ -42,8 +42,9 @@ import net.minecraft.world.level.levelgen.blending.Blender;
 /**
  * Generates the Switzerland dimension from .swd cells. Owner: mod-core.
  *
- * <p>{@link #fillFromNoise} returns a future that completes only when every cell the chunk touches is loaded or known
- * to be ocean ({@link CellCache}); a missing cell is requested from the sidecar and the chunk simply stays pending.
+ * <p>{@link #fillFromNoise} returns a future that completes only when the {@link SitePlan} of the chunk's tile is
+ * computed, which waits until every cell it reads is loaded or known to be ocean ({@link CellCache}); a missing cell is
+ * requested from the sidecar and the chunk simply stays pending.
  * Nothing blocks a thread meanwhile, and the pipeline then runs on the worldgen background executor, never on the
  * cache's I/O threads. Biomes are filled here too, from the same cells (the BIOMES step is a no-op), so they are
  * never baked from a guess. At shutdown, or when the server thread is stuck loading a pending chunk
@@ -72,11 +73,12 @@ public final class SwissChunkGenerator extends ChunkGenerator {
     public static final int SEA_LEVEL_Y = (int) SwissCoords.toY(193);
 
     /**
-     * Cells are loaded for the chunk plus this many columns around it, so stages can look at neighbour columns.
-     * The widest look-out is {@link ch.bissbert.swissworld.gen.surface.TransportPlan#MARGIN}: it smooths ways and
-     * follows rail tracks that far.
+     * How far around a chunk its stages may read cell data: the chunk lies in a {@link SitePlan} tile whose cells are
+     * loaded with {@link SitePlan#MARGIN} around the tile, so at least this much around every chunk of it. The widest
+     * look-out of a per-chunk grid is {@link ch.bissbert.swissworld.gen.surface.TransportPlan#MARGIN}; the shared
+     * tile grid itself has {@link SitePlan#MARGIN}.
      */
-    public static final int CELL_MARGIN = 36;
+    public static final int CELL_MARGIN = SitePlan.MARGIN;
 
     public SwissChunkGenerator(BiomeSource biomeSource) {
         super(biomeSource);
@@ -97,52 +99,32 @@ public final class SwissChunkGenerator extends ChunkGenerator {
     public CompletableFuture<ChunkAccess> fillFromNoise(Blender blender, RandomState randomState, StructureManager structureManager, ChunkAccess chunk) {
         // lock before reading the origin, so no chunk can be generated with an origin that changes afterwards
         SwissCoords coords = SwissRuntime.lockOrigin();
-        Map<Long, CompletableFuture<CellCache.Result>> needed = requestCells(SwissRuntime.cells(), coords, chunk.getPos());
-        CompletableFuture<Void> all = CompletableFuture.allOf(needed.values().toArray(CompletableFuture[]::new));
-        boolean waits = !all.isDone();
+        long t0 = System.nanoTime();
+        CompletableFuture<SitePlan> plan = SitePlans.forColumn(SwissRuntime.cells(), coords,
+                chunk.getPos().getMinBlockX(), chunk.getPos().getMinBlockZ(), Util.backgroundExecutor());
+        boolean waits = !plan.isDone();
         if (waits) SwissRuntime.PENDING_CHUNKS.incrementAndGet();
-        return all.thenApplyAsync(v -> {
+        return plan.thenApplyAsync(site -> {
             if (waits) SwissRuntime.PENDING_CHUNKS.decrementAndGet();
-            Map<Long, SwdCell> cells = loadedCells(needed);
-            if (cells == null) {
+            GenStats.record(GenStats.PLAN_WAIT, System.nanoTime() - t0);
+            if (site == null) {
                 // an empty placeholder: kept off disk (AbortedChunks), replaced once loaded (PlaceholderRepair)
                 SwissRuntime.markAborted(chunk.getPos());
                 return chunk;
             }
             SwissRuntime.clearAborted(chunk.getPos());
-            fill(chunk, coords, cells, randomState);
+            fill(chunk, coords, site, randomState);
             return chunk;
         }, Util.backgroundExecutor());
     }
 
-    /** Requests every cell the chunk touches, including {@link #CELL_MARGIN}; keyed by {@link CellCache#key}. */
-    public static Map<Long, CompletableFuture<CellCache.Result>> requestCells(CellCache cache, SwissCoords coords, ChunkPos pos) {
-        int x0 = pos.getMinBlockX(), z0 = pos.getMinBlockZ();
-        Map<Long, CompletableFuture<CellCache.Result>> needed = new HashMap<>();
-        for (int x : new int[] {x0 - CELL_MARGIN, x0 + 15 + CELL_MARGIN}) {
-            for (int z : new int[] {z0 - CELL_MARGIN, z0 + 15 + CELL_MARGIN}) {
-                int e = SwissCoords.cellKm(coords.east(x)), n = SwissCoords.cellKm(coords.north(z));
-                needed.computeIfAbsent(CellCache.key(e, n), k -> cache.get(e, n));
-            }
-        }
-        return needed;
-    }
-
-    /** The cells of completed requests (ocean ones are absent), or null if any was aborted. */
-    public static Map<Long, SwdCell> loadedCells(Map<Long, CompletableFuture<CellCache.Result>> done) {
-        Map<Long, SwdCell> cells = new HashMap<>();
-        for (var f : done.entrySet()) {
-            CellCache.Result r = f.getValue().join();
-            if (r.status() == CellCache.Status.ABORTED) return null;
-            if (r.cell() != null) cells.put(f.getKey(), r.cell());
-        }
-        return cells;
-    }
-
-    /** Biomes and the whole {@link #PIPELINE} for one chunk whose cells are loaded. Any thread. */
-    public void fill(ChunkAccess chunk, SwissCoords coords, Map<Long, SwdCell> cells, RandomState randomState) {
+    /**
+     * Biomes and the whole {@link #PIPELINE} for one chunk of the tile {@code site} plans; every cell any stage reads
+     * is loaded with it. Any thread.
+     */
+    public void fill(ChunkAccess chunk, SwissCoords coords, SitePlan site, RandomState randomState) {
         long t0 = System.nanoTime();
-        GenContext ctx = new GenContext(chunk, coords, (e, n) -> cells.get(CellCache.key(e, n)));
+        GenContext ctx = new GenContext(chunk, coords, site::cell, site);
         if (getBiomeSource() instanceof SwissBiomeSource biomes) {
             chunk.fillBiomesFromNoise(biomes.resolver(ctx), randomState.sampler());
         }

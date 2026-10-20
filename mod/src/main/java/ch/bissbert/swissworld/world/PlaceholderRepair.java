@@ -6,6 +6,7 @@ import ch.bissbert.swissworld.cell.CellCache;
 import ch.bissbert.swissworld.cell.SwdCell;
 import ch.bissbert.swissworld.cell.SwissCoords;
 import ch.bissbert.swissworld.gen.SwissChunkGenerator;
+import ch.bissbert.swissworld.gen.site.SitePlans;
 import it.unimi.dsi.fastutil.shorts.ShortList;
 import java.util.ArrayList;
 import java.util.EnumSet;
@@ -142,16 +143,14 @@ public final class PlaceholderRepair {
         CellCache cache = SwissRuntime.cells();
         var randomState = level.getChunkSource().randomState();
         var biomes = level.registryAccess().registryOrThrow(Registries.BIOME);
-        Map<Long, CompletableFuture<CellCache.Result>> needed = SwissChunkGenerator.requestCells(cache, coords, job.pos);
-        CompletableFuture.allOf(needed.values().toArray(CompletableFuture[]::new)).thenRunAsync(() -> {
-            Map<Long, SwdCell> cells = SwissChunkGenerator.loadedCells(needed);
-            if (cells == null) { // given up again (another stall): ask again later
+        SitePlans.forColumn(cache, coords, job.pos.getMinBlockX(), job.pos.getMinBlockZ(), Util.backgroundExecutor()).thenAcceptAsync(site -> {
+            if (site == null) { // given up again (another stall): ask again later
                 job.retryAt = Util.getMillis() + RETRY_MS;
                 job.running = false;
                 return;
             }
             ProtoChunk proto = new ProtoChunk(job.pos, UpgradeData.EMPTY, level, biomes, null);
-            generator.fill(proto, coords, cells, randomState);
+            generator.fill(proto, coords, site, randomState);
             job.result = proto;
             GENERATED.add(job);
         }, Util.backgroundExecutor()).exceptionally(err -> {

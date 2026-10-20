@@ -1,6 +1,8 @@
 package ch.bissbert.swissworld.gen.site;
 
+import ch.bissbert.swissworld.cell.SwdCell;
 import ch.bissbert.swissworld.cell.SwissCoords;
+import ch.bissbert.swissworld.gen.GenContext;
 import ch.bissbert.swissworld.gen.surface.ColumnGrid;
 import ch.bissbert.swissworld.gen.surface.OverlayPlan;
 import ch.bissbert.swissworld.gen.surface.TransportPlan;
@@ -54,6 +56,20 @@ public final class SitePlan {
     }
 
     public SitePlan(SwissCoords coords, ColumnGrid.Cells cells, TreeData treeData, int tx, int tz) {
+        this(coords, byKm(coords, cells), cells, treeData, tx, tz);
+    }
+
+    /**
+     * Plans tile (tx, tz) from the cells {@code cells} answers by km index: every cell under the tile plus
+     * {@link #MARGIN}, and those the buildings near it reach ({@link SitePlans}).
+     */
+    public SitePlan(SwissCoords coords, GenContext.CellLookup cells, int tx, int tz) {
+        this(coords, cells, byColumn(coords, cells), null, tx, tz);
+    }
+
+    private SitePlan(SwissCoords coords, GenContext.CellLookup km, ColumnGrid.Cells cells, TreeData treeData, int tx, int tz) {
+        if (treeData == null) treeData = TreeData.of(coords, cells);
+        this.lookup = km;
         this.coords = coords;
         this.tx = tx;
         this.tz = tz;
@@ -70,6 +86,20 @@ public final class SitePlan {
     }
 
     private final long nanos;
+    private final GenContext.CellLookup lookup;
+
+    private static GenContext.CellLookup byKm(SwissCoords c, ColumnGrid.Cells cells) {
+        return (e, n) -> cells.at((int) ((long) e * 1000 - c.e0()), (int) (c.n0() - (long) n * 1000 - 1000));
+    }
+
+    private static ColumnGrid.Cells byColumn(SwissCoords c, GenContext.CellLookup cells) {
+        return (x, z) -> cells.get(SwissCoords.cellKm(c.east(x)), SwissCoords.cellKm(c.north(z)));
+    }
+
+    /** The cell (eKm, nKm) as this plan was made with: null for ocean, or for a cell the plan did not load. */
+    public SwdCell cell(int eKm, int nKm) {
+        return lookup.get(eKm, nKm);
+    }
 
     /** Time this plan took to compute. */
     public long nanos() {

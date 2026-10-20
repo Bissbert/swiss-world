@@ -2,6 +2,7 @@ package ch.bissbert.swissworld.gen.surface;
 
 import ch.bissbert.swissworld.gen.GenContext;
 import ch.bissbert.swissworld.gen.GenStage;
+import ch.bissbert.swissworld.gen.site.SitePlan;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.tags.BlockTags;
@@ -44,8 +45,9 @@ public final class OverlayStage implements GenStage {
     @Override
     public void apply(GenContext ctx) {
         ChunkAccess chunk = ctx.chunk;
-        ColumnGrid g = ColumnGrid.of(ctx, TransportPlan.MARGIN);
-        TransportPlan t = new TransportPlan(g);
+        SitePlan site = ctx.site();
+        ColumnGrid g = site != null ? site.grid() : ColumnGrid.of(ctx, TransportPlan.MARGIN);
+        TransportPlan t = site != null ? site.transport() : new TransportPlan(g);
         int x0 = chunk.getPos().getMinBlockX(), z0 = chunk.getPos().getMinBlockZ();
         BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
         for (int lx = 0; lx < 16; lx++) {
