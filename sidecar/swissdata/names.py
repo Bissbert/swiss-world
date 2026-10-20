@@ -24,6 +24,8 @@ Selection:
 
 Search is accent-, case- and punctuation-insensitive ("zurich" -> Zürich, "st gallen" -> St. Gallen).
 Ranking: exact match, then prefix, then a word inside the name; within that tier, size, shorter name.
+Hamlets and districts count as a prefix match at most and rank after peaks/passes of the same class ("Gotthard" is the pass,
+not the hamlet near St. Gallen); passes also answer to their bare stem ("Gotthard" -> Gotthardpass).
 Near-duplicates (same display name and tier within 1.5 km, e.g. Grimselpass as pass and road pass) are dropped.
 """
 
@@ -285,6 +287,7 @@ def read_index(path: Path) -> tuple[str, list[Place]]:
 # --- search ---------------------------------------------------------------------------------------------------
 
 EXACT, PREFIX, WORD = 0, 1, 2
+MINOR_SETTLEMENTS = ("hamlet", "district")  # ranked below peaks, passes and lakes unless the others match no better
 
 
 class PlaceIndex:
@@ -301,6 +304,10 @@ class PlaceIndex:
                     continue
                 seen.add(k)
                 keys.append((k, 0, i, spelling))
+                if p.kind == "pass" and k.endswith("pass") and len(k) >= 8 and k[:-4].strip() not in seen:
+                    stem = k[:-4].strip()  # "Gotthardpass" is also just "Gotthard", "Furkapass" "Furka"
+                    seen.add(stem)
+                    keys.append((stem, 0, i, spelling))
                 words = k.split(" ")
                 for w in range(1, len(words)):  # "st moritz" also under "moritz"
                     sub = " ".join(words[w:])
@@ -332,8 +339,16 @@ class PlaceIndex:
                 cls = WORD if word else PREFIX
             if i not in best or (cls, spelling != self.places[i].name) < (best[i][0], best[i][1] != self.places[i].name):
                 best[i] = (cls, spelling)
-        ranked = sorted(best.items(), key=lambda it: (it[1][0], self.places[it[0]].tier, -self.places[it[0]].size,
-                                                      len(self.places[it[0]].name), self.places[it[0]].name, it[0]))
+        def rank(it):
+            i, (cls, _) = it
+            p = self.places[i]
+            tier = p.tier
+            if p.kind in MINOR_SETTLEMENTS:  # a hamlet named like a famous pass/peak/lake must not outrank it
+                cls, tier = max(cls, PREFIX), 1
+            elif p.kind == "pass" and cls == EXACT and nq not in {normalize(n) for n in (p.name, *p.aliases)}:
+                tier = -1  # only the bare stem matched ("Susten"): the famous pass beats a village of that name
+            return cls, tier, -p.size, len(p.name), p.name, i
+        ranked = sorted(best.items(), key=rank)
         out: list[dict] = []
         kept: list[Place] = []
         for i, (cls, spelling) in ranked:
