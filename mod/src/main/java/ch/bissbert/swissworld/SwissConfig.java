@@ -54,6 +54,11 @@ public final class SwissConfig {
             .comment("Most 'prefetch' requests for the cells ahead of a player that may be unanswered at once, per player")
             .defineInRange("prefetchMaxInFlight", 2, 1, 16);
 
+    public static final ModConfigSpec.BooleanValue PREFETCH_AHEAD = B
+            .comment("Also request, at 'prefetch' priority, the ring of cells one kilometre ahead of a moving player,",
+                    "and decode them as soon as they are in the store")
+            .define("prefetchAhead", true);
+
     public static final ModConfigSpec SPEC = B.build();
 
     private SwissConfig() {}

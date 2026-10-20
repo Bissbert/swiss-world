@@ -95,3 +95,15 @@ uv run python -m swissdata.fixture ../fixtures     # only when the format change
   - the production server;
   - writing to `~/minecraft-modpack` (reading is fine);
   - anything on the live server.
+
+## IO pool, prefetch and cell cache sizing
+
+- **IO pool.** `ioThreads` (default 0 = `clamp(cores/2, 2, 6)`) threads named `swissworld-io-N` read and decode cell files and run the sidecar HTTP client. Decoding never happens on the server thread.
+- **Stats.** `/swiss admin status` prints the cell hit rate (`get` calls answered from memory), decodes with mean ms per decode, LRU evictions and StallGuard aborts, followed by the existing cached/pending/waiting line.
+- **Prefetch ahead.** Once a second the player's velocity is taken over the last 5 samples. Above 2 m/s the cells of the one-kilometre ring around the footprint (view distance × 16 + 36 m) that lie within 60° of the heading are requested with priority `prefetch` (`PlayerPrefetch.aheadCells`, at most 8). At most `prefetchMaxInFlight` (default 2) such requests per player are unanswered at once, and a cell is not asked for again within 30 s. Cells already in the store are decoded straight away (`CellCache.warm`), but only while the cache is under 75% full. `prefetchAhead = false` turns it off.
+- **`cellCacheSize` (default 64, ~10 MB per decoded cell, so ~640 MB of heap).**
+  - Working set of one player at view distance 12: the footprint is 456 m wide, so 1 to 4 cells, plus up to 8 ahead cells while moving: at most about 12.
+  - Three players far apart: about 36 cells, three at the same spot: about 12.
+  - 64 leaves room for flying back over cells, and warming stops at 48 so it never evicts cells in use. Keep the default; give the JVM at least 1.5 GB if you keep it. Do not go below 40 with 3 players.
+  - Watch `evicted` in the status: it should stay flat while players stand still.
+- **Measured** (private store, view distance 12, one headless bot, `/tp` by 100 m every second for 120 s along the Brünig line direction, 12 km): `get` misses 270 (98.9% hit rate), 1 of 120 status samples with chunks waiting, before (2 IO threads, no prefetch ahead) against 57 misses (99.7%), 0 of 120 samples, after (5 threads, prefetch ahead). 0 StallGuard aborts in both. One run each, cells were all in the store.

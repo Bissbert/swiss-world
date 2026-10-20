@@ -144,7 +144,7 @@ public final class PlayerPrefetch {
                 SwissRuntime.sidecar().prefetch(e, n, radius, heading, sent).exceptionally(err -> 0);
                 st.lastPrefetch = now;
             }
-            if (v != null) {
+            if (v != null && SwissConfig.PREFETCH_AHEAD.get()) {
                 st.ahead = aheadCells(e, n, v[0], v[1], viewM + GEN_MARGIN_M);
             } else {
                 st.ahead = List.of();
