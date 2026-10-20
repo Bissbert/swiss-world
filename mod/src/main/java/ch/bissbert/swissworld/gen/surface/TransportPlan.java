@@ -801,14 +801,14 @@ public final class TransportPlan {
     private static final int ARM_OPEN = 0, ARM_END = 1, ARM_SWITCH = 2;
 
     /**
-     * The two arms on the main line (most of their walked rails tagged {@link ColumnGrid#MAIN}) when exactly two are
+     * The two arms on the main line (at least half their walked rails on it, {@link #mainNear}) when exactly two are
      * and neither is a stub, as a {@link #links} bit mask; else 0 (no tag, as in older cells, or a yard where more
      * arms are tagged), and the shape rules decide.
      */
     private static int mainPair(int[][] arm) {
         int m = 0;
         for (int d = 0; d < 4; d++) {
-            if (arm[d] != null && arm[d][4] * 2 > arm[d][1]) {
+            if (arm[d] != null && arm[d][4] * 2 >= arm[d][1]) {
                 if (arm[d][0] == ARM_END) return 0;
                 m |= 1 << d;
             }
@@ -817,14 +817,30 @@ public final class TransportPlan {
     }
 
     /**
+     * A rail on a main line: on a tagged column, or on an untagged one (no track of its own) beside a main-line centre:
+     * where tracks run a column or two apart the rails of a main line are often set off its centres (see {@link #rail}).
+     */
+    private boolean mainNear(int x, int z) {
+        if (!g.present(x, z)) return false;
+        if (g.flag(x, z, ColumnGrid.RAIL)) return g.flag(x, z, ColumnGrid.MAIN);
+        for (int j = -1; j <= 1; j++) {
+            for (int i = -1; i <= 1; i++) {
+                int cx = x + i, cz = z + j;
+                if (g.present(cx, cz) && g.flag(cx, cz, ColumnGrid.MAIN) && OverlayPlan.railCentre(g, cx, cz)) return true;
+            }
+        }
+        return false;
+    }
+
+    /**
      * Walks a switch's arm in direction d for up to {@link #SWITCH_WALK} rails: {kind, steps, x, z, main} where kind is
      * {@link #ARM_END} (the track ends), {@link #ARM_SWITCH} (another switch, at x, z) or {@link #ARM_OPEN}, and main
-     * counts the walked rails on a main line ({@link ColumnGrid#MAIN}).
+     * counts the walked rails on or beside a main line ({@link #mainNear}).
      */
     private int[] arm(int x, int z, int d) {
         int px = x, pz = z, cx = x + DIRS[d][0], cz = z + DIRS[d][1], main = 0;
         for (int step = 1; step <= SWITCH_WALK; step++) {
-            if (g.present(cx, cz) && g.flag(cx, cz, ColumnGrid.MAIN)) main++;
+            if (mainNear(cx, cz)) main++;
             int cm = links(cx, cz);
             int n = Integer.bitCount(cm);
             if (n <= 1) return new int[] {ARM_END, step, cx, cz, main};

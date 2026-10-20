@@ -642,6 +642,55 @@ class TransportPlanTest {
         for (int x = -8; x <= 24; x++) assertTrue(t.rail(x, 0), "main line at " + x);
     }
 
+    /**
+     * The Brünig line at 2339,-1989 (flags as in cell 2635_1172): the main line runs two columns beside a siding and
+     * a crossover between them. Its rails there are set off its centres onto untagged columns, and the switch counted
+     * that arm as not on the main line and took the crossover; the line ended at 2340,-1988.
+     */
+    @Test
+    void switchCountsMainLineRailsSetOffItsCentres() {
+        String[] rows = {
+            "                        ..RR.  ",
+            "                       .RRR.  .",
+            "                      .RRR.  .M",
+            "                    ..RRR. ..MM",
+            "                   .RRR.. .MMM.",
+            "                  .RRR.. .MM.. ",
+            "                ..RRR....MM.  .",
+            "               .RRRR. .MMM.  .R",
+            "              .RRRR. .MM..  .RR",
+            "            ..RRRR...MM.  ..RR.",
+            "           .RRRRR..MMM.  .RRR. ",
+            "          .RR.RR..MM..  .RR..  ",
+            "        ..RR.RR..MM.  ..RR.    ",
+            "       .RRR.RR.MMM.  .RRR.     ",
+            "      .RR..RR.MM..  .RR..      ",
+            "    ..RR..RR.MM.  ..RR.        ",
+            "   .RRR..RRMMM.  .RRR.         ",
+            "  .RR...RRMM..  .RR..          ",
+            "..RR. .RRMM.  ..RR.            ",
+            "RRR. .RRMM.  .RRR.             ",
+            "R....RMMM.  .RR..              ",
+            ". .RRMM.. ..RR.                ",
+            " .RRMM.  .RRR.                 ",
+            ".RMMM.  .RR..                  ",
+            "RMM..  .RR.                    ",
+            "MM.  .RRR.                     ",
+            "M.  .RR..                      ",
+        };
+        SwdCell c = Cells.flat(600);
+        for (int j = 0; j < rows.length; j++) {
+            for (int i = 0; i < rows[j].length(); i++) {
+                char ch = rows[j].charAt(i);
+                int flags = ch == 'M' ? RAIL | ColumnGrid.MAIN : ch == 'R' ? RAIL : 0;
+                if (ch != ' ') Cells.overlay(c, i - 14, j - 13, OverlayPlan.RAIL_BED, flags, Double.NaN);
+            }
+        }
+        TransportPlan t = new TransportPlan(Cells.grid(c, 0, 0, TransportPlan.MARGIN));
+        assertTrue(t.rail(0, 0) && t.rail(0, 1) && t.rail(1, 0), "switch with its arms south and east");
+        assertEquals(Rail.SOUTH_EAST, t.railShape(0, 0));
+    }
+
     @Test
     void shortTrackPiecesWhereTracksMergeAreDropped() {
         SwdCell c = Cells.flat(600);
