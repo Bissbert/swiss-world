@@ -7,6 +7,8 @@ import ch.bissbert.swissworld.cell.SwissCoords;
 import ch.bissbert.swissworld.gen.building.BuildingStage;
 import ch.bissbert.swissworld.gen.building.FurnishStage;
 import ch.bissbert.swissworld.gen.building.LootStage;
+import ch.bissbert.swissworld.gen.ground.GroundTextureStage;
+import ch.bissbert.swissworld.gen.ground.SnowStage;
 import ch.bissbert.swissworld.gen.stage.TerrainStage;
 import ch.bissbert.swissworld.gen.surface.OverlayStage;
 import ch.bissbert.swissworld.gen.surface.VegetationStage;
@@ -60,7 +62,9 @@ public final class SwissChunkGenerator extends ChunkGenerator {
             new BuildingStage(),
             new FurnishStage(),
             new LootStage(),
-            new VegetationStage());
+            new GroundTextureStage(),
+            new VegetationStage(),
+            new SnowStage());
 
     /** Real sea level 193 m (lowest point of Switzerland) -> y = -1807. Ocean outside the border. */
     public static final int SEA_LEVEL_Y = (int) SwissCoords.toY(193);

@@ -1,6 +1,6 @@
 {
   "has_precipitation": true,
-  "temperature": 0.45,
+  "temperature": 2.0,
   "downfall": 0.8,
   "effects": {
     "fog_color": 12638463,
@@ -12,7 +12,9 @@
       "offset": 2.0,
       "sound": "minecraft:ambient.cave",
       "tick_delay": 6000
-    }
+    },
+    "grass_color": 8698482,
+    "foliage_color": 6727758
   },
   "spawners": {
     "monster": [
@@ -96,8 +98,6 @@
     [],
     [],
     [],
-    [
-      "swissworld:snow_top_layer"
-    ]
+    []
   ]
 }
