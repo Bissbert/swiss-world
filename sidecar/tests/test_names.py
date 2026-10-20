@@ -95,7 +95,8 @@ def test_search_ranking(index):
 
 
 def test_search_exact_mode_limits_and_garbage(index):
-    assert [x["name"] for x in index.search("Grimsel", exact=True)] == []
+    assert [x["name"] for x in index.search("Grimsel", exact=True)] == ["Grimselpass"]  # bare pass stem
+    assert [x["name"] for x in index.search("Grimselse", exact=True)] == []
     assert [x["name"] for x in index.search("grimselpass", exact=True)] == ["Grimselpass"]
     assert len(index.search("z", limit=1)) == 1
     assert len(index.search("z", limit=10_000)) <= names.MAX_LIMIT
@@ -156,7 +157,7 @@ def test_place_endpoint(tmp_path, places):
         r = c.get("/place", params={"q": "zurich", "limit": 2}).json()["results"]
         assert r[0] == {"name": "Zürich", "kind": "city", "e": 2683500, "n": 1247184, "h": 418}
         assert c.get("/place", params={"q": "Genf"}).json()["results"][0]["matched"] == "Genf"
-        assert c.get("/place", params={"q": "Grimsel", "mode": "exact"}).json() == {"results": []}
+        assert c.get("/place", params={"q": "Grimsel", "mode": "exact"}).json()["results"][0]["name"] == "Grimselpass"
         assert c.get("/place", params={"q": "x", "mode": "fuzzy"}).status_code == 400
         assert c.get("/place", params={"q": "x", "limit": 0}).status_code == 422
         assert c.get("/status").json()["versions"]["names"] == "swissnames3d_2026"
@@ -190,3 +191,38 @@ def test_gazetteer_loads_existing_index(tmp_path, places):
         import time
         time.sleep(0.05)
     assert g.state() == "ready" and g.item == "swissnames3d_2026"
+
+
+def test_landmarks_beat_tiny_namesakes():
+    P = names.Place
+    places = [
+        P("Gotthard", (), "hamlet", 0, 10, 2748370, 1254356, None),
+        P("Passo del San Gottardo", ("Gotthardpass", "Col du Saint-Gothard"), "pass", 1, 30, 2686000, 1158000, 2106),
+        P("Gotthardstrasse", (), "quarter", 3, 0, 2683000, 1247000, None),
+        P("Grimselpass", (), "pass", 1, 30, 2668880, 1157032, 2163),
+        P("Grimsel", (), "hamlet", 0, 10, 2600000, 1200000, None),
+        P("Susten", (), "town", 0, 5000, 2615580, 1128894, None),
+        P("Sustenpass", (), "pass", 1, 30, 2680000, 1175000, 2224),
+        P("Furkapass", (), "pass", 1, 30, 2675000, 1166000, 2436),
+        P("Brünigpass", (), "pass", 1, 30, 2650000, 1180000, 1008),
+        P("Jungfrau", (), "peak", 1, 30, 2641000, 1155000, 4158),
+        P("Jungfrau", (), "hamlet", 0, 10, 2600000, 1250000, None),
+        P("Thun", (), "town", 0, 25000, 2614000, 1178000, 560),
+        P("Thun", (), "station", 4, 30, 2614100, 1178100, 560),
+        P("Brienzersee", (), "lake", 2, 30, 2640000, 1175000, 564),
+        P("Aare", (), "hamlet", 0, 10, 2600000, 1210000, None),
+        P("Bern", (), "city", 0, 130000, 2600000, 1200000, 540),
+        P("Bern", (), "hamlet", 0, 10, 2700000, 1250000, None),
+    ]
+    idx = names.PlaceIndex(places)
+    for q, want in [("Gotthard", "Passo del San Gottardo"), ("Gotthardpass", "Passo del San Gottardo"),
+                    ("Grimsel", "Grimselpass"), ("Susten", "Sustenpass"), ("Furka", "Furkapass"),
+                    ("Brünig", "Brünigpass"), ("Jungfrau", "Jungfrau"), ("Thun", "Thun"),
+                    ("Brienzersee", "Brienzersee"), ("Bern", "Bern")]:
+        r = idx.search(q)
+        if want:
+            assert r[0]["name"] == want, (q, r)
+    assert idx.search("Jungfrau")[0]["kind"] == "peak" and idx.search("Thun")[0]["kind"] == "town"
+    assert idx.search("Bern")[0]["kind"] == "city"
+    assert [x["kind"] for x in idx.search("Gotthard")][:2] == ["pass", "hamlet"]  # the hamlet is still found
+    assert idx.search("Aare")[0]["kind"] == "hamlet"  # no landmark competes
