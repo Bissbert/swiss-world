@@ -37,16 +37,18 @@ public final class ColumnGrid {
 
     private final SwissCoords coords;
     private final Cells cells;
-    private final int minX, minZ, size, margin;
+    /** First sampled column, side of the sampled square, margin around the area, side of the area (16 for a chunk). */
+    private final int minX, minZ, size, margin, width;
     /** A home view: only this cell's data, see {@link #home}. Null for the chunk grid. */
     private final SwdCell homeCell;
     /** Columns sampled so far in a lazy view; null when all are sampled up front. */
     private final boolean[] sampled;
-    private Map<Long, ColumnGrid> homes;
+    private final Map<Long, ColumnGrid> homes = new HashMap<>();
     private final boolean[] present, spans;
     private final int[] ground, source, kind, surf, ocls, oflg, oelv;
     private final double[] metres, waterMetres, overlayMetres;
-    private int[] top;
+    /** {@link #top} by column, NONE until computed; the value is a pure function, so a racing duplicate write is harmless. */
+    private final int[] top;
 
     /** The cell containing block column (x, z), or null; {@link GenContext#cellAt} in the game. */
     @FunctionalInterface
@@ -59,22 +61,31 @@ public final class ColumnGrid {
     }
 
     public ColumnGrid(SwissCoords coords, Cells cells, int chunkMinX, int chunkMinZ, int margin) {
-        this(coords, cells, chunkMinX - margin, chunkMinZ - margin, margin, null);
+        this(coords, cells, chunkMinX, chunkMinZ, 16, margin);
         if (margin > SwissChunkGenerator.CELL_MARGIN) throw new IllegalArgumentException("margin " + margin);
+    }
+
+    /**
+     * The square area of {@code width} columns from (minX, minZ) plus {@code margin} around it, sampled up front. The
+     * caller makes sure {@code cells} has every cell under it (a site plan tile loads them itself).
+     */
+    public ColumnGrid(SwissCoords coords, Cells cells, int minX, int minZ, int width, int margin) {
+        this(coords, cells, minX - margin, minZ - margin, width, margin, null);
         for (int i = 0; i < size; i++) {
             for (int j = 0; j < size; j++) {
-                sample(cells, minX + i, minZ + j, j * size + i);
+                sample(cells, this.minX + i, this.minZ + j, j * size + i);
             }
         }
     }
 
-    private ColumnGrid(SwissCoords coords, Cells cells, int minX, int minZ, int margin, SwdCell homeCell) {
+    private ColumnGrid(SwissCoords coords, Cells cells, int minX, int minZ, int width, int margin, SwdCell homeCell) {
         this.coords = coords;
         this.cells = cells;
         this.minX = minX;
         this.minZ = minZ;
         this.margin = margin;
-        this.size = 16 + 2 * margin;
+        this.width = width;
+        this.size = width + 2 * margin;
         this.homeCell = homeCell;
         int n = size * size;
         sampled = homeCell == null ? null : new boolean[n];
@@ -90,6 +101,8 @@ public final class ColumnGrid {
         metres = new double[n];
         waterMetres = new double[n];
         overlayMetres = new double[n];
+        top = new int[n];
+        Arrays.fill(top, NONE);
     }
 
     /**
@@ -102,10 +115,11 @@ public final class ColumnGrid {
         if (homeCell != null) return this;
         SwdCell cell = cells.at(x, z);
         if (cell == null) return null;
-        if (homes == null) homes = new HashMap<>();
         int d = HOME_MARGIN - margin;
-        return homes.computeIfAbsent(((long) cell.eKm() << 32) ^ (cell.nKm() & 0xFFFFFFFFL),
-                k -> new ColumnGrid(coords, (bx, bz) -> cell, minX - d, minZ - d, HOME_MARGIN, cell));
+        synchronized (homes) {
+            return homes.computeIfAbsent(((long) cell.eKm() << 32) ^ (cell.nKm() & 0xFFFFFFFFL),
+                    k -> new ColumnGrid(coords, (bx, bz) -> cell, minX - d, minZ - d, width, HOME_MARGIN, cell));
+        }
     }
 
     /** The cell km of column x as this grid's data sees it: its home cell in a {@link #home} view. */
@@ -127,6 +141,20 @@ public final class ColumnGrid {
 
     public int margin() {
         return margin;
+    }
+
+    /** Side of the area the grid was made for (16 for a chunk, a tile's side for a site plan). */
+    public int width() {
+        return width;
+    }
+
+    /** First column of the area (without the margin). */
+    public int areaMinX() {
+        return minX + margin;
+    }
+
+    public int areaMinZ() {
+        return minZ + margin;
     }
 
     private void sample(Cells cells, int x, int z, int k) {
@@ -182,9 +210,13 @@ public final class ColumnGrid {
             throw new IndexOutOfBoundsException("column " + x + "," + z + " outside the sampled margin");
         }
         int k = j * size + i;
-        if (sampled != null && !sampled[k]) {
-            sampled[k] = true;
-            sample(cells, x, z, k);
+        if (sampled != null) {
+            synchronized (sampled) {
+                if (!sampled[k]) {
+                    sample(cells, x, z, k);
+                    sampled[k] = true;
+                }
+            }
         }
         return k;
     }
@@ -287,10 +319,6 @@ public final class ColumnGrid {
      * Valid {@link WaterPlan#BANK_REACH} columns less far out than the other accessors, because banks look at water nearby.
      */
     public int top(int x, int z) {
-        if (top == null) {
-            top = new int[size * size];
-            Arrays.fill(top, NONE);
-        }
         int k = k(x, z);
         if (top[k] == NONE) top[k] = Math.max(ground[k], WaterPlan.bankTop(this, x, z));
         return top[k];

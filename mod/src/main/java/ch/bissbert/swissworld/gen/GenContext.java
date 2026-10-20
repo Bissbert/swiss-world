@@ -2,6 +2,7 @@ package ch.bissbert.swissworld.gen;
 
 import ch.bissbert.swissworld.cell.SwdCell;
 import ch.bissbert.swissworld.cell.SwissCoords;
+import ch.bissbert.swissworld.gen.site.SitePlan;
 import net.minecraft.world.level.chunk.ChunkAccess;
 
 /**
@@ -14,11 +15,25 @@ public final class GenContext {
     private final CellLookup cells;
     /** Per-chunk results shared by stages (and the biome resolver), see {@link #memo}. */
     private final java.util.Map<Class<?>, Object> memo = new java.util.HashMap<>(4);
+    private final SitePlan site;
 
     public GenContext(ChunkAccess chunk, SwissCoords coords, CellLookup cells) {
+        this(chunk, coords, cells, null);
+    }
+
+    public GenContext(ChunkAccess chunk, SwissCoords coords, CellLookup cells, SitePlan site) {
         this.chunk = chunk;
         this.coords = coords;
         this.cells = cells;
+        this.site = site;
+    }
+
+    /**
+     * The resolved site of the tile this chunk lies in: claims, final ground G, distances, the shared grid and transport
+     * plan. Computed once per tile before the chunk's stages run; null only in tests that build a context by hand.
+     */
+    public SitePlan site() {
+        return site;
     }
 
     /**

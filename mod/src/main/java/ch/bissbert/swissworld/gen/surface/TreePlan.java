@@ -385,7 +385,7 @@ public final class TreePlan {
     }
 
     /** Rock above a tunnel's roof (with this much to spare) is open ground for plants. */
-    static final int TUNNEL_COVER = 10;
+    public static final int TUNNEL_COVER = 10;
 
     /** The column has an overlay at the surface; a tunnel deep enough below the ground does not count. */
     public static boolean surfaceOverlay(ColumnGrid g, int x, int z) {
