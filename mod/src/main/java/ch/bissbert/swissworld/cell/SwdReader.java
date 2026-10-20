@@ -36,6 +36,7 @@ public final class SwdReader {
 
         short[] terr = null, wlvl = null, oelv = null;
         byte[] surf = null, wknd = null, ocls = null, oflg = null, insd = null, cnpy = null;
+        byte[] regn = null, lith = null, topo = null, habt = null;
         List<SwdCell.Tree> trees = null;
         List<SwdCell.Building> buildings = List.of();
         Map<Integer, SwdCell.Span[]> spans = Map.of();
@@ -63,6 +64,10 @@ public final class SwdReader {
                 case "OFLG" -> oflg = u8(blob, tag);
                 case "INSD" -> insd = u8(blob, tag);
                 case "CNPY" -> cnpy = u8(blob, tag);
+                case "REGN" -> regn = u8(blob, tag);
+                case "LITH" -> lith = u8(blob, tag);
+                case "TOPO" -> topo = u8(blob, tag);
+                case "HABT" -> habt = u8(blob, tag);
                 case "TTOP" -> trees = ttop(blob);
                 case "BTBL" -> buildings = btbl(blob);
                 case "BSPN" -> spans = bspn(blob);
@@ -70,7 +75,8 @@ public final class SwdReader {
             }
         }
         if (terr == null || surf == null) throw new IOException("TERR and SURF are required");
-        return new SwdCell(eKm, nKm, terr, surf, wlvl, wknd, ocls, oelv, oflg, insd, buildings, spans, cnpy, trees);
+        return new SwdCell(eKm, nKm, terr, surf, wlvl, wknd, ocls, oelv, oflg, insd, buildings, spans, cnpy, trees,
+                regn, lith, topo, habt);
     }
 
     private static byte[] inflate(byte[] data, int off, int len, int raw) throws IOException {

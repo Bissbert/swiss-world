@@ -99,6 +99,51 @@ class SwdReaderTest {
     }
 
     @Test
+    void readsZoneLayers() throws Exception {
+        int n = SwdCell.SIZE * SwdCell.SIZE;
+        byte[] regn = new byte[n], lith = new byte[n], topo = new byte[n], habt = new byte[n];
+        regn[SwdCell.key(3, 4)] = (byte) (SwdCell.REGION_ALPS_NORTH | 2 << 3 | SwdCell.REGN_FILLED);
+        lith[SwdCell.key(3, 4)] = (byte) (SwdCell.LITH_CRYSTALLINE | SwdCell.LITH_GLACIER | 3 << 5);
+        topo[SwdCell.key(3, 4)] = (byte) (SwdCell.TPI_RIDGE | SwdCell.TPI_VALLEY << 2 | SwdCell.FLOW_HOLLOW << 4
+                | SwdCell.WIND_EXPOSED << 6);
+        topo[SwdCell.key(999, 0)] = (byte) (SwdCell.WIND_LEE << 6 | SwdCell.FLOW_CHANNEL << 4);
+        habt[SwdCell.key(3, 4)] = (byte) (SwdCell.HAB_FEN | SwdCell.AUE_DELTA << 3);
+        SwdCell cell = SwdReader.decode(swd(2632, 1170,
+                "TERR", new byte[SwdCell.TERR_N * SwdCell.TERR_N * 2], "SURF", new byte[n],
+                "REGN", regn, "LITH", lith, "TOPO", topo, "HABT", habt));
+        assertTrue(cell.hasZones() && cell.hasTopo() && cell.hasHabitats());
+        assertEquals(SwdCell.REGION_ALPS_NORTH, cell.region(3, 4));
+        assertEquals(0x53, cell.regn(3, 4));
+        assertEquals(SwdCell.LITH_CRYSTALLINE, cell.lithClass(3, 4));
+        assertEquals(3, cell.lithDetail(3, 4));
+        assertEquals(SwdCell.LITH_GLACIER, cell.lith(3, 4) & SwdCell.LITH_GLACIER);
+        assertEquals(SwdCell.TPI_RIDGE, cell.tpi50(3, 4));
+        assertEquals(SwdCell.TPI_VALLEY, cell.tpi300(3, 4));
+        assertEquals(SwdCell.FLOW_HOLLOW, cell.flow(3, 4));
+        assertEquals(SwdCell.WIND_EXPOSED, cell.wind(3, 4));
+        assertEquals(SwdCell.WIND_LEE, cell.wind(999, 0));
+        assertEquals(SwdCell.FLOW_CHANNEL, cell.flow(999, 0));
+        assertEquals(SwdCell.TPI_MID, cell.tpi50(999, 0));
+        assertEquals(SwdCell.HAB_FEN, cell.habitat(3, 4) & 7);
+        assertEquals(SwdCell.AUE_DELTA, cell.aue(3, 4));
+        assertEquals(0, cell.habitat(0, 0));
+    }
+
+    @Test
+    void cellsWithoutZoneLayersReadNeutral() throws Exception {
+        SwdCell cell = SwdReader.read(FIX.resolve("synthetic_2632_1170.swd"));
+        assertFalse(cell.hasZones());
+        assertFalse(cell.hasTopo());
+        assertFalse(cell.hasHabitats());
+        assertEquals(0, cell.region(500, 500));
+        assertEquals(SwdCell.LITH_UNKNOWN, cell.lithClass(500, 500));
+        assertEquals(SwdCell.TPI_MID, cell.tpi300(500, 500));
+        assertEquals(SwdCell.FLOW_NONE, cell.flow(500, 500));
+        assertEquals(SwdCell.WIND_NEUTRAL, cell.wind(500, 500));
+        assertEquals(0, cell.aue(500, 500));
+    }
+
+    @Test
     void emptyTreeTableStillCountsAsPresent() throws Exception {
         byte[] none = new byte[4];
         SwdCell cell = SwdReader.decode(swd(2632, 1170,

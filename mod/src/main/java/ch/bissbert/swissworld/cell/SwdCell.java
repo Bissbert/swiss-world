@@ -6,6 +6,8 @@ import java.util.Map;
 /**
  * One decoded 1 km cell. Array layers are indexed {@code dz * 1000 + dx}; TERR is {@code j * 501 + i}.
  * Optional layers are null when absent (also {@code trees}; use {@link #trees()} and {@link #hasTrees()}).
+ * The zone inputs REGN/LITH/TOPO/HABT (format §6b) read as 0 when absent: unknown region and lithology,
+ * mid-slope / no flow / neutral wind, no habitat.
  */
 public record SwdCell(
         int eKm,
@@ -21,7 +23,11 @@ public record SwdCell(
         List<Building> buildings,
         Map<Integer, Span[]> spans,
         byte[] cnpy,
-        List<Tree> trees) {
+        List<Tree> trees,
+        byte[] regn,
+        byte[] lith,
+        byte[] topo,
+        byte[] habt) {
 
     public static final int SIZE = 1000;
     public static final int TERR_N = 501;
@@ -31,6 +37,34 @@ public record SwdCell(
                    byte[] oflg, byte[] insd, List<Building> buildings, Map<Integer, Span[]> spans) {
         this(eKm, nKm, terr, surf, wlvl, wknd, ocls, oelv, oflg, insd, buildings, spans, null, null);
     }
+
+    /** Without the zone inputs (cells from before REGN/LITH/TOPO/HABT, tests). */
+    public SwdCell(int eKm, int nKm, short[] terr, byte[] surf, short[] wlvl, byte[] wknd, byte[] ocls, short[] oelv,
+                   byte[] oflg, byte[] insd, List<Building> buildings, Map<Integer, Span[]> spans, byte[] cnpy,
+                   List<Tree> trees) {
+        this(eKm, nKm, terr, surf, wlvl, wknd, ocls, oelv, oflg, insd, buildings, spans, cnpy, trees,
+                null, null, null, null);
+    }
+
+    // ---- REGN (§6b): region bits 0-2, subregion digit bits 3-5, 0x40 = filled from the nearest region
+    public static final int REGION_JURA = 1, REGION_MITTELLAND = 2, REGION_ALPS_NORTH = 3, REGION_ALPS_WEST = 4,
+            REGION_ALPS_EAST = 5, REGION_ALPS_SOUTH = 6;
+    public static final int REGN_FILLED = 0x40;
+
+    // ---- LITH (§6b): class bits 0-2, 0x08 glacier (rock = nearest), 0x10 lake, detail bits 5-7
+    public static final int LITH_UNKNOWN = 0, LITH_LIMESTONE = 1, LITH_CRYSTALLINE = 2, LITH_SCHIST = 3,
+            LITH_MOLASSE = 4, LITH_QUATERNARY = 5;
+    public static final int LITH_GLACIER = 0x08, LITH_LAKE = 0x10;
+
+    // ---- TOPO (§6b): TPI50 bits 0-1, TPI300 bits 2-3, flow bits 4-5, wind bits 6-7
+    public static final int TPI_MID = 0, TPI_VALLEY = 1, TPI_FLAT = 2, TPI_RIDGE = 3;
+    public static final int FLOW_NONE = 0, FLOW_GULLY = 1, FLOW_CHANNEL = 2, FLOW_HOLLOW = 3;
+    public static final int WIND_NEUTRAL = 0, WIND_LEE = 1, WIND_EXPOSED = 2;
+
+    // ---- HABT (§6b): 0x01 raised bog, 0x02 bog margin, 0x04 fen, Aue type (1-5) in bits 3-5
+    public static final int HAB_RAISED_BOG = 0x01, HAB_BOG_MARGIN = 0x02, HAB_FEN = 0x04;
+    public static final int AUE_GLACIER_FOREFIELD = 1, AUE_ALPINE_PLAIN = 2, AUE_RIVER = 3, AUE_DELTA = 4,
+            AUE_LAKE_SHORE = 5;
 
     public static int key(int dx, int dz) {
         return dz * SIZE + dx;
@@ -86,6 +120,78 @@ public record SwdCell(
 
     public boolean hasCanopy() {
         return cnpy != null;
+    }
+
+    private static int u8(byte[] a, int dx, int dz) {
+        return a == null ? 0 : a[key(dx, dz)] & 0xFF;
+    }
+
+    /** Raw REGN byte (0 without REGN). */
+    public int regn(int dx, int dz) {
+        return u8(regn, dx, dz);
+    }
+
+    /** Biogeographic region 1-6 ({@code REGION_*}), 0 = unknown. */
+    public int region(int dx, int dz) {
+        return regn(dx, dz) & 7;
+    }
+
+    /** Raw LITH byte (0 without LITH). */
+    public int lith(int dx, int dz) {
+        return u8(lith, dx, dz);
+    }
+
+    /** Lithology class ({@code LITH_*} 0-5). */
+    public int lithClass(int dx, int dz) {
+        return lith(dx, dz) & 7;
+    }
+
+    /** Class-specific detail 0-7 (format §6b). */
+    public int lithDetail(int dx, int dz) {
+        return lith(dx, dz) >>> 5;
+    }
+
+    /** Raw TOPO byte (0 = mid-slope, no flow, neutral wind; also without TOPO). */
+    public int topo(int dx, int dz) {
+        return u8(topo, dx, dz);
+    }
+
+    public int tpi50(int dx, int dz) {
+        return topo(dx, dz) & 3;
+    }
+
+    public int tpi300(int dx, int dz) {
+        return topo(dx, dz) >>> 2 & 3;
+    }
+
+    public int flow(int dx, int dz) {
+        return topo(dx, dz) >>> 4 & 3;
+    }
+
+    public int wind(int dx, int dz) {
+        return topo(dx, dz) >>> 6 & 3;
+    }
+
+    /** Raw HABT byte (0 without HABT). */
+    public int habitat(int dx, int dz) {
+        return u8(habt, dx, dz);
+    }
+
+    /** Aue (floodplain) type 1-5 ({@code AUE_*}), 0 = none. */
+    public int aue(int dx, int dz) {
+        return habitat(dx, dz) >>> 3 & 7;
+    }
+
+    public boolean hasZones() {
+        return regn != null && lith != null;
+    }
+
+    public boolean hasTopo() {
+        return topo != null;
+    }
+
+    public boolean hasHabitats() {
+        return habt != null;
     }
 
     /** True if the cell has TTOP (possibly with no trees): it replaces the statistical placement in this cell (§6a). */
