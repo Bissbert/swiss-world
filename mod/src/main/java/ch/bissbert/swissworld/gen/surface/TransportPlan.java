@@ -1329,7 +1329,8 @@ public final class TransportPlan {
 
     /** A rail block on this column's deck (outside a tunnel, not under a road bridge). */
     private boolean trackOnDeck(int x, int z) {
-        return !OverlayPlan.railUnderBridge(g, x, z) && rail(x, z) && gap(x, z) == NONE && !cut(x, z);
+        // a staircase corner moved beside a crossing way's bore (gapSide) lies in the bore, not on the way's deck
+        return !OverlayPlan.railUnderBridge(g, x, z) && rail(x, z) && gap(x, z) == NONE && !gapSide(x, z) && !cut(x, z);
     }
 
     /**

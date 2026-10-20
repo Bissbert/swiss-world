@@ -860,9 +860,17 @@ class TransportPlanTest {
         for (int z = -6; z <= 6; z++) {
             if (!hasRail(v, z, z) && !hasRail(v, z + 1, z)) bad.add("no rail at row " + z);
         }
-        // the road keeps its deck on the hill over the bore
+        // the road keeps its deck on the hill over the bore, with no rail on it
         for (int z = -4; z <= 4; z++) {
             if (v.at(-1, v.deck[v.col(-1, z)], z) != B.SOLID) bad.add("road deck open at -1," + z);
+        }
+        for (int z = -8; z <= 8; z++) {
+            for (int x = -4; x <= 3; x++) {
+                // the bore floor lies near y -1400 here, the road over the hill some twenty blocks higher
+                for (int y = -1394; y < v.y0 + v.ny; y++) {
+                    if (v.at(x, y, z) == B.RAIL) bad.add("rail on the road deck at " + x + "," + y + "," + z);
+                }
+            }
         }
         assertTrue(bad.isEmpty(), () -> "faults: " + bad);
     }
