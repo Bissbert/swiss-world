@@ -18,7 +18,7 @@ from pathlib import Path
 
 import acc
 
-START = acc.block_of(2632923, 1171160)   # Interlaken Ost, swissNAMES3D
+START = acc.block_of(2632940, 1171136)   # Interlaken Ost, on the Brünig line (meter-gauge main line, TLM ACHSE_DKM)
 GOAL = acc.block_of(2656972, 1175392)    # Meiringen station
 
 
