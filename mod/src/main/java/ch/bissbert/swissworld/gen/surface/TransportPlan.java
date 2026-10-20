@@ -47,7 +47,7 @@ public final class TransportPlan {
     private static final int UNSET = Integer.MAX_VALUE;
 
     private final ColumnGrid g;
-    private final int[] roadHalf, railBase, railProfile, railNode, railLevel, floor, ceil, wet, gap, joins, flipped;
+    private final int[] roadHalf, railBase, railProfile, railNode, railLevel, floor, ceil, wet, gap, joins, flipped, low;
     private final int[][] thinned;
 
     public TransportPlan(ColumnGrid g) {
@@ -65,6 +65,7 @@ public final class TransportPlan {
         gap = filled(n);
         joins = filled(n);
         flipped = filled(n);
+        low = filled(n);
         thinned = new int[THIN.length][];
         for (int i = 0; i < THIN.length; i++) thinned[i] = filled(n);
     }
@@ -123,9 +124,13 @@ public final class TransportPlan {
         return way(x, z) && g.flag(x, z, ColumnGrid.TUNNEL);
     }
 
-    /** A way on the ground: not a bridge, not in a tunnel. Its terrain is cut or filled to its deck. */
+    /**
+     * A way on the ground: not a bridge (unless built as an embankment, {@link #lowBridge}), not in a tunnel. Its
+     * terrain is cut or filled to its deck.
+     */
     public boolean open(int x, int z) {
-        return way(x, z) && !g.flag(x, z, ColumnGrid.BRIDGE) && !g.flag(x, z, ColumnGrid.TUNNEL) && !absorbed(x, z);
+        return way(x, z) && !g.flag(x, z, ColumnGrid.TUNNEL) && !absorbed(x, z)
+                && (!g.flag(x, z, ColumnGrid.BRIDGE) || lowBridge(x, z));
     }
 
     /**
@@ -1370,12 +1375,73 @@ public final class TransportPlan {
     static final int LOW_BRIDGE = 2;
 
     /**
-     * A bridge column with at most {@link #LOW_BRIDGE} blocks of air between dry terrain and its beam: no water, no rail and
-     * no headroom under it. Playtest 00.07 (28980,-1255,49): such a deck showed as a long stone-brick wall on a slope.
+     * A bridge with nothing under it is built as fill where every column of its cross-section has at most
+     * {@link #SIDE_HILL_MAX} blocks of air under the beam. The cross-section is the shortest chord of bridge columns
+     * through the column, at most {@link #SIDE_HILL_CHORD} each way.
+     */
+    static final int SIDE_HILL_MAX = 12, SIDE_HILL_CHORD = 12;
+    private static final int[][] CHORDS = {{1, 0}, {0, 1}, {1, 1}, {1, -1}};
+
+    /**
+     * A bridge column built as an embankment of soil (the earthwork beside it slopes down from its edge): dry, with
+     * no rail under it, and either at most {@link #LOW_BRIDGE} blocks of air between terrain and beam, or on a
+     * side-hill bridge ({@link #sideHill}). Playtest 00.07 (28980,-1255,49): such a deck showed as a long stone-brick
+     * wall on a slope, and then as a beam and railing standing on the downhill half.
      */
     boolean lowBridge(int x, int z) {
-        if (OverlayPlan.railUnderBridge(g, x, z) || wetTop(x, z) != NONE || g.source(x, z) != NONE) return false;
-        return deck(x, z) - 2 - g.top(x, z) <= LOW_BRIDGE; // air between terrain and beam
+        int k = g.index(x, z);
+        if (low[k] != UNSET) return low[k] == 1;
+        boolean r = !OverlayPlan.railUnderBridge(g, x, z) && wetTop(x, z) == NONE && g.source(x, z) == NONE
+                && (deck(x, z) - 2 - g.top(x, z) <= LOW_BRIDGE || sideHill(x, z)); // air between terrain and beam
+        low[k] = r ? 1 : 0;
+        return r;
+    }
+
+    /** Air between the terrain and the beam by the overlay's own deck (no smoothing: it looks far). */
+    private int rawAir(int x, int z) {
+        return g.deck(x, z) - 2 - g.top(x, z);
+    }
+
+    private boolean bridgeColumn(int x, int z) {
+        return g.present(x, z) && g.overlay(x, z) != 0 && g.flag(x, z, ColumnGrid.BRIDGE);
+    }
+
+    /**
+     * On a bridge along a slope or over a shallow dry hollow with nothing under it: the shortest chord of bridge
+     * columns through this column (its cross-section) is dry, carries no rail under it, meets no lower way or water
+     * beside it, and has no column more than {@link #SIDE_HILL_MAX} above the terrain. A bridge over a deep valley,
+     * water or a way keeps its beam; only its approaches, where the ground comes near the deck, become fill.
+     */
+    private boolean sideHill(int x, int z) {
+        if (!bridgeColumn(x, z) || rawAir(x, z) > SIDE_HILL_MAX) return false;
+        int[] best = null;
+        int len = Integer.MAX_VALUE;
+        for (int[] d : CHORDS) {
+            int a = extent(x, z, -d[0], -d[1]), b = extent(x, z, d[0], d[1]);
+            if (a == NONE || b == NONE || a + b >= len) continue;
+            len = a + b;
+            best = new int[] {x - a * d[0], z - a * d[1], d[0], d[1]};
+        }
+        if (best == null) return false;
+        for (int i = 0; i <= len; i++) {
+            int cx = best[0] + i * best[2], cz = best[1] + i * best[3];
+            if (rawAir(cx, cz) > SIDE_HILL_MAX || OverlayPlan.railUnderBridge(g, cx, cz) || g.source(cx, cz) != NONE) return false;
+            for (int[] e : DIRS) {
+                int nx = cx + e[0], nz = cz + e[1];
+                if (!g.present(nx, nz) || bridgeColumn(nx, nz)) continue;
+                if (g.source(nx, nz) != NONE) return false; // water beside the footprint runs under it
+                if (g.overlay(nx, nz) != 0 && g.deck(nx, nz) < g.deck(cx, cz) - LOW_BRIDGE - 2) return false; // a way under
+            }
+        }
+        return true;
+    }
+
+    /** Bridge columns beyond (x, z) towards (dx, dz), or NONE when the run is longer than {@link #SIDE_HILL_CHORD}. */
+    private int extent(int x, int z, int dx, int dz) {
+        for (int i = 1; i <= SIDE_HILL_CHORD + 1; i++) {
+            if (!bridgeColumn(x + i * dx, z + i * dz)) return i - 1;
+        }
+        return NONE;
     }
 
     /** A road or rail column outside a tunnel: embankment or cut, culvert roof over water, deck, slab or rail. */

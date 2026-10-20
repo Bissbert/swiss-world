@@ -107,9 +107,9 @@ class TransportPlanTest {
         SwdCell c = Cells.flat(600);
         for (int z = -30; z <= 30; z++) {
             for (int x = 0; x <= 3; x++) Cells.overlay(c, x, z, 3, ColumnGrid.BRIDGE, 602);
-            for (int x = 10; x <= 13; x++) Cells.overlay(c, x, z, 3, ColumnGrid.BRIDGE, 608);
+            for (int x = 10; x <= 13; x++) Cells.overlay(c, x, z, 3, ColumnGrid.BRIDGE, 602 + TransportPlan.SIDE_HILL_MAX + 4);
         }
-        Voxels v = new Voxels(c, -4, -10, 16, 10, -1440, -1380);
+        Voxels v = new Voxels(c, -4, -10, 16, 10, -1440, -1370);
         for (int z = -5; z <= 5; z++) {
             for (int x = 0; x <= 3; x++) {
                 int deck = v.deck[v.col(x, z)], top = v.originalTop[v.col(x, z)];
@@ -125,6 +125,46 @@ class TransportPlanTest {
             assertEquals(TransportPlan.Part.BEAM, v.part(11, deck - 1, z));
             assertEquals(TransportPlan.Part.RAILING, v.part(10, deck + 1, z), "railing on the high bridge at " + z);
             assertTrue(v.at(11, deck - 2, z) == B.AIR || v.part(11, deck - 2, z) == TransportPlan.Part.BEAM, "air or pier under the beam at " + z);
+        }
+    }
+
+    /**
+     * Playtest 00.07 again (28980,-1255,49): a road bridge along a slope with nothing under it stood on a beam and a
+     * railing up to ten blocks over the downhill half. It is grassed fill with a slope beside it; one over a stream
+     * keeps its beam.
+     */
+    @Test
+    void sideHillBridgeIsFill() {
+        SwdCell c = Cells.flat(600);
+        Voxels.terrain(c, (x, z) -> 600 - 1.2 * x);
+        for (int z = -40; z <= 40; z++) {
+            for (int x = 0; x <= 7; x++) Cells.overlay(c, x, z, 3, ColumnGrid.BRIDGE, 600);
+        }
+        // the same bridge further south crosses a stream on its downhill side
+        for (int z = 20; z <= 40; z++) Cells.water(c, 6, z, 600 - 1.2 * 6 + 0.5, 2);
+        Voxels v = new Voxels(c, -6, -12, 24, 30, -1450, -1380);
+        int deepest = 0;
+        for (int z = -6; z <= 6; z++) {
+            int deck = v.deck[v.col(0, z)];
+            for (int x = 0; x <= 7; x++) {
+                int top = v.originalTop[v.col(x, z)];
+                deepest = Math.max(deepest, deck - 2 - top);
+                assertNotEquals(TransportPlan.Part.BEAM, v.part(x, deck - 1, z), "beam on the side-hill bridge at " + x + "," + z);
+                assertNotEquals(TransportPlan.Part.RAILING, v.part(x, deck + 1, z), "railing on the side-hill bridge at " + x + "," + z);
+                for (int y = top + 1; y < deck; y++) {
+                    assertEquals(TransportPlan.Part.SOIL, v.part(x, y, z), "fill at " + x + "," + y + "," + z);
+                }
+            }
+            // downhill of the edge the ground slopes away from the deck one block per column: no soil wall
+            for (int x = 8; x <= 10; x++) {
+                assertTrue(topSolid(v, x, z) >= deck - (x - 7), "slope at " + x + "," + z + ": " + topSolid(v, x, z) + " vs deck " + deck);
+            }
+            assertEquals(TransportPlan.Part.TOP, v.part(9, topSolid(v, 9, z), z), "grassed slope at 9," + z);
+        }
+        assertTrue(deepest > TransportPlan.LOW_BRIDGE + 4, "the downhill edge stands well above the ground: " + deepest);
+        for (int z = 24; z <= 30; z++) {
+            int deck = v.deck[v.col(0, z)];
+            assertEquals(TransportPlan.Part.BEAM, v.part(6, deck - 1, z), "beam over the stream at 6," + z);
         }
     }
 
