@@ -705,7 +705,9 @@ public final class TransportPlan {
      * switch block (a powered T junction turns, an unpowered one keeps its shape), so the branch is the side that
      * gives way. Two exceptions: an arm that ends within {@link #SWITCH_WALK} rails is a stub and gives way instead,
      * and of two arms that meet again at the same switch (a short loop, where two tracks drawn side by side were
-     * thinned apart) the longer one gives way, so both switches of the loop route the line the same way.
+     * thinned apart) the longer one gives way, so both switches of the loop route the line the same way. Before both,
+     * where the data tags a main line (swd-format §5) and exactly two arms run on it, those two carry on: at a Y where
+     * a loop or siding merges, the straighter pair is often the loop's, and the main line broke there.
      */
     private int track(int x, int z) {
         int m = links(x, z);
@@ -721,6 +723,8 @@ public final class TransportPlan {
             }
         }
         if (stubs == 1) return m & ~(1 << stub);
+        int main = mainPair(arm);
+        if (main != 0) return main;
         for (int d = 0; d < 4; d++) {
             for (int e = d + 1; e < 4; e++) {
                 if (arm[d] == null || arm[e] == null || arm[d][0] != ARM_SWITCH || arm[e][0] != ARM_SWITCH) continue;
@@ -759,6 +763,8 @@ public final class TransportPlan {
     private int crossing(int x, int z) {
         int[][] arm = new int[4][];
         for (int d = 0; d < 4; d++) arm[d] = arm(x, z, d);
+        int main = mainPair(arm);
+        if (main != 0) return main;
         int pick = 0;
         double best = Double.MAX_VALUE;
         for (int d = 0; d < 4; d++) {
@@ -779,16 +785,34 @@ public final class TransportPlan {
     private static final int ARM_OPEN = 0, ARM_END = 1, ARM_SWITCH = 2;
 
     /**
-     * Walks a switch's arm in direction d for up to {@link #SWITCH_WALK} rails: {kind, steps, x, z} where kind is
-     * {@link #ARM_END} (the track ends), {@link #ARM_SWITCH} (another switch, at x, z) or {@link #ARM_OPEN}.
+     * The two arms on the main line (most of their walked rails tagged {@link ColumnGrid#MAIN}) when exactly two are
+     * and neither is a stub, as a {@link #links} bit mask; else 0 (no tag, as in older cells, or a yard where more
+     * arms are tagged), and the shape rules decide.
+     */
+    private static int mainPair(int[][] arm) {
+        int m = 0;
+        for (int d = 0; d < 4; d++) {
+            if (arm[d] != null && arm[d][4] * 2 > arm[d][1]) {
+                if (arm[d][0] == ARM_END) return 0;
+                m |= 1 << d;
+            }
+        }
+        return Integer.bitCount(m) == 2 ? m : 0;
+    }
+
+    /**
+     * Walks a switch's arm in direction d for up to {@link #SWITCH_WALK} rails: {kind, steps, x, z, main} where kind is
+     * {@link #ARM_END} (the track ends), {@link #ARM_SWITCH} (another switch, at x, z) or {@link #ARM_OPEN}, and main
+     * counts the walked rails on a main line ({@link ColumnGrid#MAIN}).
      */
     private int[] arm(int x, int z, int d) {
-        int px = x, pz = z, cx = x + DIRS[d][0], cz = z + DIRS[d][1];
+        int px = x, pz = z, cx = x + DIRS[d][0], cz = z + DIRS[d][1], main = 0;
         for (int step = 1; step <= SWITCH_WALK; step++) {
+            if (g.present(cx, cz) && g.flag(cx, cz, ColumnGrid.MAIN)) main++;
             int cm = links(cx, cz);
             int n = Integer.bitCount(cm);
-            if (n <= 1) return new int[] {ARM_END, step, cx, cz};
-            if (n >= 3) return new int[] {ARM_SWITCH, step, cx, cz};
+            if (n <= 1) return new int[] {ARM_END, step, cx, cz, main};
+            if (n >= 3) return new int[] {ARM_SWITCH, step, cx, cz, main};
             int nx = NONE, nz = NONE;
             for (int e = 0; e < 4; e++) {
                 int qx = cx + DIRS[e][0], qz = cz + DIRS[e][1];
@@ -802,7 +826,7 @@ public final class TransportPlan {
             cx = nx;
             cz = nz;
         }
-        return new int[] {ARM_OPEN, SWITCH_WALK, cx, cz};
+        return new int[] {ARM_OPEN, SWITCH_WALK, cx, cz, main};
     }
 
     private static boolean curve(int m) {

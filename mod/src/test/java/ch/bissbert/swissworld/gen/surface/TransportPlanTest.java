@@ -552,6 +552,34 @@ class TransportPlanTest {
         }
     }
 
+    /**
+     * The Brünig line at its passing loops (2339,-1987, 23339,-4986): the main line bends away where a loop track runs
+     * on straight, and the switch kept the straighter pair, the loop's, so the main line ended beside it. With the main
+     * line tagged (OFLG bit5) the switch keeps it; untagged (older cells) the straighter pair still wins.
+     */
+    @Test
+    void switchKeepsTheTaggedMainLine() {
+        for (boolean tagged : new boolean[] {true, false}) {
+            int main = RAIL | (tagged ? ColumnGrid.MAIN : 0);
+            SwdCell c = Cells.flat(600);
+            for (int x = -40; x <= 40; x++) {
+                for (int z = -3; z <= 40; z++) Cells.overlay(c, x, z, OverlayPlan.RAIL_BED, 0, Double.NaN);
+            }
+            // the main line: from the west along row 0, then south and a diagonal staircase to the south-east
+            for (int x = -40; x <= 0; x++) Cells.overlay(c, x, 0, OverlayPlan.RAIL_BED, main, Double.NaN);
+            Cells.overlay(c, 0, 1, OverlayPlan.RAIL_BED, main, Double.NaN);
+            for (int i = 0; i < 30; i++) {
+                Cells.overlay(c, i, i + 2, OverlayPlan.RAIL_BED, main, Double.NaN);
+                Cells.overlay(c, i + 1, i + 2, OverlayPlan.RAIL_BED, main, Double.NaN);
+            }
+            // the loop track runs on straight east
+            for (int x = 1; x <= 40; x++) Cells.overlay(c, x, 0, OverlayPlan.RAIL_BED, RAIL, Double.NaN);
+            TransportPlan t = new TransportPlan(Cells.grid(c, 0, 0, TransportPlan.MARGIN));
+            assertTrue(t.rail(0, 0) && t.rail(1, 0) && t.rail(0, 1), "switch and its three arms");
+            assertEquals(tagged ? Rail.SOUTH_WEST : Rail.EAST_WEST, t.railShape(0, 0), "tagged " + tagged);
+        }
+    }
+
     @Test
     void shortTrackPiecesWhereTracksMergeAreDropped() {
         SwdCell c = Cells.flat(600);
