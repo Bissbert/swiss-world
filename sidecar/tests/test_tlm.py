@@ -268,3 +268,52 @@ def test_surface_rail_keeps_its_centre_across_a_road():
     ocls, _, oflg = overlay.rasterise(_burn_order([], [], [road], [rail]), e_km, n_km)
     dz, dx = np.array(overlay.grid_path(line, e_km, n_km)).T
     assert np.all(oflg[dz, dx] & swd.OFLG_RAIL) and np.all(ocls[dz, dx] == overlay.RAIL)
+
+
+def test_main_line_tag_follows_achse_dkm():
+    rail = {"ZAHNRADBAHN": 1, "STANDSEILBAHN": 1, "AUSSER_BETRIEB": 1}
+    assert overlay.is_main_line({**rail, "ACHSE_DKM": tlm.BOOL_YES})
+    assert not overlay.is_main_line({**rail, "ACHSE_DKM": 1})
+    assert not overlay.is_main_line(rail)  # an extract without the attribute: no main line, as before
+
+
+def test_main_line_bit_only_along_the_main_track():
+    """A passing loop: the loop track leaves the main track and joins it again; only the main track gets bit5,
+    also where it runs in a tunnel under a car park (kept_rail_tunnels)."""
+    e_km, n_km = 2646, 1178
+    e0, n0 = e_km * 1000, n_km * 1000
+    main = shapely.LineString([(e0 + 100, n0 + 500.5, 560.0), (e0 + 900, n0 + 500.5, 560.0)])
+    loop = shapely.LineString([(e0 + 300, n0 + 500.5, 560.0), (e0 + 340, n0 + 505.5, 560.0),
+                               (e0 + 460, n0 + 505.5, 560.0), (e0 + 500, n0 + 500.5, 560.0)])
+    rails = [overlay.Feature(overlay._buffer(main, 3.0), overlay.RAIL, rail_line=main, main=True),
+             overlay.Feature(overlay._buffer(loop, 3.0), overlay.RAIL, rail_line=loop)]
+    tline = shapely.LineString([(e0 + 600, n0 + 300.5, 555.0), (e0 + 700, n0 + 300.5, 555.0)])
+    tunnel = overlay.Feature(overlay._buffer(tline, 3.0), overlay.RAIL, swd.OFLG_TUNNEL, line=tline,
+                             rail_line=tline, main=True)
+    park = overlay.Feature(shapely.box(e0 + 620, n0 + 290, e0 + 680, n0 + 310), overlay.PARKING)
+    _, _, oflg = overlay.rasterise(_burn_order([tunnel], [park], [], rails), e_km, n_km)
+    centre = 499
+    assert np.all(oflg[centre, 100:900] & swd.OFLG_RAIL) and np.all(oflg[centre, 100:900] & swd.OFLG_MAIN)
+    under_park = oflg[centre + 200, 620:680]  # the tunnel part under the car park keeps bit5 too
+    assert np.all(under_park & swd.OFLG_TUNNEL) and np.all(under_park & swd.OFLG_MAIN)
+    assert np.all(oflg[centre - 5, 345:455] & swd.OFLG_RAIL)
+    assert not np.any(oflg[centre - 5, 345:455] & swd.OFLG_MAIN)
+    assert not np.any((oflg & swd.OFLG_MAIN > 0) & (oflg & swd.OFLG_RAIL == 0))  # bit5 only with bit2
+
+
+def test_brienz_main_line_is_tagged(brienz):
+    """The Brünig line through 2646_1178 is one main track; the station's other tracks are not."""
+    cfg, L, _ = brienz
+    rail = L["OFLG"] & swd.OFLG_RAIL > 0
+    main = L["OFLG"] & swd.OFLG_MAIN > 0
+    if not main.any():
+        pytest.skip("TLM extract without ACHSE_DKM")
+    assert np.all(rail[main])
+    assert 0.3 < main.sum() / rail.sum() < 0.95
+    box = tlm.cell_box(2646, 1178)
+    cols = set()
+    for g, p in tlm.read(cfg, "TLM_EISENBAHN", tlm.cell_bbox(2646, 1178)):
+        if g.intersects(box) and overlay.is_main_line(p):
+            cols.update(overlay.grid_path(g, 2646, 1178))
+    dz, dx = np.array(sorted(cols)).T
+    assert np.mean(main[dz, dx]) > 0.95

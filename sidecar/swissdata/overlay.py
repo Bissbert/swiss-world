@@ -6,8 +6,10 @@ dams, bridges. Bridges, tunnels and roads over dams carry their
 deck/floor height from the TLM line Z in OELV; dams carry their crest (highest Z) and the dam-body flag.
 Where a road bridge spans a ground-level railway, the column keeps the road deck (OCLS, OELV, bit0) and
 also the rail-centre bit2, which then means a rail on the terrain under the deck (see NOTES-sidecar-tlm.md).
-Everything else follows the terrain. The grid is burnt one column wider on every side so the edge flag
-(a road column next to a non-overlay column) agrees across cell seams.
+Rail centre columns of a railway's main line (TLM ACHSE_DKM, the track the national map draws: one continuous
+track through every station and passing loop) also get the main-line bit5, so the mod can keep that track
+where sidings and loop tracks merge into it. Everything else follows the terrain. The grid is burnt one column
+wider on every side so the edge flag (a road column next to a non-overlay column) agrees across cell seams.
 """
 
 from __future__ import annotations
@@ -64,6 +66,7 @@ class Feature:
     line: object = None  # 3D line whose Z gives OELV
     elev: float = np.nan  # constant OELV (dams)
     rail_line: object = None  # centre line for OFLG.bit2
+    main: bool = False  # rail_line is the main line of its railway (OFLG.bit5 along it)
 
 
 class OverlayBuilder:
@@ -86,6 +89,13 @@ def road_class(p: dict) -> tuple[int, float] | None:
     if c and p["OBJEKTART"] in UNPAVED_TRACK and p["BELAGSART"] == UNPAVED:
         return TRACK, c[1]
     return c
+
+
+def is_main_line(p: dict) -> bool:
+    """TLM ACHSE_DKM: the track the national map draws. It runs without a branch through every station and
+    passing loop (Interlaken Ost to Meiringen: 0 branches, against 7 for not-ANSCHLUSSGLEIS), and on the
+    two-track sections it is one of the real tracks (about 4 m from the other), not a centre line."""
+    return p.get("ACHSE_DKM") == tlm.BOOL_YES
 
 
 def rail_class(p: dict) -> int:
@@ -129,7 +139,8 @@ def collect(cfg, e_km: int, n_km: int) -> list[Feature]:
         ocls = rail_class(p)
         width = RAIL_WIDTH.get(p["OBJEKTART"], 3.0)
         for part in tlm.single_lines(g):
-            f = Feature(_buffer(part, width), ocls, rail_line=part if ocls == RAIL else None)
+            f = Feature(_buffer(part, width), ocls, rail_line=part if ocls == RAIL else None,
+                        main=ocls == RAIL and is_main_line(p))
             k = p["KUNSTBAUTE"]
             if k in RAIL_TUNNEL:
                 f.flags, f.line = swd.OFLG_TUNNEL, part
@@ -188,7 +199,7 @@ def kept_rail_tunnels(tunnels: list[Feature], areas: list[Feature], roads: list[
             continue
         geom = shapely.intersection(t.geom, shapely.union_all(over))
         if not geom.is_empty:
-            out.append(Feature(geom, t.ocls, t.flags, line=t.line, rail_line=t.rail_line))
+            out.append(Feature(geom, t.ocls, t.flags, line=t.line, rail_line=t.rail_line, main=t.main))
     return out
 
 
@@ -225,10 +236,11 @@ def rasterise(feats: list[Feature], e_km: int, n_km: int) -> tuple[np.ndarray, n
     for i, f in enumerate(feats):
         if f.rail_line is None:
             continue
+        bits = swd.OFLG_RAIL | (swd.OFLG_MAIN if f.main else 0)
         for dz_, dx_ in grid_path(f.rail_line, e_km, n_km):
             if (idx[dz_, dx_] == i + 1 or ocls[dz_, dx_] == RAIL
                     or (f.flags == 0 and under_road_bridge(ocls[dz_, dx_], oflg[dz_, dx_]))):
-                oflg[dz_, dx_] |= swd.OFLG_RAIL
+                oflg[dz_, dx_] |= bits
     return ocls, swd.encode_height(elev), oflg
 
 

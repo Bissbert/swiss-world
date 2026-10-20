@@ -26,6 +26,7 @@ OFLG_TUNNEL = 2
 OFLG_RAIL = 4
 OFLG_EDGE = 8
 OFLG_DAM = 16
+OFLG_MAIN = 32  # rail centre (bit2) on the main line of its railway
 
 _HEADER = struct.Struct("<4sHHiiII")
 _DIR = struct.Struct("<4sIQQQ")

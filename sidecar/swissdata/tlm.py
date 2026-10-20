@@ -41,7 +41,7 @@ LAYERS: dict[str, tuple[str, ...]] = {
     "TLM_STEHENDES_GEWAESSER": ("NAME",),
     "TLM_FLIESSGEWAESSER": ("VERLAUF", "NAME", "TLM_GEWAESSER_LAUF_UUID"),
     "TLM_STRASSE": ("KUNSTBAUTE", "BELAGSART", "STUFE"),
-    "TLM_EISENBAHN": ("KUNSTBAUTE", "ZAHNRADBAHN", "STANDSEILBAHN", "AUSSER_BETRIEB", "NAME"),
+    "TLM_EISENBAHN": ("KUNSTBAUTE", "ZAHNRADBAHN", "STANDSEILBAHN", "AUSSER_BETRIEB", "NAME", "ACHSE_DKM"),
     "TLM_STAUBAUTE": ("NAME",),
     "TLM_VERKEHRSBAUTE_PLY": (),
     "TLM_EINZELOBJEKT": ("NAME",),
@@ -64,8 +64,14 @@ def check_pinned(pinned: dict | None) -> None:
         raise ValueError(f"cell pinned to {pinned['tlm']}, only {TLM_ITEM} is extracted")
 
 
+# Bumped whenever LAYERS gains an attribute: ensure_extract only checks that the file exists, so a new
+# version makes it extract once more instead of reading an old file without the attribute.
+# 2: TLM_EISENBAHN.ACHSE_DKM (the main-line tag, overlay.py).
+EXTRACT_VERSION = 2
+
+
 def extract_path(cfg: Config) -> Path:
-    return cfg.raw / "extracts" / f"{TLM_ITEM}_tlm-extract.gpkg"
+    return cfg.raw / "extracts" / f"{TLM_ITEM}_tlm-extract-v{EXTRACT_VERSION}.gpkg"
 
 
 def ensure_extract(cfg: Config) -> Path:
