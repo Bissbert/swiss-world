@@ -301,6 +301,35 @@ def test_main_line_bit_only_along_the_main_track():
     assert not np.any((oflg & swd.OFLG_MAIN > 0) & (oflg & swd.OFLG_RAIL == 0))  # bit5 only with bit2
 
 
+def test_trunk_continues_straight_through_branch_points():
+    """Interlaken Ost: the stem meets the Brünig line (straight on) and the BOB (turning off); Meiringen: the line
+    from Interlaken and the line from Luzern run into one station track. The trunk keeps the straight-on chains,
+    so at every branch point at most two chains are on it; a separate network gets its own trunk."""
+    L = shapely.LineString
+    stem = L([(0, 0), (100, 0)])
+    bruenig = [L([(100, 0), (300, 20)]), L([(300, 20), (2000, 300)])]  # two parts of one chain
+    bob = L([(100, 0), (160, -80)])
+    station = L([(2000, 300), (2100, 300)])
+    luzern = L([(2000, 300), (1500, 900)])  # meets the trunk from the side, turning back
+    other = L([(5000, 5000), (5100, 5000)])
+    lines = [stem, *bruenig, bob, station, luzern, other]
+    assert overlay.trunk_parts(lines) == {0, 1, 2, 4, 6}
+    assert overlay.trunk_parts(list(reversed(lines))) == {6 - i for i in (0, 1, 2, 4, 6)}  # order-free
+
+
+def test_trunk_bit_only_with_the_main_bit():
+    e_km, n_km = 2646, 1178
+    e0, n0 = e_km * 1000, n_km * 1000
+    trunk = shapely.LineString([(e0 + 100, n0 + 500.5, 560.0), (e0 + 900, n0 + 500.5, 560.0)])
+    side = shapely.LineString([(e0 + 500, n0 + 500.5, 560.0), (e0 + 600, n0 + 700.5, 560.0)])
+    rails = [overlay.Feature(overlay._buffer(trunk, 3.0), overlay.RAIL, rail_line=trunk, main=True, trunk=True),
+             overlay.Feature(overlay._buffer(side, 3.0), overlay.RAIL, rail_line=side, main=True)]
+    _, _, oflg = overlay.rasterise(_burn_order([], [], [], rails), e_km, n_km)
+    assert np.all(oflg[499, 100:900] & swd.OFLG_TRUNK)
+    on = oflg & swd.OFLG_TRUNK > 0
+    assert on.sum() < 850 and np.all(oflg[on] & swd.OFLG_MAIN)  # the side line gets bit5 only
+
+
 def test_brienz_main_line_is_tagged(brienz):
     """The Brünig line through 2646_1178 is one main track; the station's other tracks are not."""
     cfg, L, _ = brienz

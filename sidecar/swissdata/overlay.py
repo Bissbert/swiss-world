@@ -15,6 +15,7 @@ wider on every side so the edge flag (a road column next to a non-overlay column
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 
 import numpy as np
 import shapely
@@ -67,6 +68,7 @@ class Feature:
     elev: float = np.nan  # constant OELV (dams)
     rail_line: object = None  # centre line for OFLG.bit2
     main: bool = False  # rail_line is the main line of its railway (OFLG.bit5 along it)
+    trunk: bool = False  # and on its network's trunk (OFLG.bit6, see trunk_parts)
 
 
 class OverlayBuilder:
@@ -96,6 +98,109 @@ def is_main_line(p: dict) -> bool:
     passing loop (Interlaken Ost to Meiringen: 0 branches, against 7 for not-ANSCHLUSSGLEIS), and on the
     two-track sections it is one of the real tracks (about 4 m from the other), not a centre line."""
     return p.get("ACHSE_DKM") == tlm.BOOL_YES
+
+
+TRUNK_TANGENT = 30.0  # m along a chain to take its direction at a branch node
+
+
+def trunk_parts(lines: list) -> set[int]:
+    """The trunk of each main-line network: indices of `lines` (2D main-line parts) on it.
+
+    Main lines branch where two railways meet (Interlaken Ost: Brünig line and BOB; Meiringen: the line from
+    Interlaken and the one from Luzern run into one station track). The parts between branch points form
+    chains; the trunk of a network is its longest chain, carried on through each branch point along the chain
+    that continues it most nearly straight (never turning back by more than 90 degrees), to the network's ends.
+    So at every branch point at most two chains are on the trunk, the same ones whichever cell asks."""
+    key = lambda c: (round(c[0], 1), round(c[1], 1))
+    ends = [(key(g.coords[0]), key(g.coords[-1])) for g in lines]
+    adj: dict = {}
+    for i, (a, b) in enumerate(ends):
+        adj.setdefault(a, []).append(i)
+        adj.setdefault(b, []).append(i)
+    other = lambda i, n: ends[i][1] if ends[i][0] == n else ends[i][0]
+    chains, used = [], set()  # (start node, end node, part indices in order)
+    for n in sorted(adj):
+        if len(adj[n]) == 2:
+            continue
+        for i in adj[n]:
+            if i in used:
+                continue
+            seq, m = [i], other(i, n)
+            used.add(i)
+            while len(adj[m]) == 2:
+                j = adj[m][0] if adj[m][1] == seq[-1] else adj[m][1]
+                if j in used:
+                    break
+                seq.append(j)
+                used.add(j)
+                m = other(j, m)
+            chains.append((n, m, seq))
+    for i in range(len(lines)):  # a ring without branch points is its own trunk
+        if i not in used:
+            chains.append((ends[i][0], ends[i][1], [i]))
+    length = [sum(lines[i].length for i in c[2]) for c in chains]
+
+    def tangent(k, node):
+        g = shapely.line_merge(shapely.MultiLineString([lines[i] for i in chains[k][2]]))
+        if g.geom_type != "LineString":
+            g = max(g.geoms, key=lambda q: q.length)
+        if key(g.coords[0]) != node:
+            g = g.reverse()
+        a, b = g.interpolate(0), g.interpolate(min(TRUNK_TANGENT, g.length))
+        v = (b.x - a.x, b.y - a.y)
+        d = (v[0] ** 2 + v[1] ** 2) ** 0.5 or 1.0
+        return v[0] / d, v[1] / d
+
+    at: dict = {}
+    for k, (a, b, _) in enumerate(chains):
+        at.setdefault(a, []).append(k)
+        at.setdefault(b, []).append(k)
+    trunk, seen = set(), set()
+    for k0 in sorted(range(len(chains)), key=lambda k: (-length[k], k)):
+        if k0 in seen:
+            continue
+        comp, stack = {k0}, [k0]  # this chain's network; its longest chain is k0
+        while stack:
+            for n in chains[stack.pop()][:2]:
+                for q in at[n]:
+                    if q not in comp:
+                        comp.add(q)
+                        stack.append(q)
+        seen |= comp
+        on = {k0}
+        for node in chains[k0][:2]:
+            cur = k0
+            while True:
+                vin = tangent(cur, node)
+                best = None
+                for q in at[node]:
+                    if q in on:
+                        continue
+                    vout = tangent(q, node)
+                    straight = -(vin[0] * vout[0] + vin[1] * vout[1])
+                    if straight > 0 and (best is None or straight > best[0]):
+                        best = (straight, q)
+                if best is None:
+                    break
+                cur = best[1]
+                on.add(cur)
+                node = chains[cur][1] if chains[cur][0] == node else chains[cur][0]
+        trunk |= on
+    return {i for k in trunk for i in chains[k][2]}
+
+
+@lru_cache(maxsize=2)
+def _trunk_wkb(path) -> frozenset:
+    lines = []
+    for g, p in tlm.read_all(path, "TLM_EISENBAHN"):
+        if is_main_line(p):
+            lines.extend(shapely.force_2d(q) for q in tlm.single_lines(g))
+    return frozenset(lines[i].wkb for i in trunk_parts(lines))
+
+
+def is_trunk(cfg, part) -> bool:
+    """`part` (a main-line part) lies on the trunk of its network (trunk_parts, over the whole extract)."""
+    return shapely.force_2d(part).wkb in _trunk_wkb(tlm.ensure_extract(cfg))
 
 
 def rail_class(p: dict) -> int:
@@ -139,8 +244,9 @@ def collect(cfg, e_km: int, n_km: int) -> list[Feature]:
         ocls = rail_class(p)
         width = RAIL_WIDTH.get(p["OBJEKTART"], 3.0)
         for part in tlm.single_lines(g):
+            main = ocls == RAIL and is_main_line(p)
             f = Feature(_buffer(part, width), ocls, rail_line=part if ocls == RAIL else None,
-                        main=ocls == RAIL and is_main_line(p))
+                        main=main, trunk=main and is_trunk(cfg, part))
             k = p["KUNSTBAUTE"]
             if k in RAIL_TUNNEL:
                 f.flags, f.line = swd.OFLG_TUNNEL, part
@@ -199,7 +305,8 @@ def kept_rail_tunnels(tunnels: list[Feature], areas: list[Feature], roads: list[
             continue
         geom = shapely.intersection(t.geom, shapely.union_all(over))
         if not geom.is_empty:
-            out.append(Feature(geom, t.ocls, t.flags, line=t.line, rail_line=t.rail_line, main=t.main))
+            out.append(Feature(geom, t.ocls, t.flags, line=t.line, rail_line=t.rail_line, main=t.main,
+                               trunk=t.trunk))
     return out
 
 
@@ -236,7 +343,7 @@ def rasterise(feats: list[Feature], e_km: int, n_km: int) -> tuple[np.ndarray, n
     for i, f in enumerate(feats):
         if f.rail_line is None:
             continue
-        bits = swd.OFLG_RAIL | (swd.OFLG_MAIN if f.main else 0)
+        bits = swd.OFLG_RAIL | (swd.OFLG_MAIN if f.main else 0) | (swd.OFLG_TRUNK if f.trunk else 0)
         for dz_, dx_ in grid_path(f.rail_line, e_km, n_km):
             if (idx[dz_, dx_] == i + 1 or ocls[dz_, dx_] == RAIL
                     or (f.flags == 0 and under_road_bridge(ocls[dz_, dx_], oflg[dz_, dx_]))):

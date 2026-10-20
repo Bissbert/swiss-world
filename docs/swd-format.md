@@ -75,7 +75,7 @@ Layer blobs follow, in directory order.
 | `WKND` | no | `u8[1000·1000]` | Water kind: 0 none, 1 lake, 2 river, 3 stream, 4 reservoir, 5 pond, 6 waterfall column |
 | `OCLS` | no | `u8[1000·1000]` | Overlay class, see §5 |
 | `OELV` | no | `u16[1000·1000]` heights | Overlay **top surface** height (road deck, bridge deck, tunnel floor, dam crest); `0xFFFF` = follow the terrain |
-| `OFLG` | no | `u8[1000·1000]` | Overlay flags: bit0 bridge, bit1 tunnel, bit2 rail centre line (place a rail block here), bit3 overlay edge (kerb/shoulder), bit4 dam body, bit5 main line (only with bit2; §5) |
+| `OFLG` | no | `u8[1000·1000]` | Overlay flags: bit0 bridge, bit1 tunnel, bit2 rail centre line (place a rail block here), bit3 overlay edge (kerb/shoulder), bit4 dam body, bit5 main line (only with bit2; §5), bit6 trunk (only with bit5; §5) |
 | `INSD` | when flags.bit0 | `u8[1000·1000]` | 1 = inside Switzerland, 0 = outside (ocean). Absent = all inside. |
 | `BTBL` | no | see §6 | Building table |
 | `CNPY` | no | `u8[1000·1000]` | **Canopy height** in whole metres above `TERR`, from swissSURFACE3D minus swissALTI3D (max of the 0.5 m pixels in the column). 0 = no vegetation or below 2 m. Building footprints and water are 0. Absent = no canopy data. |
@@ -129,6 +129,8 @@ Values 18–255 are reserved. Readers map unknown values to 0.
 Rail blocks are placed where `OFLG.bit2` is set on a class-8 column. The mod derives the rail shape from the neighbouring rail-centre columns.
 
 **Main line.** `OFLG.bit5` is set on the rail-centre columns (bit2) of each railway's main line: the swissTLM3D track with `ACHSE_DKM` = yes, which runs as one track without a branch through stations and passing loops. Sidings and loop tracks have bit2 only. Where tracks merge, the mod keeps the main-line track. Cells built before bit5 existed have no bit5 anywhere; a reader must treat that as "no main line known", not as "nothing is a main line".
+
+**Trunk.** Main lines branch where two railways meet (Interlaken Ost: the Brünig line and the BOB; Meiringen: the lines from Interlaken and from Luzern run into one station track). `OFLG.bit6` is set on the main-line columns (bit5) of each main-line network's trunk: its longest run between branch points, carried on through every branch point along the run that continues it most nearly straight, never turning back by more than 90°. It is computed over the whole TLM extract, so neighbouring cells agree. At every branch point at most two of the meeting main lines are on the trunk; where more than two main lines meet, the mod keeps the trunk ones. Cells built before bit6 existed have no bit6 anywhere: "no trunk known".
 
 **Rail under a road bridge.** A column can have the bridge bit, a road `OCLS` (1–7) **and** `OFLG.bit2`. Then:
 
