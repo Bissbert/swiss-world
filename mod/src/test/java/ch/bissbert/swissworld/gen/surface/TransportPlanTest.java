@@ -620,6 +620,28 @@ class TransportPlanTest {
         }
     }
 
+    /**
+     * The Brünig line at 2339,-1987: the main line runs a column beside a siding, the two thinned as one band and the
+     * main line's centres were dropped there, so its rails ran over onto the siding. The tagged main line keeps its
+     * centres; the siding gives way.
+     */
+    @Test
+    void mainLineKeepsItsCentresBesideATrack() {
+        SwdCell c = Cells.flat(600);
+        for (int x = -40; x <= 40; x++) {
+            for (int z = -3; z <= 20; z++) Cells.overlay(c, x, z, OverlayPlan.RAIL_BED, 0, Double.NaN);
+        }
+        for (int x = -40; x <= 40; x++) Cells.overlay(c, x, 0, OverlayPlan.RAIL_BED, RAIL | ColumnGrid.MAIN, Double.NaN);
+        // a siding comes up from the south-west, runs along the main line touching it, and leaves to the south-east
+        for (int i = 0; i < 12; i++) {
+            Cells.overlay(c, -12 - i, 1 + i, OverlayPlan.RAIL_BED, RAIL, Double.NaN);
+            Cells.overlay(c, 12 + i, 1 + i, OverlayPlan.RAIL_BED, RAIL, Double.NaN);
+        }
+        for (int x = -12; x <= 12; x++) Cells.overlay(c, x, 1, OverlayPlan.RAIL_BED, RAIL, Double.NaN);
+        TransportPlan t = new TransportPlan(Cells.grid(c, 0, 0, TransportPlan.MARGIN));
+        for (int x = -8; x <= 24; x++) assertTrue(t.rail(x, 0), "main line at " + x);
+    }
+
     @Test
     void shortTrackPiecesWhereTracksMergeAreDropped() {
         SwdCell c = Cells.flat(600);

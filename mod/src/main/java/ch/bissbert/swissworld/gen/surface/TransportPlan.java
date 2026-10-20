@@ -370,7 +370,9 @@ public final class TransportPlan {
     /**
      * Two tracks drawn side by side (two centre lines touching, or one drawn two wide) thinned to one: pass by pass,
      * the centres with no centre on the pass's side are dropped where that keeps their neighbours joined and does not
-     * shorten a track (a simple point of the 4-connected centres). Each pass looks one column further around.
+     * shorten a track (a simple point of the 4-connected centres). Each pass looks one column further around. A
+     * main-line centre (swd-format §5, bit5) that touches another track's centre stays: the other track gives way, so
+     * where two tracks run side by side the main line keeps its rails (2339,-1987).
      */
     private boolean thin(int x, int z, int pass) {
         if (pass == 0) return c00(x, z);
@@ -380,10 +382,19 @@ public final class TransportPlan {
         boolean keep = thin(x, z, pass - 1);
         if (keep) {
             int[] d = DIRS[THIN[pass - 1]];
-            if (!thin(x + d[0], z + d[1], pass - 1) && simple(x, z, pass - 1)) keep = false;
+            if (!thin(x + d[0], z + d[1], pass - 1) && simple(x, z, pass - 1) && !mainBeside(x, z, pass - 1)) keep = false;
         }
         cache[k] = keep ? 1 : 0;
         return keep;
+    }
+
+    /** A main-line centre with a centre of another track (or a gap column between tracks) beside it. */
+    private boolean mainBeside(int x, int z, int pass) {
+        if (!g.flag(x, z, ColumnGrid.MAIN)) return false;
+        for (int[] d : DIRS) {
+            if (thin(x + d[0], z + d[1], pass) && !g.flag(x + d[0], z + d[1], ColumnGrid.MAIN)) return true;
+        }
+        return false;
     }
 
     /** Ring of the eight neighbours, clockwise from north. */
