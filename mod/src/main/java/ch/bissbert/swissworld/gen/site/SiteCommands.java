@@ -11,11 +11,14 @@ public final class SiteCommands {
 
     public static int stats(CommandSourceStack s) {
         for (String line : GenStats.table()) s.sendSystemMessage(Component.literal(line));
+        s.sendSystemMessage(Component.literal(String.format("site plans cached %d, cell misses %d, guard violations %d",
+                SitePlans.cached(), SitePlans.misses(), SiteWriter.violations())));
         return 1;
     }
 
     public static int resetStats(CommandSourceStack s) {
         GenStats.reset();
+        SiteWriter.reset();
         s.sendSystemMessage(Component.literal("gen stats reset"));
         return 1;
     }

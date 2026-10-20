@@ -1,5 +1,6 @@
 package ch.bissbert.swissworld.gen.building;
 
+import ch.bissbert.swissworld.gen.site.SiteWriter;
 import ch.bissbert.swissworld.cell.SwissCoords;
 import ch.bissbert.swissworld.gen.GenContext;
 import ch.bissbert.swissworld.gen.GenStage;
@@ -26,7 +27,7 @@ public final class BuildingStage implements GenStage {
     @Override
     public void apply(GenContext ctx) {
         CellView view = CellView.of(ctx);
-        Put put = new Put(ctx.chunk);
+        Put put = new Put(ctx.chunk, SiteWriter.of(ctx, SiteWriter.Stage.BUILDING));
         for (BuildingPlan p : Buildings.near(view, put.minX(), put.minZ())) shell(p, put, view);
     }
 

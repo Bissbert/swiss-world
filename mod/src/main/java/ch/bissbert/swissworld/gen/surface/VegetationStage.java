@@ -2,7 +2,9 @@ package ch.bissbert.swissworld.gen.surface;
 
 import ch.bissbert.swissworld.gen.GenContext;
 import ch.bissbert.swissworld.gen.GenStage;
+import ch.bissbert.swissworld.gen.site.Claim;
 import ch.bissbert.swissworld.gen.site.SitePlan;
+import ch.bissbert.swissworld.gen.site.SiteWriter;
 import java.util.List;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -33,6 +35,7 @@ public final class VegetationStage implements GenStage {
     public void apply(GenContext ctx) {
         ChunkAccess chunk = ctx.chunk;
         SitePlan site = ctx.site();
+        SiteWriter w = SiteWriter.of(ctx, SiteWriter.Stage.VEGETATION);
         ColumnGrid g = site != null ? site.grid() : ColumnGrid.of(ctx);
         int x0 = chunk.getPos().getMinBlockX(), z0 = chunk.getPos().getMinBlockZ();
         BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
@@ -44,14 +47,15 @@ public final class VegetationStage implements GenStage {
             for (int i = 0; i < trees.size(); i++) {
                 TreePlan.Tree t = trees.get(i);
                 int base = g.ground(t.x(), t.z()) + 1;
+                if (!fits(site, t, shapes.get(i), base)) continue;
                 for (TreePlan.Part p : shapes.get(i)) {
                     if (p.log() != logs) continue;
                     int x = t.x() + p.dx(), z = t.z() + p.dz(), y = base + p.dy();
                     if (x < x0 || x > x0 + 15 || z < z0 || z > z0 + 15) continue;
                     if (g.hasBuilding(x, z) || TreePlan.surfaceOverlay(g, x, z) && y <= g.deck(x, z) + TreePlan.OVERLAY_CLEARANCE) continue;
                     pos.set(x, y, z);
-                    if (!chunk.getBlockState(pos).isAir()) continue;
-                    chunk.setBlockState(pos, block(t.species(), p), false);
+                    if (!chunk.getBlockState(pos).isAir() || !w.allowed(x, y, z)) continue;
+                    w.set(x, y, z, block(t.species(), p));
                     if (!p.log() && y >= g.ground(x, z) + 3) shade[(z - z0) * 16 + x - x0] = true;
                 }
             }
@@ -59,9 +63,37 @@ public final class VegetationStage implements GenStage {
         for (int lx = 0; lx < 16; lx++) {
             for (int lz = 0; lz < 16; lz++) {
                 int x = x0 + lx, z = z0 + lz;
-                if (g.present(x, z)) column(chunk, g, x, z, shade[lz * 16 + lx], pos);
+                if (g.present(x, z)) column(chunk, w, g, x, z, shade[lz * 16 + lx], pos);
             }
         }
+    }
+
+    /**
+     * A tree is planted only where it fits the site: on natural ground (or an earthwork or bank), with no part in a
+     * structure, building or landing column below its crown clearance, no part under the deck of a way or bridge or
+     * the surface of water, and no log over a way or water. Leaves hanging high over a way are only trimmed.
+     * Decided from the site plan's claims (tile + PAD covers every part), so every chunk the tree reaches agrees.
+     */
+    static boolean fits(SitePlan site, TreePlan.Tree t, List<TreePlan.Part> shape, int base) {
+        if (site == null) return true;
+        Claim at = site.claim(t.x(), t.z());
+        if (at != Claim.FREE && at != Claim.EARTHWORK && at != Claim.BANK) return false;
+        for (TreePlan.Part p : shape) {
+            int x = t.x() + p.dx(), z = t.z() + p.dz(), y = base + p.dy();
+            if (!site.covers(x, z)) continue;
+            Claim c = site.claim(x, z);
+            int g = site.ground(x, z);
+            switch (c) {
+                case FREE, EARTHWORK, BANK -> {}
+                case STRUCTURE, BUILDING, LANDING -> {
+                    if (y <= g + SiteWriter.CROWN_CLEARANCE) return false;
+                }
+                default -> {
+                    if (y < g || p.log() && y <= g + SiteWriter.CROWN_CLEARANCE) return false;
+                }
+            }
+        }
+        return true;
     }
 
     private static BlockState block(TreePlan.Species s, TreePlan.Part p) {
@@ -85,9 +117,10 @@ public final class VegetationStage implements GenStage {
      * Ground cover, rows and ice of one column. Plants go only onto grass with air above. Forest floor in the shade of
      * a crown gets ferns and moss (podzol under conifers), no flowers; gaps get grass and flowers.
      */
-    private static void column(ChunkAccess chunk, ColumnGrid g, int x, int z, boolean shade, BlockPos.MutableBlockPos pos) {
+    private static void column(ChunkAccess chunk, SiteWriter w, ColumnGrid g, int x, int z, boolean shade, BlockPos.MutableBlockPos pos) {
         int surf = g.surf(x, z);
         if (TreePlan.surfaceOverlay(g, x, z) || g.hasBuilding(x, z) || g.source(x, z) != ColumnGrid.NONE) return;
+        if (!w.treeGround(x, z)) return;
         int ground = g.ground(x, z);
         if (g.top(x, z) != ground) return;
         long e = g.east(x), n = g.north(z);
@@ -114,7 +147,7 @@ public final class VegetationStage implements GenStage {
                     yield r < 0.3 ? Blocks.SHORT_GRASS.defaultBlockState() : r < 0.36 ? Blocks.FERN.defaultBlockState() : null;
                 }
                 if (surf != 1 && groundState.is(Blocks.GRASS_BLOCK) && ColumnHash.unit(e, n, SALT_PODZOL) < 0.35) {
-                    chunk.setBlockState(pos.set(x, ground, z), Blocks.PODZOL.defaultBlockState(), false);
+                    w.set(x, ground, z, Blocks.PODZOL.defaultBlockState());
                 }
                 yield r < 0.1 ? Blocks.FERN.defaultBlockState() : r < 0.18 ? Blocks.MOSS_CARPET.defaultBlockState() : null;
             }
@@ -123,7 +156,7 @@ public final class VegetationStage implements GenStage {
             case 13 -> vine(e, n);
             default -> null;
         };
-        if (plant != null) chunk.setBlockState(pos.set(x, ground + 1, z), plant, false);
+        if (plant != null) w.set(x, ground + 1, z, plant);
     }
 
     /** Vineyard: east-west rows every 3 m, a post every 5 m, vines (persistent leaves) between. */

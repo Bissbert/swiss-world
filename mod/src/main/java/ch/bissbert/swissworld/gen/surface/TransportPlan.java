@@ -47,7 +47,7 @@ public final class TransportPlan {
     private static final int UNSET = Integer.MAX_VALUE;
 
     private final ColumnGrid g;
-    private final int[] roadHalf, railBase, railProfile, railNode, railLevel, floor, ceil, wet, gap, joins, flipped, low;
+    private final int[] roadHalf, railBase, railProfile, railNode, railLevel, floor, ceil, wet, gap, joins, flipped, low, sealed;
     private final int[][] thinned;
 
     public TransportPlan(ColumnGrid g) {
@@ -66,6 +66,7 @@ public final class TransportPlan {
         joins = filled(n);
         flipped = filled(n);
         low = filled(n);
+        sealed = filled(n);
         thinned = new int[THIN.length][];
         for (int i = 0; i < THIN.length; i++) thinned[i] = filled(n);
     }
@@ -138,7 +139,90 @@ public final class TransportPlan {
      * through the bore, and then the bore wins: the column is part of the tunnel and the way gives way to it.
      */
     public boolean absorbed(int x, int z) {
-        return way(x, z) && !g.flag(x, z, ColumnGrid.TUNNEL) && tunnelFloor(x, z) != NONE && !over(x, z);
+        return way(x, z) && !g.flag(x, z, ColumnGrid.TUNNEL) && tunnelFloor(x, z) != NONE && !over(x, z) && !seals(x, z);
+    }
+
+    /**
+     * A rail way on the ground that a road or path bore would absorb (an underpass under a rail yard whose cover is
+     * thinner than the bore): the rail wins. The column is built as open rail and the bore is closed under it, so the
+     * yard stays one level deck without the bore's lining or old ground sticking up between the tracks. A rail
+     * tunnel's own bore is never closed. Owner of this rule: mod-siteplan (site priority rail over road).
+     */
+    public boolean seals(int x, int z) {
+        if (!g.present(x, z)) return false;
+        int k = g.index(x, z);
+        if (sealed[k] == UNSET) sealed[k] = computeSeals(x, z) ? 1 : 0;
+        return sealed[k] == 1;
+    }
+
+    private boolean computeSeals(int x, int z) {
+        boolean rail = railWay(x, z);
+        if (tunnel(x, z)) {
+            // a lone pixel of a road or path tunnel among the tracks: nothing to walk through, closed with the yard
+            // (a real underpass is a band at least three wide: a 5x5 window around any of its columns holds 9 or more)
+            if (rail) return false;
+            int bore = 0;
+            boolean yard = false;
+            for (int j = -2; j <= 2; j++) {
+                for (int i = -2; i <= 2; i++) {
+                    if (tunnel(x + i, z + j) && !railWay(x + i, z + j)) bore++;
+                    if (Math.abs(i) <= 1 && Math.abs(j) <= 1) yard |= railWay(x + i, z + j) && !g.flag(x + i, z + j, ColumnGrid.TUNNEL);
+                }
+            }
+            return yard && bore <= 4 && !railBore(x, z);
+        }
+        if (g.flag(x, z, ColumnGrid.TUNNEL)) return false;
+        if (rail) {
+            if (tunnelFloor(x, z) == NONE || over(x, z)) return false;
+        } else {
+            // what is left of such a bore between the tracks (profile, wall, or a platform it absorbed) with no open
+            // tunnel way of its own near: a platform is built as a platform again, the rest filled to the yard
+            if (tunnelFloor(x, z) == NONE && (way(x, z) || !tunnelWall(x, z))) return false;
+            if (tunnelFloor(x, z) == NONE) {
+                // a wall lines the profile beside it: once all of that is closed, nothing is left to line
+                for (int j = -1; j <= 1; j++) {
+                    for (int i = -1; i <= 1; i++) {
+                        if (tunnelFloor(x + i, z + j) != NONE && !seals(x + i, z + j)) return false;
+                    }
+                }
+                return !railBore(x, z);
+            }
+            for (int j = -2; j <= 2; j++) {
+                for (int i = -2; i <= 2; i++) {
+                    if (tunnel(x + i, z + j) && !seals(x + i, z + j)) return false;
+                }
+            }
+            boolean yard = false;
+            for (int j = -1; j <= 1 && !yard; j++) {
+                for (int i = -1; i <= 1 && !yard; i++) {
+                    int nx = x + i, nz = z + j; // (only rail and tunnel columns asked: their seals() never asks back)
+                    yard = (i != 0 || j != 0) && (railWay(nx, nz) && !g.flag(nx, nz, ColumnGrid.TUNNEL) && !over(nx, nz)
+                            || tunnel(nx, nz) && seals(nx, nz));
+                }
+            }
+            if (!yard) return false;
+        }
+        return !railBore(x, z);
+    }
+
+    private boolean railBore(int x, int z) {
+        int cls = boreClass(x, z);
+        return cls == OverlayPlan.RAIL_BED || cls == OverlayPlan.RACK_BED;
+    }
+
+    /**
+     * The yard level a sealed column that is no rail way of its own is filled to ({@link #seals}): the lowest ballast
+     * of the rail ways around it. NONE for any other column.
+     */
+    public int yardDeck(int x, int z) {
+        if (way(x, z) && !tunnel(x, z) || !seals(x, z)) return NONE;
+        int d = Integer.MAX_VALUE;
+        for (int j = -1; j <= 1; j++) {
+            for (int i = -1; i <= 1; i++) {
+                if ((i != 0 || j != 0) && railWay(x + i, z + j) && !g.flag(x + i, z + j, ColumnGrid.TUNNEL)) d = Math.min(d, deck(x + i, z + j));
+            }
+        }
+        return d == Integer.MAX_VALUE ? NONE : d;
     }
 
     /** A way without the tunnel flag whose deck lies above the lining of a bore under it: both are built, apart. */
@@ -1379,7 +1463,7 @@ public final class TransportPlan {
 
     /** Part of a tunnel (profile or wall): earthworks leave it alone. */
     public boolean structure(int x, int z) {
-        return tunnelFloor(x, z) != NONE || tunnelWall(x, z);
+        return (tunnelFloor(x, z) != NONE || tunnelWall(x, z)) && !seals(x, z);
     }
 
     // ---------------------------------------------------------------- blocks
@@ -1411,6 +1495,14 @@ public final class TransportPlan {
      */
     public boolean build(int x, int z, Sink out) {
         if (!g.present(x, z)) return true;
+        int yard = yardDeck(x, z);
+        if (yard != NONE) {
+            int top = g.top(x, z);
+            for (int y = yard + 1; y <= top; y++) out.set(y, Part.AIR);
+            for (int y = top + 1; y < yard; y++) out.set(y, Part.FILL);
+            out.set(yard, Part.BALLAST);
+            return true;
+        }
         if (structure(x, z)) {
             tunnelColumn(x, z, out);
             if (over(x, z)) wayColumn(x, z, tunnelHighCeiling(x, z) + 1, out);

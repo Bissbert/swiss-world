@@ -1,5 +1,6 @@
 package ch.bissbert.swissworld.gen.building;
 
+import ch.bissbert.swissworld.gen.site.SiteWriter;
 import ch.bissbert.swissworld.SwissWorld;
 import ch.bissbert.swissworld.gen.GenContext;
 import ch.bissbert.swissworld.gen.GenStage;
@@ -27,7 +28,7 @@ public final class LootStage implements GenStage {
     @Override
     public void apply(GenContext ctx) {
         CellView view = CellView.of(ctx);
-        Put put = new Put(ctx.chunk);
+        Put put = new Put(ctx.chunk, SiteWriter.of(ctx, SiteWriter.Stage.LOOT));
         for (BuildingPlan p : Buildings.near(view, put.minX(), put.minZ())) {
             for (BuildingPlan.Prop pr : p.props()) if (pr.kind().container()) place(p, pr, put);
         }

@@ -161,6 +161,11 @@ public final class SitePlan {
         return x >= x0 && x < x0 + TILE && z >= z0 && z < z0 + TILE;
     }
 
+    /** Claim and G are known for (x, z): the tile plus {@link #PAD}. */
+    public boolean covers(int x, int z) {
+        return x >= x0 - PAD && x < x0 + TILE + PAD && z >= z0 - PAD && z < z0 + TILE + PAD;
+    }
+
     private int index(int x, int z) {
         int i = x - x0 + PAD, j = z - z0 + PAD;
         if (i < 0 || j < 0 || i >= SIDE || j >= SIDE) {
@@ -234,9 +239,13 @@ public final class SitePlan {
         int k = index(x, z);
         Claim c;
         int gy;
+        int yard = g.present(x, z) ? t.yardDeck(x, z) : ColumnGrid.NONE;
         if (!g.present(x, z)) {
             c = Claim.WATER;
             gy = g.ground(x, z);
+        } else if (yard != ColumnGrid.NONE) {
+            c = Claim.RAIL; // a bore closed under a rail yard: filled to the yard's ballast
+            gy = yard;
         } else if (t.structure(x, z)) {
             int hi = t.tunnelHighCeiling(x, z), top = g.top(x, z);
             if (t.over(x, z)) {

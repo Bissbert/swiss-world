@@ -3,6 +3,7 @@ package ch.bissbert.swissworld.gen.surface;
 import ch.bissbert.swissworld.gen.GenContext;
 import ch.bissbert.swissworld.gen.GenStage;
 import ch.bissbert.swissworld.gen.site.SitePlan;
+import ch.bissbert.swissworld.gen.site.SiteWriter;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.tags.BlockTags;
@@ -48,14 +49,15 @@ public final class OverlayStage implements GenStage {
         SitePlan site = ctx.site();
         ColumnGrid g = site != null ? site.grid() : ColumnGrid.of(ctx, TransportPlan.MARGIN);
         TransportPlan t = site != null ? site.transport() : new TransportPlan(g);
+        SiteWriter w = SiteWriter.of(ctx, SiteWriter.Stage.OVERLAY);
         int x0 = chunk.getPos().getMinBlockX(), z0 = chunk.getPos().getMinBlockZ();
         BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
         for (int lx = 0; lx < 16; lx++) {
             for (int lz = 0; lz < 16; lz++) {
                 int x = x0 + lx, z = z0 + lz;
                 BlockState top = chunk.getBlockState(pos.set(x, g.present(x, z) ? g.top(x, z) : 0, z));
-                boolean done = t.build(x, z, (y, part) -> set(chunk, pos, x, y, z, block(t, x, z, part, y, top)));
-                if (!done) column(chunk, t, x, z, pos);
+                boolean done = t.build(x, z, (y, part) -> set(w, x, y, z, block(t, x, z, part, y, top)));
+                if (!done) column(w, t, x, z, pos);
             }
         }
     }
@@ -85,7 +87,7 @@ public final class OverlayStage implements GenStage {
     }
 
     /** Steps, dams, grass and other overlay that keeps its {@link ColumnGrid#deck}. */
-    private static void column(ChunkAccess chunk, TransportPlan t, int x, int z, BlockPos.MutableBlockPos pos) {
+    private static void column(SiteWriter w, TransportPlan t, int x, int z, BlockPos.MutableBlockPos pos) {
         ColumnGrid g = t.grid();
         int cls = g.overlay(x, z);
         boolean bridge = g.flag(x, z, ColumnGrid.BRIDGE);
@@ -96,23 +98,23 @@ public final class OverlayStage implements GenStage {
         int top = g.top(x, z), deck = g.deck(x, z);
 
         if (g.flag(x, z, ColumnGrid.DAM_BODY)) {
-            for (int y = g.ground(x, z) + 1; y < deck; y++) set(chunk, pos, x, y, z, DAM_BODY);
+            for (int y = g.ground(x, z) + 1; y < deck; y++) set(w, x, y, z, DAM_BODY);
         } else if (bridge) {
-            set(chunk, pos, x, deck - 1, z, BEAM);
+            set(w, x, deck - 1, z, BEAM);
             if (OverlayPlan.pier(g, x, z)) {
-                for (int y = g.ground(x, z) + 1; y <= deck - 2; y++) set(chunk, pos, x, y, z, BEAM);
+                for (int y = g.ground(x, z) + 1; y <= deck - 2; y++) set(w, x, y, z, BEAM);
             }
         } else if (deck > top) {
-            for (int y = top + 1; y < deck; y++) set(chunk, pos, x, y, z, FILL);
+            for (int y = top + 1; y < deck; y++) set(w, x, y, z, FILL);
         }
         if (deck < top && !wet) {
             // never cut below a neighbour's water: that wall holds it
             int keep = Math.max(deck, WaterPlan.neighbourSource(g, x, z));
-            for (int y = keep + 1; y <= top; y++) set(chunk, pos, x, y, z, AIR);
+            for (int y = keep + 1; y <= top; y++) set(w, x, y, z, AIR);
         }
         if (cls == 0) return;
-        set(chunk, pos, x, deck, z, surface(g, x, z, cls, deck));
-        if (t.railing(x, z)) set(chunk, pos, x, deck + 1, z, railing(t, x, z));
+        set(w, x, deck, z, surface(g, x, z, cls, deck));
+        if (t.railing(x, z)) set(w, x, deck + 1, z, railing(t, x, z));
     }
 
     /** A bore's floor under a way it took over: ballast in a rail tunnel, the road's surface in a road tunnel. */
@@ -183,7 +185,7 @@ public final class OverlayStage implements GenStage {
                 .setValue(WallBlock.WEST_WALL, w ? WallSide.LOW : WallSide.NONE);
     }
 
-    private static void set(ChunkAccess chunk, BlockPos.MutableBlockPos pos, int x, int y, int z, BlockState s) {
-        chunk.setBlockState(pos.set(x, y, z), s, false);
+    private static void set(SiteWriter w, int x, int y, int z, BlockState s) {
+        w.set(x, y, z, s);
     }
 }

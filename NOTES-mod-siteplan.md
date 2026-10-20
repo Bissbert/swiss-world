@@ -1,7 +1,7 @@
 # NOTES mod-siteplan
 
 Owner of `mod/src/main/java/ch/bissbert/swissworld/gen/site/`: `SitePlan`, `Claim`, `GenStats`, `WriteTrace`,
-`SiteCommands` (and the site-plan cache / write guard once they land).
+`SiteCommands`, `SitePlans` (cache), `SiteWriter` (write guard).
 
 ## Read API for other stages (mod-texture: GroundTextureStage)
 
@@ -40,3 +40,30 @@ int   d   = site.distanceTo(Claim.ROAD, x, z); // Chebyshev columns, 0..16
 128 x 128 columns, chunk aligned (8 x 8 chunks), `SitePlan.tile(x) = floorDiv(x, 128)`. Margin of data around it:
 `SitePlan.MARGIN` = PAD 16 + `TransportPlan.MARGIN` 36 = 52. Per chunk the same margin would sample (16+104)²/16² = 56
 columns per column; per tile (128+104)²/128² = 3.3. A 1 km cell is not chunk aligned and holds ~3,900 chunks.
+
+## Cache (`SitePlans`)
+
+`SitePlans.forColumn(cache, coords, x, z, exec)` requests the cells of tile ± MARGIN from `CellCache` (async, never a
+synchronous `.swd` read on the gen thread), then the cells the buildings near the tile reach (`BUILDING_REACH` 48),
+then computes the plan once on the worldgen executor. LRU of `-Dswissworld.siteplan.cache` tiles (default 24), keyed
+by tile and which cells exist; a failed/aborted plan is dropped and asked again. `CELL_MARGIN` in the generator is now
+`SitePlan.MARGIN` (tile ± 52 covers chunk ± 36). Cell reads outside the requested set count as `SitePlans.misses()`
+(should stay 0). `/swiss admin stats` prints cached plans, misses and guard violations.
+
+## Write guard (`SiteWriter`)
+
+Water, Overlay, Building/Furnish/Loot (via `Put`) and Vegetation write through `SiteWriter.of(ctx, stage)`. Rules by
+claim and y against G: water only under the deck of ways/structures/buildings; overlay not above G in BUILDING/LANDING;
+buildings not in a way/structure column below G + 3 (they yield: `Put` skips silently, the stage checks first); trees
+and ground cover only on FREE/EARTHWORK/BANK, crowns over ways/water only above G + 5. A dropped write is counted and,
+with `-Dswissworld.trace=true` or `-Dswissworld.guard.log=true`, logged (first 200). New stages that write should use it.
+Sweep: `SWISSWORLD_SWEEP_STORE=<store> [SWISSWORLD_SWEEP_CHUNKS=4] ./gradlew test --tests '*SiteGuardSweepTest*'`
+(asserts 0 violations; 789 chunks / 27 tiles at grow 4). `PipelineGoldenTest` (GOLDEN_OUT/GOLDEN_IN) hashes chunks for
+refactoring checks.
+
+## Rail over road bores
+
+`TransportPlan.seals`: a road/path bore under an open rail yard whose cover is thinner than the bore loses to the rail:
+the rail column is built as open rail, small road-tunnel stubs and orphan lining/walls between the tracks are filled
+to the yard ballast (`yardDeck`, claim RAIL), absorbed platforms are built as platforms again. Fixes the stone-brick /
+grass bumps and pits between the tracks at Interlaken Ost.

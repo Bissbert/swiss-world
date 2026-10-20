@@ -1,5 +1,6 @@
 package ch.bissbert.swissworld.gen.surface;
 
+import ch.bissbert.swissworld.gen.site.SiteWriter;
 import ch.bissbert.swissworld.gen.GenContext;
 import ch.bissbert.swissworld.gen.GenStage;
 import ch.bissbert.swissworld.gen.stage.TerrainStage;
@@ -73,6 +74,7 @@ public final class WaterStage implements GenStage {
     public void apply(GenContext ctx) {
         ChunkAccess chunk = ctx.chunk;
         ColumnGrid g = ctx.site() != null ? ctx.site().grid() : ColumnGrid.of(ctx);
+        SiteWriter w = SiteWriter.of(ctx, SiteWriter.Stage.WATER);
         int x0 = chunk.getPos().getMinBlockX(), z0 = chunk.getPos().getMinBlockZ();
         BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
         for (int lx = 0; lx < 16; lx++) {
@@ -87,41 +89,41 @@ public final class WaterStage implements GenStage {
                     for (int y = face[0]; y <= face[1]; y++) {
                         if (chunk.getBlockState(pos.set(x, y, z)).is(Blocks.STONE)
                                 && chunk.getBlockState(pos.set(x, y - 1, z)).isSolid()) {
-                            chunk.setBlockState(pos.set(x, y, z), BANK_TOP, false);
+                            w.set(x, y, z, BANK_TOP);
                         }
                     }
                 }
                 WaterPlan.Fill f = WaterPlan.fill(g, x, z);
                 if (f != null && f.reed()) {
                     int s = f.sourceTop();
-                    for (int y = bottom; y < s - 1; y++) chunk.setBlockState(pos.set(x, y, z), FILL, false);
-                    chunk.setBlockState(pos.set(x, s - 1, z), REED_BED, false);
-                    chunk.setBlockState(pos.set(x, s, z), REED, false);
-                    chunk.setBlockState(pos.set(x, f.fallTop(), z), FLOWING, false);
+                    for (int y = bottom; y < s - 1; y++) w.set(x, y, z, FILL);
+                    w.set(x, s - 1, z, REED_BED);
+                    w.set(x, s, z, REED);
+                    w.set(x, f.fallTop(), z, FLOWING);
                     continue;
                 }
                 if (f != null && f.cane()) {
                     int s = f.sourceTop();
-                    for (int y = bottom; y < s; y++) chunk.setBlockState(pos.set(x, y, z), FILL, false);
-                    chunk.setBlockState(pos.set(x, s, z), REED_BED, false);
-                    for (int y = s + 1; y <= f.fallTop(); y++) chunk.setBlockState(pos.set(x, y, z), REED, false);
+                    for (int y = bottom; y < s; y++) w.set(x, y, z, FILL);
+                    w.set(x, s, z, REED_BED);
+                    for (int y = s + 1; y <= f.fallTop(); y++) w.set(x, y, z, REED);
                     continue;
                 }
                 if (f != null) {
-                    for (int y = bottom; y <= f.sourceTop(); y++) chunk.setBlockState(pos.set(x, y, z), WATER, false);
-                    if (f.lip()) chunk.setBlockState(pos.set(x, f.sourceTop() + 1, z), LIP, false);
+                    for (int y = bottom; y <= f.sourceTop(); y++) w.set(x, y, z, WATER);
+                    if (f.lip()) w.set(x, f.sourceTop() + 1, z, LIP);
                     if (f.rock()) {
-                        for (int y = f.sourceTop() + 1; y <= f.fallTop(); y++) chunk.setBlockState(pos.set(x, y, z), rock(ground, y == f.fallTop()), false);
+                        for (int y = f.sourceTop() + 1; y <= f.fallTop(); y++) w.set(x, y, z, rock(ground, y == f.fallTop()));
                         continue;
                     }
-                    for (int y = f.sourceTop() + 1; y < f.fallTop(); y++) chunk.setBlockState(pos.set(x, y, z), FALLING, false);
-                    if (f.falls()) chunk.setBlockState(pos.set(x, f.fallTop(), z), FLOWING, false);
+                    for (int y = f.sourceTop() + 1; y < f.fallTop(); y++) w.set(x, y, z, FALLING);
+                    if (f.falls()) w.set(x, f.fallTop(), z, FLOWING);
                     continue;
                 }
                 int bank = WaterPlan.bankTop(g, x, z);
                 for (int y = bottom; y <= bank; y++) {
                     // the ground's own top block on earth: a bank side that shows in the water is no stone wall
-                    chunk.setBlockState(pos.set(x, y, z), y == bank ? ground : under(ground), false);
+                    w.set(x, y, z, y == bank ? ground : under(ground));
                 }
             }
         }

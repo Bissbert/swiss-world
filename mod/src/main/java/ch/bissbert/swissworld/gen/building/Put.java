@@ -1,5 +1,6 @@
 package ch.bissbert.swissworld.gen.building;
 
+import ch.bissbert.swissworld.gen.site.SiteWriter;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.level.block.EntityBlock;
@@ -20,12 +21,23 @@ public final class Put {
 
     private final ChunkAccess chunk;
     private final Sink sink;
+    private final SiteWriter guard;
     private final int x0, z0, minY, maxY;
     private final BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
 
     public Put(ChunkAccess chunk) {
+        this(chunk, null);
+    }
+
+    /**
+     * Writes to the chunk, leaving out every block the site plan does not give the building ({@link SiteWriter#allowed}):
+     * where a way, a bridge or a tunnel crosses its footprint, the building is cut back to the way's head room.
+     * {@code guard} null: everything is written.
+     */
+    public Put(ChunkAccess chunk, SiteWriter guard) {
         this.chunk = chunk;
         this.sink = null;
+        this.guard = guard;
         this.x0 = chunk.getPos().getMinBlockX();
         this.z0 = chunk.getPos().getMinBlockZ();
         this.minY = chunk.getMinBuildHeight();
@@ -36,6 +48,7 @@ public final class Put {
     public Put(int x0, int z0, int minY, int maxY, Sink sink) {
         this.chunk = null;
         this.sink = sink;
+        this.guard = null;
         this.x0 = x0;
         this.z0 = z0;
         this.minY = minY;
@@ -61,6 +74,8 @@ public final class Put {
     /** Sets the block and returns its new block entity, or null. */
     public BlockEntity entity(int x, int y, int z, BlockState s) {
         if (!in(x, z) || y <= minY || y >= maxY) return null;
+        // a building yields to the higher claims around it (ways, structures): its blocks there are left out
+        if (guard != null && !guard.allowed(x, y, z)) return null;
         pos.set(x, y, z);
         if (sink != null) {
             sink.set(pos, s);
