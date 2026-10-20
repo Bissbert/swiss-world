@@ -12,6 +12,9 @@ Needs an offline-mode server with network-compression-threshold=-1. Op the bot w
                          real client, which freezes in unloaded chunks); the server's "moved wrongly" correction acts as
                          the ground (the next packet then says on ground, so fall damage applies). Prints the y once a second, health changes, the action bar and death
     respawn              request a respawn after death
+    look:<yaw>           turn to yaw degrees (0 south, -90 east, 90 west, 180 north), pitch 0
+    ride:<fwd>,<seconds> while riding a vehicle, send the movement keys every tick: forward fwd (1 forward key, -1 back,
+                         0 none) and the rotation, like the client does for a passenger
     complete:<command>   ask for tab completion of a command line (no leading slash), print the suggestions
 
 BOT_VIEW=<chunks> sets the requested view distance (default 8; the server clamps it to its own).
@@ -310,6 +313,20 @@ def main() -> None:
             bot.send(0x09, varint(0))
             bot.dead = False
             time.sleep(1)
+        elif kind == "look":
+            bot.yaw = float(arg)
+            bot.send(0x1C, struct.pack(">ff?", bot.yaw, 0.0, False))
+            time.sleep(0.2)
+        elif kind == "ride":
+            fwd, secs = (float(a) for a in arg.split(","))
+            start = time.time()
+            for t in range(1, int(secs * 20) + 1):
+                if not bot.alive:
+                    break
+                # the client sends its rotation every tick while riding: that is what moves its chunk tracking
+                bot.send(0x1C, struct.pack(">ff?", getattr(bot, "yaw", 0.0), 0.0, False))
+                bot.send(0x26, struct.pack(">ffB", 0.0, fwd * 0.98, 0))
+                time.sleep(max(0.0, start + t / 20 - time.time()))
         elif kind == "walk":
             dx, dz, v = (float(a) for a in arg.split(","))
             bot.walk(dx, dz, v)
