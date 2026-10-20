@@ -651,8 +651,7 @@ class TransportPlanTest {
      * Meiringen (flags as in cell 2656_1175, x 23764.., z -4880..): the line from Interlaken (trunk, T) and the one
      * from Luzern (main line, M) run a column or two apart and merge. Their rails touch in squares of four rails, a
      * switch at two opposite corners (23789,-4868); each switch kept its straight pair, the two went round a square
-     * on different sides, and the line from Interlaken ended there. Both switches of a square now drop the same side,
-     * and where three arms run on the trunk the switch keeps two of them.
+     * on different sides, and the line from Interlaken ended there. Both switches of a square now drop the same side.
      */
     @Test
     void trunkRunsThroughWhereTwoMainLinesMerge() {
