@@ -148,6 +148,7 @@ public final class SwissChunkGenerator extends ChunkGenerator {
         }
         long t = System.nanoTime();
         GenStats.record(GenStats.BIOMES, t - t0);
+        long traced = 0;
         for (int i = 0; i < PIPELINE.size(); i++) {
             GenStage stage = PIPELINE.get(i);
             Object before = WriteTrace.ENABLED && i > 0 ? WriteTrace.snapshot(chunk) : null;
@@ -156,12 +157,15 @@ public final class SwissChunkGenerator extends ChunkGenerator {
             GenStats.record(STAGE_NAMES.get(i), now - t);
             if (before != null) {
                 WriteTrace.diff(chunk, before, i);
-                now = System.nanoTime(); // the trace's own cost is not the stage's
+                long after = System.nanoTime(); // the trace's own cost is not the stage's, nor the chunk's
+                traced += after - now;
+                now = after;
             }
             t = now;
         }
-        SwissRuntime.recordChunk(System.nanoTime() - t0);
-        GenStats.chunk(System.nanoTime() - t0);
+        long total = System.nanoTime() - t0 - traced;
+        SwissRuntime.recordChunk(total);
+        GenStats.chunk(total);
     }
 
     /** Stage names by pipeline index, for {@link GenStats} and {@link WriteTrace}. */
