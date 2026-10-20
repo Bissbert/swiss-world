@@ -12,6 +12,7 @@ import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 class TransportPlanTest {
@@ -830,8 +831,8 @@ class TransportPlanTest {
      * track.
      */
     @ParameterizedTest
-    @ValueSource(doubles = {0, 0.1, 0.3})
-    void roadAcrossATunnelAtASlantIsBoredUnder(double slope) {
+    @CsvSource({"0, false", "0.1, false", "0.3, false", "0, true", "0.3, true"})
+    void roadAcrossATunnelAtASlantIsBoredUnder(double slope, boolean band) {
         SwdCell c = Cells.flat(600);
         Voxels.terrain(c, (x, z) -> {
             double a = Math.abs(x + z) / 2.0;
@@ -846,6 +847,13 @@ class TransportPlanTest {
         // a road four wide over the hill, north to south: later wins, so it takes the tunnel's columns
         for (int z = -30; z <= 30; z++) {
             for (int x = -2; x <= 1; x++) Cells.overlay(c, x, z, 4, 0, Double.NaN);
+        }
+        if (band) {
+            // Brienz 12283,-7925: the centre line is cut a little beyond the road, the tunnel's band is not, so the
+            // join runs through band columns
+            for (int x = 2; x <= 3; x++) {
+                for (int z = x - 1; z <= x; z++) Cells.overlay(c, x, z, OverlayPlan.RAIL_BED, TUNNEL, 600 + slope * z);
+            }
         }
         Voxels v = new Voxels(c, -40, -40, 40, 40, -1420, -1370);
         List<String> bad = new ArrayList<>(railFaults(v));

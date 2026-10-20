@@ -991,10 +991,12 @@ public final class TransportPlan {
                 span = a + b;
                 best = f * 4 + kind;
             }
-            if (best == NONE || Math.floorMod(best, 4) != GAP_RAIL) {
-                int j = joinGap(x, z);
-                if (j != NONE) best = j;
-            }
+            // a join between two tunnel ends wins over the axis scan: one track, one level profile through the cut
+            int j = joinGap(x, z);
+            if (j != NONE) best = j;
+        } else if (g.present(x, z) && g.overlay(x, z) != 0 && !OverlayPlan.railCentre(g, x, z)) {
+            // a tunnel's own band column beside a cut centre line (the band is wider than the line)
+            best = joinGap(x, z);
         }
         return gap[k] = best;
     }
@@ -1032,8 +1034,7 @@ public final class TransportPlan {
                 boolean ok = true;
                 for (int q = 0; q < p.length && ok; q++) {
                     int px = p[q][0], pz = p[q][1];
-                    ok = g.present(px, pz) && g.overlay(px, pz) != 0 && !g.flag(px, pz, ColumnGrid.TUNNEL)
-                            && !OverlayPlan.railCentre(g, px, pz);
+                    ok = g.present(px, pz) && g.overlay(px, pz) != 0 && !OverlayPlan.railCentre(g, px, pz);
                     if (px == x && pz == z) at = q;
                 }
                 if (!ok || at < 0) continue;
@@ -1051,7 +1052,7 @@ public final class TransportPlan {
 
     /** A column of another way beside a {@link #joinGap} rail column, where a staircase corner may move (see {@link #flip}). */
     private boolean gapSide(int x, int z) {
-        if (!g.present(x, z) || railWay(x, z) || g.overlay(x, z) == 0 || g.flag(x, z, ColumnGrid.TUNNEL)) return false;
+        if (!g.present(x, z) || railWay(x, z) || g.overlay(x, z) == 0 || OverlayPlan.railCentre(g, x, z)) return false;
         if (gapKind(x, z) == GAP_RAIL) return false;
         for (int[] d : DIRS) if (gapKind(x + d[0], z + d[1]) == GAP_RAIL) return true;
         return false;
@@ -1149,7 +1150,7 @@ public final class TransportPlan {
     }
 
     private int boreDeck(int x, int z) {
-        return tunnel(x, z) ? deck(x, z) : Math.floorDiv(gap(x, z), 4);
+        return tunnel(x, z) && gapKind(x, z) != GAP_RAIL ? deck(x, z) : Math.floorDiv(gap(x, z), 4);
     }
 
     private boolean boreRoad(int x, int z) {
@@ -1410,8 +1411,9 @@ public final class TransportPlan {
             for (int y = floor + 1; y < ceil; y++) out.set(y, Part.AIR);
             for (int y = ceil; y <= hi; y++) out.set(y, Part.LINING);
             // a rail of a crossing way's bore that sits off its floor (a moved staircase corner) keeps its own level below
-            boolean own = !tunnel(x, z) && rail(x, z) && railLevel(x, z) != floor;
-            if (tunnel(x, z) || gapKind(x, z) == GAP_RAIL && !own) {
+            boolean own = (!tunnel(x, z) || gapSide(x, z) || gapKind(x, z) == GAP_RAIL) && rail(x, z)
+                    && railLevel(x, z) != floor;
+            if (!own && (tunnel(x, z) || gapKind(x, z) == GAP_RAIL)) {
                 boolean road = road(x, z) && tunnel(x, z);
                 out.set(floor, road ? Part.SURFACE : Part.BALLAST);
                 if (road && roadSlab(x, z)) out.set(floor + 1, Part.SLAB);
