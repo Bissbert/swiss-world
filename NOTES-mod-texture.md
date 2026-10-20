@@ -57,15 +57,18 @@ Enum ordinals are the ids. They are append-only.
 |---|---|
 | no cell | NONE |
 | water source on the column | WATER |
-| SURF 6, slope > 28° | CREVASSED |
+| SURF 6, slope 25–45° on a convex break (curvature over 4 m < −0.15 m) | CREVASSED |
 | SURF 6, snow < 4/8 and ≤ 4 columns from open ground | DEBRIS_GLACIER |
 | SURF 6 otherwise | GLACIER |
 | building or SURF 10 | URBAN_SEALED |
+| HABT (if the cell has it; never on SURF 11/12/13/16): forest in a river/delta Aue < 1,300 m, < 15° | RIPARIAN (other forest keeps its rules) |
+| HABT raised bog, < 12° / bog margin or fen, < 15° | RAISED_BOG / WET_MEADOW |
+| HABT Aue: glacier forefield < 25° / alpine plain < 10° near water / river or delta < 8° / lake shore < 8° | FOREFIELD or MORAINE / RIVERBED_GRAVEL / FLOODPLAIN (RIVERBED_GRAVEL on gravel banks) / ALPINE_LAKE_SHORE (≥ 1,500 m), REED_SHORE (≤ 6 columns from water), WET_MEADOW |
 | SURF 4: slope < 25° under a cliff | SCREE_CONE |
 | SURF 4: slope < 18° | KARST (limestone), else FOREFIELD (near a glacier or within 500 m below the snow line), else BOULDER_FIELD |
 | SURF 4 otherwise | cliff by lithology: LIMESTONE_CLIFF / CRYSTALLINE_CLIFF / SCHIST_SLOPE (schist, molasse); unknown lithology by region |
 | SURF 5 near a glacier | MORAINE (TPI > 2 m) / FOREFIELD |
-| SURF 5, slope ≥ 20° | DEBRIS_CHANNEL (hollow, < 35°, not nival) / SCREE_CONE |
+| SURF 5, slope ≥ 20° | DEBRIS_CHANNEL (TOPO flow gully/channel, else a hollow without TOPO; < 40°, not nival) / SCREE_CONE |
 | SURF 5 otherwise | MORAINE / FOREFIELD near the snow line, else BOULDER_FIELD |
 | SURF 7/8/15 | ALPINE_LAKE_SHORE (lake-type water, ≥ 1,500 m) / RIVERBED_GRAVEL |
 | SURF 9 | RAISED_BOG (> 900 m, flat, away from water) / WET_MEADOW |
@@ -80,6 +83,7 @@ Enum ordinals are the ids. They are append-only.
 | subalpine forest | LARCH_PINE (inner Alps or within 200 m of the treeline) / SPRUCE |
 | open ≤ 2 columns from lake/reservoir/pond | ALPINE_LAKE_SHORE (≥ 1,500 m) / REED_SHORE (< 8°) |
 | open ≤ 6 columns from a river, < 5°, < 1,000 m | FLOODPLAIN |
+| open, TOPO wet hollow, below the alpine belt, < 4° | WET_MEADOW |
 | open under a cliff, 22–40°, not colline | SCREE_CONE |
 | open alpine/nival | ALPINE_TURF (> 30°, > treeline + 450 m, or ridge TPI > 4 m) / ALPINE_PASTURE |
 | open subalpine/montane > 32° near forest | AVALANCHE_TRACK |
@@ -170,14 +174,15 @@ a per-block dither. Neighbouring list entries are neighbouring noise values, so 
   - stream: mud 35, gravel 35, coarse dirt 30.
 - Steep ground sheds its soil:
   - open land turns to rock from 33°, all rock by 45°;
-  - forest starts at 38° and is all rock by 50°.
+  - forest starts at 38° and is all rock by 50°;
+  - in gardens, orchards, vineyards and fields the "rock" is an embankment: coarse dirt 40, cobble 30, stone 15, gravel 15.
 - Under a cliff (< 40°): scree, gravel 70, cobble 30.
 
 ## Snow (`Snow`, `ZoneMap`, `SnowStage`)
 
 - **Local line**: `regional − 200·northness·min(1, slope/20°) − min(160, 30·hollow) + jitter`.
   - North faces lie up to 200 m lower, south faces up to 200 m higher.
-  - Hollows and lee (curvature over 4 m from TERR; later TOPO `wind`) lie up to 160 m lower.
+  - Hollows and lee (curvature over 4 m from TERR, +3 m with TOPO wind lee) lie up to 160 m lower; TOPO exposed: +80 m, depth × 0.6.
   - Jitter is 48 m value noise, ±60 m.
 - **Depth** (eighths, `Snow.depth`):
   - it starts half a 160 m band below the local line;
@@ -224,22 +229,42 @@ a per-block dither. Neighbouring list entries are neighbouring noise values, so 
   - `pathDist`/`railDist` become `distanceTo(Claim.PATH / Claim.RAIL)`.
   - Not adopted yet because SitePlan is not on main. `ZoneMap` can later move into the SitePlan tile unchanged
     (no Minecraft classes, read-only).
-- **sidecar-zones** (REGN/LITH/TOPO/HABT, branch sidecar-zones): `Ground.region`/`lithology` take the codes 1:1.
-  - TOPO `tpi50`/`tpi300` replace the local TPI ring.
-  - `wind` LEE/EXPOSED add to or replace `hollow` in the snow line.
-  - `flow` CHANNEL gives DEBRIS_CHANNEL.
-  - HABT raised bog/fen/aue give RAISED_BOG / WET_MEADOW / FLOODPLAIN / FOREFIELD.
-  - All are defaults in `Ground` today ("unknown"), so old cells keep working. Wire them up in `CellGround` once
-    `SwdCell` has the accessors on main.
+- **sidecar-zones** (REGN/LITH/TOPO/HABT, on main since 0d6077a): wired in `CellGround` → `Ground` → `ZoneMap`.
+  Each layer is optional; 0 / absent falls back to the earlier rules, so old cells keep working.
+  - `region` (REGN bits 0–2) = `Region` id 1:1; 0 → the E/N lookup.
+  - `lithology` (LITH class) = `Lith` id 1:1; 0 → the positional guess. Detail bits and the glacier/lake flags are unused.
+  - `topo` (raw TOPO byte, −1 without the layer):
+    - TPI-50 ridge/valley pins the local TPI to ≥ +5 / ≤ −5 m; flat/mid clamp it to ±2 m.
+    - wind lee: +3 m hollow in the snow line and depth (up to 90 m lower, deeper);
+      exposed: line +80 m, depth × 0.6.
+    - flow gully/channel → DEBRIS_CHANNEL on steep loose ground; a mapped "none" overrides the local hollow; wet hollow → WET_MEADOW.
+  - `habitat` (raw HABT byte, −1 without the layer): see the HABT rows in the zone rules.
+  - Tests: `GroundZonesTest.habitatAndFlowLayers`, `ZoneMapTest.layersOverrideFallbacks` (all-zero layers = no layers;
+    REGN/LITH win; lee adds, exposed removes snow), `ZoneMapTest.chunkBordersAgreeWithLayers`.
+  - Test cells: `uv run python augment_zones.py E_N …` (session scratchpad) ran `ZonesBuilder.build` with each cell's
+    pinned sources over 48 cells of the private clone (decode, add the four layers, re-encode), as sidecar-zones did.
 
 ## Measured
 
-- Synthetic mountain bench (`ZoneMapTest.cheap`, 1,444 chunks): zones 0.19 + texture+snow 0.11 = **0.30 ms/chunk**,
-  within the 0.5 ms budget.
-- On real cells (`GroundSweepTest`): 0.5–1.3 ms/chunk. This includes the test world's per-column hash maps and the JIT
-  on a busy machine.
+- Synthetic mountain bench (`ZoneMapTest.cheap`, 1,444 chunks): zones 0.12 + texture+snow 0.08 = **0.20 ms/chunk**.
+  The cliff search is now a separable 13×13 max filter (was a disc scan per column).
+- Real cells with all four layers (`GroundSweepTest`, warm pass after an untimed one, zones / texture+snow ms/chunk):
+  forest 0.22/0.07, Grimsel 0.24/0.06, Aare 0.25/0.04, Interlaken 0.27/0.04, Oberaar 0.24/0.09, glacier 0.14/0.10,
+  fen 0.47/0.07 (busy machine; within 0.5 ms except noise).
+- Zone shares (% of ground columns):
+  - forest-slope: fir_spruce 95, avalanche_track 2.5, limestone_cliff 2.2.
+  - alpine-grimsel: crystalline_cliff 44, alpine_pasture 25, alpine_turf 22, scree_cone 8.5.
+  - river-bank-aare: garden 37, water 30, hay_meadow 16, urban_sealed 7.5, beech 3.8, forest_edge 2.3.
+  - interlaken-meadow (the Höhematte, SURF urban green): garden 75, urban_sealed 22.
+  - oberaar-snowline: crystalline_cliff 33, forefield 30, scree_cone 28, moraine 3.6, glacier 3, firn 2.4; snow on 78.5 %.
+  - oberaar-glacier: crystalline_cliff 42, glacier 34, scree 8, debris_glacier 7, forefield 4, crevassed 3.7
+    (crevassed 8 % of the ice, was 96 % with the plain slope rule).
+  - grimsel-fen (HABT fen): wet_meadow 36, alpine_pasture 32, scree 12, boulder 9, krummholz 6.
+- Weather check: 98 % (Oberaar) / 94 % (glacier) of snowy ground lies in snowfield quarts; 3 % of snowfield ground is bare.
+- Steep spots in gardens, orchards, vineyards and fields take an embankment palette (coarse dirt, cobble, stone,
+  gravel) instead of bedrock: no white calcite on the Aare bank.
 - Zone shares and block mixes per area: `.data-cache/previews/texture-summary.txt`. Previews:
-  `.data-cache/previews/texture-{forest-slope,alpine-grimsel,river-bank-aare,interlaken-meadow,oberaar-snowline}.png`.
+  `.data-cache/previews/texture-{forest-slope,alpine-grimsel,river-bank-aare,interlaken-meadow,oberaar-snowline,oberaar-glacier,grimsel-fen}.png`.
   - Left half: blocks in map colours with hillshade.
   - Right half: zones by group, snow hatched white, the regional snow line in red.
 - Run the sweep with `SWISSWORLD_STORE=<private store copy> SWISSWORLD_PREVIEWS=<dir> ./gradlew test --tests '*GroundSweepTest'`.

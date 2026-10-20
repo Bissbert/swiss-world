@@ -21,6 +21,8 @@ public final class ZoneMap {
     private static final int TPI_STEP = 4;
     private static final int W = 16 + 2 * REACH;
     private static final int SALT_SNOW = 41, SALT_DITHER = 42;
+    /** TOPO wind codes (swd-format §6b). */
+    private static final int WIND_LEE = 1, WIND_EXPOSED = 2;
     /** Overlay classes of foot and farm paths, whose fringe gets trodden earth. */
     private static final int TRACK = 5, FOOTPATH = 6, RAIL_BED = 8, RACK_BED = 9;
     private static final int DIST_CAP = 7;
@@ -179,6 +181,30 @@ public final class ZoneMap {
         double[] tpi = tpiLattice(g);
         boolean anySteep = false;
         for (int q = 0; q < n; q++) anySteep |= present[q] && slopeW[q] >= 45;
+        // highest steep (45 degrees+) column within 6 columns (a 13 x 13 square), separable: rows, then columns
+        double[] steepAbove = null;
+        if (anySteep) {
+            double[] rowMax = new double[n];
+            java.util.Arrays.fill(rowMax, Double.NEGATIVE_INFINITY);
+            for (int j = REACH - 6; j < REACH + 22; j++) {
+                for (int i = REACH; i < REACH + 16; i++) {
+                    double m = Double.NEGATIVE_INFINITY;
+                    for (int di = -6; di <= 6; di++) {
+                        int q = w(i + di, j);
+                        if (present[q] && slopeW[q] >= 45 && h[q] > m) m = h[q];
+                    }
+                    rowMax[w(i, j)] = m;
+                }
+            }
+            steepAbove = new double[256];
+            for (int lz = 0; lz < 16; lz++) {
+                for (int lx = 0; lx < 16; lx++) {
+                    double m = Double.NEGATIVE_INFINITY;
+                    for (int dj = -6; dj <= 6; dj++) m = Math.max(m, rowMax[w(lx + REACH, lz + REACH + dj)]);
+                    steepAbove[idx(lx, lz)] = m;
+                }
+            }
+        }
         boolean[] open = new boolean[n];
         for (int q = 0; q < n; q++) open[q] = present[q] && !forest[q];
         int[] nearWAt = new int[256];
@@ -224,20 +250,7 @@ public final class ZoneMap {
                 // neighbourhood within REACH (exact squared distances, see near())
                 int wd2 = nearW[c], gd2 = nearG[c], od2 = nearO[c], fd2 = nearF[c], pd2 = nearP[c], rd2 = nearR[c];
                 int wk = wd2 == Integer.MAX_VALUE ? 0 : kind[nearWAt[c]];
-                boolean cliff = false;
-                if (anySteep) {
-                    for (int dj = -6; dj <= 6 && !cliff; dj++) {
-                        for (int di = -6; di <= 6; di++) {
-                            int d2 = di * di + dj * dj;
-                            if (d2 > 36 || d2 == 0) continue;
-                            int q = w(i + di, j + dj);
-                            if (present[q] && slopeW[q] >= 45 && h[q] > h[k] + 3) {
-                                cliff = true;
-                                break;
-                            }
-                        }
-                    }
-                }
+                boolean cliff = steepAbove != null && steepAbove[c] > h[k] + 3;
                 int wd = dist(wd2);
                 waterDist[c] = (byte) Math.min(DIST_CAP, wd);
                 waterKind[c] = (byte) wk;
@@ -246,22 +259,34 @@ public final class ZoneMap {
                 cliffAbove[c] = cliff;
 
                 int surf = g.surf(x, z);
+                // sidecar-zones layers where the cell has them (0 / -1 = unknown), else the fallbacks
                 int rid = g.region(x, z);
                 Region region = rid > 0 ? Region.byId(rid) : Region.of(e, nn);
                 Lith lith = Lith.byId(g.lithology(x, z));
                 if (lith == Lith.UNKNOWN) lith = Lith.guess(e, nn, h[k], region);
-                double t = g.tpi(x, z);
-                if (Double.isNaN(t)) t = tpiAt(tpi, lx, lz);
-                double ex = g.exposure(x, z);
-                // lee from the TOPO layer where known (-1 lee .. +1 exposed), else the local hollow stands in
-                double lee = Double.isNaN(ex) ? hol : hol + Math.max(0, -ex) * 3;
+                int topo = g.topo(x, z);
+                double t = tpiAt(tpi, lx, lz);
+                int wind = 0;
+                if (topo >= 0) {
+                    // the 50 m TPI class of the 2 m terrain replaces the local estimate's verdict
+                    t = switch (topo & 3) {
+                        case 3 -> Math.max(t, 5);
+                        case 1 -> Math.min(t, -5);
+                        default -> Math.max(-2, Math.min(2, t));
+                    };
+                    wind = topo >>> 6 & 3;
+                }
+                // drift: lee slopes collect snow (deeper, lower line), exposed ridges are blown bare
+                double lee = wind == WIND_LEE ? hol + 3 : hol;
                 double line0 = ClimateLines.snowLine(e, nn), tree = ClimateLines.treeline(e, nn);
                 double south = Math.max(0, -north) * Math.min(1, s / 20);
                 Belt belt = Belt.of(h[k], tree, line0, south);
 
                 double jitter = (Noise.value(e, nn, 48, SALT_SNOW) - 0.5) * 120;
                 double line = Snow.line(line0, s, north, lee, jitter);
+                if (wind == WIND_EXPOSED) line += 80;
                 double depth = Snow.depth(h[k], line, s, lee);
+                if (wind == WIND_EXPOSED) depth *= 0.6;
                 int surfForest = surf == 1 || surf == 2 || surf == 3 ? 1 : 0;
                 if (surfForest == 1) depth *= 0.6; // crowns catch part of it
                 int eighths = Snow.eighths(depth, ColumnHash.unit(e, nn, SALT_DITHER));
@@ -291,6 +316,8 @@ public final class ZoneMap {
                 in.treeline = tree;
                 in.snowLine = line0;
                 in.snow = eighths;
+                in.flow = topo >= 0 ? topo >>> 4 & 3 : -1;
+                in.habitat = g.habitat(x, z);
                 Zone zone = GroundZones.zone(in);
                 if (lith == Lith.UNKNOWN) lith = Lith.ofCliff(zone);
                 snow[c] = (byte) eighths;

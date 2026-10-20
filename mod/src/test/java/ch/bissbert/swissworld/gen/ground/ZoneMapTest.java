@@ -59,6 +59,24 @@ class ZoneMapTest {
         return c;
     }
 
+    /** The cell with the sidecar-zones layers set per column by {@code f(dx, dz) -> {regn, lith, topo, habt}}. */
+    static SwdCell withLayers(SwdCell c, java.util.function.BiFunction<Integer, Integer, int[]> f) {
+        int n = SwdCell.SIZE * SwdCell.SIZE;
+        byte[] regn = new byte[n], lith = new byte[n], topo = new byte[n], habt = new byte[n];
+        for (int dz = 0; dz < SwdCell.SIZE; dz++) {
+            for (int dx = 0; dx < SwdCell.SIZE; dx++) {
+                int[] v = f.apply(dx, dz);
+                int k = SwdCell.key(dx, dz);
+                regn[k] = (byte) v[0];
+                lith[k] = (byte) v[1];
+                topo[k] = (byte) v[2];
+                habt[k] = (byte) v[3];
+            }
+        }
+        return new SwdCell(c.eKm(), c.nKm(), c.terr(), c.surf(), c.wlvl(), c.wknd(), c.ocls(), c.oelv(), c.oflg(), c.insd(),
+                c.buildings(), c.spans(), c.cnpy(), c.trees(), regn, lith, topo, habt);
+    }
+
     static ColumnGrid.Cells only(SwdCell cell) {
         return (x, z) -> SwissCoords.cellKm(ORIGIN.east(x)) == cell.eKm() && SwissCoords.cellKm(ORIGIN.north(z)) == cell.nKm()
                 ? cell : null;
@@ -92,6 +110,74 @@ class ZoneMapTest {
                             assertEquals(own.snow(x, z), s.snow(x, z), "snow at " + x + "," + z);
                             assertEquals(own.slope(x, z), s.slope(x, z), 1e-9);
                         }
+                    }
+                }
+            }
+        }
+    }
+
+    /** Layers win where set: region and lithology in the packed id, lee and exposed snow; zero layers fall back. */
+    @Test
+    void layersOverrideFallbacks() {
+        SwdCell plain = mountain();
+        // all-zero layers read exactly like no layers (region and lithology unknown, mid-slope, neutral wind)
+        SwdCell zeros = withLayers(plain, (dx, dz) -> new int[4]);
+        int x0 = x(480) & ~15, z0 = z(560) & ~15;
+        for (int[] at : new int[][] {{x0, z0}, {x(200) & ~15, z(300) & ~15}, {x(700) & ~15, z(700) & ~15}}) {
+            ZoneMap a = ZoneMap.of(ORIGIN, only(plain), at[0], at[1]), b = ZoneMap.of(ORIGIN, only(zeros), at[0], at[1]);
+            for (int lz = 0; lz < 16; lz++) {
+                for (int lx = 0; lx < 16; lx++) {
+                    assertEquals(a.id(at[0] + lx, at[1] + lz), b.id(at[0] + lx, at[1] + lz));
+                    assertEquals(a.snow(at[0] + lx, at[1] + lz), b.snow(at[0] + lx, at[1] + lz));
+                }
+            }
+        }
+        // REGN 6 (south flank) and LITH 1 (limestone) everywhere; TOPO lee on the west half, exposed on the east
+        SwdCell south = withLayers(plain, (dx, dz) -> new int[] {6, 1, dx < 500 ? 1 << 6 : 2 << 6, 0});
+        int lee = 0, exposed = 0, leeN = 0, expN = 0;
+        boolean limestone = false;
+        for (int cx = x(100) & ~15; cx < x(900); cx += 32) {
+            for (int cz = z(100) & ~15; cz < z(900); cz += 32) {
+                ZoneMap zm = ZoneMap.of(ORIGIN, only(south), cx, cz), ref = ZoneMap.of(ORIGIN, only(plain), cx, cz);
+                for (int lz = 0; lz < 16; lz++) {
+                    for (int lx = 0; lx < 16; lx++) {
+                        int x = cx + lx, z = cz + lz;
+                        Zone zone = zm.zone(x, z);
+                        if (zone == Zone.NONE) continue;
+                        assertEquals(Region.SOUTH_FLANK, ZoneId.region(zm.id(x, z)));
+                        assertTrue(zone != Zone.CRYSTALLINE_CLIFF, "limestone has no crystalline cliffs");
+                        limestone |= zone == Zone.LIMESTONE_CLIFF || zone == Zone.KARST;
+                        if (zone.glacier()) continue;
+                        if (x < x(500)) {
+                            leeN++;
+                            lee += zm.snow(x, z) - ref.snow(x, z);
+                        } else {
+                            expN++;
+                            exposed += zm.snow(x, z) - ref.snow(x, z);
+                        }
+                    }
+                }
+            }
+        }
+        assertTrue(limestone);
+        assertTrue(lee > 0 && exposed < 0, "lee " + lee + "/" + leeN + ", exposed " + exposed + "/" + expN);
+    }
+
+    /** Chunk borders agree with layers that change from column to column. */
+    @Test
+    void chunkBordersAgreeWithLayers() {
+        SwdCell c = withLayers(mountain(), (dx, dz) -> new int[] {1 + (dx / 37 + dz / 53) % 6, (dx * 7 + dz) / 41 % 6,
+                (dx * 31 + dz * 17) % 256, (dx / 13 + dz / 11) % 3 == 0 ? (dx / 29 % 6) << 3 | dz % 5 : 0});
+        ColumnGrid.Cells cells = only(c);
+        for (int cx = x(300) & ~15; cx < x(700); cx += 80) {
+            for (int cz = z(300) & ~15; cz < z(700); cz += 80) {
+                ZoneMap s = ZoneMap.of(ORIGIN, cells, cx + 8, cz + 4);
+                for (int lz = 0; lz < 16; lz++) {
+                    for (int lx = 0; lx < 16; lx++) {
+                        int x = s.x0 + lx, z = s.z0 + lz;
+                        ZoneMap own = ZoneMap.of(ORIGIN, cells, Math.floorDiv(x, 16) * 16, Math.floorDiv(z, 16) * 16);
+                        assertEquals(own.id(x, z), s.id(x, z), "zone at " + x + "," + z);
+                        assertEquals(own.snow(x, z), s.snow(x, z), "snow at " + x + "," + z);
                     }
                 }
             }

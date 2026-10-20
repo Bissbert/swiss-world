@@ -97,6 +97,9 @@ public final class GroundTexture {
     private static final Palette PATH_EDGE = Palette.of(Blocks.DIRT_PATH, 35, Blocks.COARSE_DIRT, 65);
     private static final Palette BALLAST = Palette.of(Blocks.GRAVEL, 65, Blocks.ANDESITE, 15, Blocks.COARSE_DIRT, 20);
     private static final Palette SCREE = Palette.of(Blocks.GRAVEL, 70, Blocks.COBBLESTONE, 30);
+    /** Steep spots in tended land are embankments and dry-stone walls, not bedrock. */
+    private static final Palette EMBANKMENT = Palette.of(Blocks.COARSE_DIRT, 40, Blocks.COBBLESTONE, 30, Blocks.STONE, 15,
+            Blocks.GRAVEL, 15);
 
     /**
      * The new top block of a natural column, or null to leave it. {@code current} is the top the earlier stages left.
@@ -129,7 +132,10 @@ public final class GroundTexture {
             // steep ground sheds its soil: rock from 33 degrees (38 under trees), all rock by 45 (50)
             double from = group == Zone.Group.FOREST ? 38 : 33;
             double rock = ClimateLines.smooth((slope - from) / 12);
-            if (Noise.patch(e, n, SALT_ROCK) < rock) return ROCK.get(lith).pick(v);
+            if (Noise.patch(e, n, SALT_ROCK) < rock) {
+                boolean tended = zone == Zone.GARDEN || zone == Zone.ORCHARD || zone == Zone.VINEYARD || zone == Zone.ARABLE;
+                return (tended ? EMBANKMENT : ROCK.get(lith)).pick(v);
+            }
             if (zm.cliffAbove(x, z) && slope < 40 && v2 < 0.4) return SCREE.pick(v);
             if (zone == Zone.ARABLE) {
                 // crop rows: two rows of turned earth, one of grass, east-west

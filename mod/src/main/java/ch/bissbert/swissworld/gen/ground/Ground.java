@@ -5,7 +5,7 @@ package ch.bissbert.swissworld.gen.ground;
  * answers it from the cells of a {@code ColumnGrid}; a shared ground model (mod-siteplan's SitePlan) can implement it instead.
  *
  * <p>The optional layers of sidecar-zones (REGN, LITH, TOPO, HAB) have defaults meaning "unknown"; the classifier then
- * falls back to a coarse E/N lookup (region), generic rock (lithology) and local TERR metrics (TPI, flow, lee). Old
+ * falls back to a coarse E/N lookup (region), a positional guess (lithology) and local TERR metrics (TPI, hollow). Old
  * cells without those layers keep working.
  */
 public interface Ground {
@@ -48,34 +48,24 @@ public interface Ground {
 
     long north(int z);
 
-    // ---- optional layers (sidecar-zones); unknown by default
+    // ---- optional layers (sidecar-zones, swd-format §6b); "unknown" by default and wherever a cell lacks them
 
-    /** {@link Region} ordinal 1..6, or -1 unknown (REGN). */
+    /** {@link Region} id 1..6 (REGN), 0 unknown. */
     default int region(int x, int z) {
-        return -1;
+        return 0;
     }
 
-    /** {@link Lith} ordinal, or -1 unknown (LITH). */
+    /** {@link Lith} id 0..5 (LITH class), 0 unknown. */
     default int lithology(int x, int z) {
+        return 0;
+    }
+
+    /** Raw TOPO byte (TPI 50 m bits 0-1, TPI 300 m bits 2-3, flow bits 4-5, wind bits 6-7), -1 without TOPO. */
+    default int topo(int x, int z) {
         return -1;
     }
 
-    /** Topographic position index at ~50 m in metres (positive = ridge), or NaN unknown (TOPO). */
-    default double tpi(int x, int z) {
-        return Double.NaN;
-    }
-
-    /** Flow accumulation in log2(upslope cells), or NaN unknown (TOPO). */
-    default double flow(int x, int z) {
-        return Double.NaN;
-    }
-
-    /** Wind exposure, -1 lee .. +1 exposed, or NaN unknown (TOPO). */
-    default double exposure(int x, int z) {
-        return Double.NaN;
-    }
-
-    /** Habitat hint (HAB), -1 unknown. */
+    /** Raw HABT byte (raised bog 0x01, bog margin 0x02, fen 0x04, Aue type bits 3-5), -1 without HABT. */
     default int habitat(int x, int z) {
         return -1;
     }

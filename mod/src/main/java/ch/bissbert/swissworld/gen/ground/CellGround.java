@@ -7,7 +7,7 @@ import ch.bissbert.swissworld.gen.surface.ColumnGrid;
 /**
  * {@link Ground} straight from the .swd cells (the chunk's {@link ch.bissbert.swissworld.gen.GenContext#cellAt}).
  * Remembers the last cell, since lookups come in runs of neighbouring columns. Optional layers are unknown until the
- * cells carry REGN/LITH/TOPO (sidecar-zones).
+ * cells carry REGN/LITH/TOPO/HABT (sidecar-zones); cells without them read "unknown" and the classifier falls back.
  */
 public final class CellGround implements Ground {
     private final SwissCoords coords;
@@ -108,6 +108,30 @@ public final class CellGround implements Ground {
     public int canopy(int x, int z) {
         SwdCell c = cell(x, z);
         return c == null || !c.hasCanopy() ? -1 : c.canopy(dx(x), dz(z));
+    }
+
+    @Override
+    public int region(int x, int z) {
+        SwdCell c = cell(x, z);
+        return c == null ? 0 : c.region(dx(x), dz(z));
+    }
+
+    @Override
+    public int lithology(int x, int z) {
+        SwdCell c = cell(x, z);
+        return c == null ? 0 : c.lithClass(dx(x), dz(z));
+    }
+
+    @Override
+    public int topo(int x, int z) {
+        SwdCell c = cell(x, z);
+        return c == null || !c.hasTopo() ? -1 : c.topo(dx(x), dz(z));
+    }
+
+    @Override
+    public int habitat(int x, int z) {
+        SwdCell c = cell(x, z);
+        return c == null || !c.hasHabitats() ? -1 : c.habitat(dx(x), dz(z));
     }
 
     @Override

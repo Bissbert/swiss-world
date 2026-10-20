@@ -2,6 +2,8 @@ package ch.bissbert.swissworld.gen.ground;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ch.bissbert.swissworld.gen.SwissBiomeSource;
+import ch.bissbert.swissworld.gen.surface.ColumnGrid;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -34,6 +36,9 @@ class GroundSweepTest {
         new Area("river-bank-aare", 1028, -865, 256),
         new Area("interlaken-meadow", 0, 0, 256),
         new Area("oberaar-snowline", 26900, 15299, 512),
+        new Area("oberaar-glacier", 24600, 15099, 384),
+        // a fen of the federal inventory (HABT) in the Grimsel valley above Guttannen
+        new Area("grimsel-fen", 35195, 11632, 256),
     };
 
     @Test
@@ -42,28 +47,61 @@ class GroundSweepTest {
         Assumptions.assumeTrue(store != null, "no SWISSWORLD_STORE");
         String prev = System.getProperty("swissworld.previews", "");
         StringBuilder report = new StringBuilder();
-        for (Area a : AREAS) report.append(run(a, store, prev.isEmpty() ? null : Path.of(prev)));
+        ColumnGrid.Cells cells = TestWorld.cells(store);
+        for (Area a : AREAS) report.append(run(a, cells, prev.isEmpty() ? null : Path.of(prev)));
         System.out.println(report);
         if (!prev.isEmpty()) Files.writeString(Path.of(prev, "texture-summary.txt"), report);
     }
 
-    private static String run(Area a, Path store, Path out) throws IOException {
-        TestWorld w = new TestWorld(TestWorld.cells(store));
+    private static String run(Area a, ColumnGrid.Cells cells, Path out) throws IOException {
         int x0 = Math.floorDiv(a.cx - a.size / 2, 16) * 16, z0 = Math.floorDiv(a.cz - a.size / 2, 16) * 16, n = a.size;
+        // untimed warm-up on a throw-away world: loads the cells and lets the JIT settle
+        TestWorld warm = new TestWorld(cells);
+        for (int cz = z0; cz < z0 + n; cz += 16) {
+            for (int cx = x0; cx < x0 + n; cx += 16) {
+                for (int lz = 0; lz < 16; lz++) for (int lx = 0; lx < 16; lx++) warm.baseTop(cx + lx, cz + lz);
+                warm.chunk(cx, cz);
+            }
+        }
+        TestWorld w = new TestWorld(cells);
         Zone[] zones = new Zone[n * n];
         int[] snow = new int[n * n];
         double[] line = new double[n * n];
-        long nanos = 0;
+        long zoneNanos = 0, stageNanos = 0;
         int chunks = 0;
+        // weather check: snowy columns inside snowfield quarts (no rain there) and bare columns inside them
+        int snowyIn = 0, snowyAll = 0, bareIn = 0, inAll = 0;
+        Map<Zone, Integer> ice = new EnumMap<>(Zone.class);
         Map<Zone.Group, Map<Block, Integer>> mix = new EnumMap<>(Zone.Group.class);
         Map<Zone, Integer> zoneCount = new EnumMap<>(Zone.class);
         for (int cz = z0; cz < z0 + n; cz += 16) {
             for (int cx = x0; cx < x0 + n; cx += 16) {
                 for (int lz = 0; lz < 16; lz++) for (int lx = 0; lx < 16; lx++) w.baseTop(cx + lx, cz + lz);
                 long t0 = System.nanoTime();
-                ZoneMap zm = w.chunk(cx, cz);
-                nanos += System.nanoTime() - t0;
+                ZoneMap zm = ZoneMap.of(TestWorld.ORIGIN, cells, cx, cz);
+                long t1 = System.nanoTime();
+                GroundTextureStage.apply(zm, w);
+                SnowStage.apply(zm, w);
+                long t2 = System.nanoTime();
+                zoneNanos += t1 - t0;
+                stageNanos += t2 - t1;
                 chunks++;
+                for (int qz = 0; qz < 16; qz += 4) {
+                    for (int qx = 0; qx < 16; qx += 4) {
+                        boolean field = SwissBiomeSource.snowfield(zm, qx, qz);
+                        for (int dz = 0; dz < 4; dz++) {
+                            for (int dx = 0; dx < 4; dx++) {
+                                int x = cx + qx + dx, z = cz + qz + dz;
+                                if (zm.zone(x, z) == Zone.NONE || zm.zone(x, z) == Zone.WATER) continue;
+                                boolean snowy = zm.snow(x, z) > 0 || zm.zone(x, z).glacier();
+                                if (snowy) snowyAll++;
+                                if (field) inAll++;
+                                if (snowy && field) snowyIn++;
+                                if (!snowy && field) bareIn++;
+                            }
+                        }
+                    }
+                }
                 for (int lz = 0; lz < 16; lz++) {
                     for (int lx = 0; lx < 16; lx++) {
                         int x = cx + lx, z = cz + lz, k = (z - z0) * n + (x - x0);
@@ -80,6 +118,7 @@ class GroundSweepTest {
                             for (int d = 1; d <= 4 && isSnow(top); d++) top = w.get(x, y - d, z).getBlock();
                         }
                         mix.computeIfAbsent(zone.group, g -> new HashMap<>()).merge(top, 1, Integer::sum);
+                        if (zone.glacier()) ice.merge(zone, 1, Integer::sum);
                     }
                 }
             }
@@ -88,9 +127,15 @@ class GroundSweepTest {
         int snowy = 0;
         for (int s : snow) if (s > 0) snowy++;
         StringBuilder sb = new StringBuilder();
-        sb.append(String.format("== %s (%d x %d m at %d,%d): %.3f ms/chunk zones+texture+snow, snow on %.1f%%%n", a.name, n, n,
-                a.cx, a.cz, nanos / 1e6 / chunks, 100.0 * snowy / Math.max(1, total)));
+        sb.append(String.format("== %s (%d x %d m at %d,%d): zones %.3f + texture+snow %.3f ms/chunk (warm), snow on %.1f%%%n",
+                a.name, n, n, a.cx, a.cz, zoneNanos / 1e6 / chunks, stageNanos / 1e6 / chunks, 100.0 * snowy / Math.max(1, total)));
         sb.append("zones: ").append(top(zoneCount, total, 12)).append('\n');
+        if (snowyAll > 0 || inAll > 0) {
+            sb.append(String.format("weather: %.1f%% of snowy ground lies in snowfield quarts (no rain), %.1f%% of snowfield ground is bare%n",
+                    100.0 * snowyIn / Math.max(1, snowyAll), 100.0 * bareIn / Math.max(1, inAll)));
+        }
+        int iceAll = ice.values().stream().mapToInt(Integer::intValue).sum();
+        if (iceAll > 0) sb.append("ice zones: ").append(top(ice, iceAll, 6)).append('\n');
         for (Map.Entry<Zone.Group, Map<Block, Integer>> e : mix.entrySet()) {
             int t = e.getValue().values().stream().mapToInt(Integer::intValue).sum();
             sb.append(String.format("  %-6s %5.1f%%: %s%n", e.getKey(), 100.0 * t / total, top(e.getValue(), t, 8)));

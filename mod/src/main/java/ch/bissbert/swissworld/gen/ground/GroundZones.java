@@ -32,27 +32,73 @@ public final class GroundZones {
         public double treeline = 2000, snowLine = 2800;
         /** Snow depth in eighths ({@link Snow}). */
         public int snow;
+        /** TOPO flow code (0 none, 1 gully, 2 channel, 3 wet hollow), -1 unknown (no TOPO). */
+        public int flow = -1;
+        /** Raw HABT byte (bog bits, Aue type in bits 3-5), -1 unknown (no HABT). */
+        public int habitat = -1;
     }
+
+    public static final int FLOW_GULLY = 1, FLOW_CHANNEL = 2, FLOW_HOLLOW = 3;
+    public static final int HAB_RAISED_BOG = 0x01, HAB_BOG_MARGIN = 0x02, HAB_FEN = 0x04;
+    public static final int AUE_GLACIER_FOREFIELD = 1, AUE_ALPINE_PLAIN = 2, AUE_RIVER = 3, AUE_DELTA = 4, AUE_LAKE_SHORE = 5;
 
     public static Zone zone(Input c) {
         if (!c.present) return Zone.NONE;
         if (c.wet) return Zone.WATER;
         if (c.surf == 6) return glacier(c);
         if (c.building || c.surf == 10) return Zone.URBAN_SEALED;
-        Zone z = land(c);
+        Zone z = c.habitat > 0 ? habitat(c) : null;
+        if (z == null) z = land(c);
         if (c.snow >= 12 && z.group != Zone.Group.ROCK) return Zone.FIRN;
         if (c.snow > 0 && c.snow < 8 && c.hollow > 1 && c.h < c.snowLine) return Zone.SNOW_PATCH;
         return z;
     }
 
     private static Zone glacier(Input c) {
-        if (c.slope > 28) return Zone.CREVASSED;
+        // crevasses open where the ice bends over a convex break of slope; steeper than 45 degrees is an ice wall
+        if (c.slope > 25 && c.slope < 45 && c.hollow < -0.15) return Zone.CREVASSED;
         if (c.snow < 4 && c.openDist <= 4) return Zone.DEBRIS_GLACIER;
         return Zone.GLACIER;
     }
 
     private static boolean forestSurf(int surf) {
         return surf == 1 || surf == 2 || surf == 3;
+    }
+
+    /**
+     * The federal mire and floodplain inventories (HABT), where known: they win over the land-cover guesses, but not
+     * over cultivated land (fields, orchards, vineyards, gardens) and not on steep ground. Null = no say.
+     */
+    private static Zone habitat(Input c) {
+        int hab = c.habitat, aue = hab >>> 3 & 7;
+        boolean tilled = c.surf == 11 || c.surf == 12 || c.surf == 13 || c.surf == 16;
+        if (tilled) return null;
+        if (forestSurf(c.surf) || c.surf == 14) {
+            // forest in a floodplain is riparian (Auenwald); bog forest keeps its forest zone
+            return (aue == AUE_RIVER || aue == AUE_DELTA) && c.h < 1300 && c.slope < 15 ? Zone.RIPARIAN : null;
+        }
+        if ((hab & HAB_RAISED_BOG) != 0 && c.slope < 12) return Zone.RAISED_BOG;
+        if ((hab & (HAB_BOG_MARGIN | HAB_FEN)) != 0 && c.slope < 15) return Zone.WET_MEADOW;
+        switch (aue) {
+            case AUE_GLACIER_FOREFIELD -> {
+                if (c.slope < 25) return c.tpi > 2 ? Zone.MORAINE : Zone.FOREFIELD;
+            }
+            case AUE_ALPINE_PLAIN -> {
+                if (c.slope < 10) return c.waterDist <= 4 || c.surf == 5 || c.surf == 15 ? Zone.RIVERBED_GRAVEL : null;
+            }
+            case AUE_RIVER, AUE_DELTA -> {
+                if (c.slope < 8) return c.surf == 15 || c.surf == 8 ? Zone.RIVERBED_GRAVEL : Zone.FLOODPLAIN;
+            }
+            case AUE_LAKE_SHORE -> {
+                if (c.slope < 8) {
+                    if (c.h >= 1500) return Zone.ALPINE_LAKE_SHORE;
+                    return c.waterDist <= 6 ? Zone.REED_SHORE : Zone.WET_MEADOW;
+                }
+            }
+            default -> {
+            }
+        }
+        return null;
     }
 
     private static Zone land(Input c) {
@@ -125,7 +171,9 @@ public final class GroundZones {
     private static Zone loose(Input c) {
         if (c.glacierDist != FAR) return c.tpi > 2 ? Zone.MORAINE : Zone.FOREFIELD;
         if (c.slope >= 20) {
-            return c.hollow > 1.5 && c.slope < 35 && c.belt != Belt.NIVAL ? Zone.DEBRIS_CHANNEL : Zone.SCREE_CONE;
+            // TOPO flow where known (a gully or channel drains through), else a local hollow stands in
+            boolean channel = c.flow >= 0 ? c.flow == FLOW_GULLY || c.flow == FLOW_CHANNEL : c.hollow > 1.5;
+            return channel && c.slope < 40 && c.belt != Belt.NIVAL ? Zone.DEBRIS_CHANNEL : Zone.SCREE_CONE;
         }
         if (nearGlacier(c)) return c.tpi > 2 ? Zone.MORAINE : Zone.FOREFIELD;
         return Zone.BOULDER_FIELD;
@@ -163,6 +211,8 @@ public final class GroundZones {
             if (c.slope < 8) return Zone.REED_SHORE;
         }
         if (c.waterDist <= 6 && c.nearWaterKind == 2 && c.slope < 5 && c.h < 1000) return Zone.FLOODPLAIN;
+        // a wet hollow (TOPO: valley floor, water draining in, barely any outflow) below the alpine belt
+        if (c.flow == FLOW_HOLLOW && !alpine && c.slope < 4) return Zone.WET_MEADOW;
         if (c.cliffAbove && c.slope > 22 && c.slope < 40 && c.belt != Belt.COLLINE) return Zone.SCREE_CONE;
         if (alpine) {
             if (c.slope > 30 || c.h > c.treeline + 450 || c.tpi > 4) return Zone.ALPINE_TURF;

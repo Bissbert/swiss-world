@@ -106,7 +106,11 @@ class GroundZonesTest {
         fore.tpi = 4;
         assertEquals(Zone.MORAINE, GroundZones.zone(fore));
         assertEquals(Zone.GLACIER, GroundZones.zone(withSnow(in(6, 3000, 10), 20)));
-        assertEquals(Zone.CREVASSED, GroundZones.zone(in(6, 2600, 30)));
+        GroundZones.Input bend = in(6, 2600, 30);
+        bend.hollow = -1;
+        assertEquals(Zone.CREVASSED, GroundZones.zone(bend));
+        bend.hollow = 1;
+        assertEquals(Zone.GLACIER, GroundZones.zone(withSnow(bend, 16)));
         GroundZones.Input debris = in(6, 2300, 8);
         debris.openDist = 2;
         assertEquals(Zone.DEBRIS_GLACIER, GroundZones.zone(debris));
@@ -114,6 +118,59 @@ class GroundZonesTest {
         GroundZones.Input wet = in(8, 500, 0);
         wet.wet = true;
         assertEquals(Zone.WATER, GroundZones.zone(wet));
+    }
+
+    /** HABT and TOPO flow override the land-cover guesses where known; -1 (no layer) and 0 (nothing) fall back. */
+    @Test
+    void habitatAndFlowLayers() {
+        GroundZones.Input bog = in(0, 1000, 2);
+        assertEquals(Zone.HAY_MEADOW, GroundZones.zone(bog));
+        bog.habitat = 0;
+        assertEquals(Zone.HAY_MEADOW, GroundZones.zone(bog));
+        bog.habitat = GroundZones.HAB_RAISED_BOG;
+        assertEquals(Zone.RAISED_BOG, GroundZones.zone(bog));
+        bog.habitat = GroundZones.HAB_FEN;
+        assertEquals(Zone.WET_MEADOW, GroundZones.zone(bog));
+        // cultivated land stays what it is, bog forest stays forest
+        GroundZones.Input field = in(16, 450, 1);
+        field.habitat = GroundZones.HAB_FEN | GroundZones.AUE_RIVER << 3;
+        assertEquals(Zone.ARABLE, GroundZones.zone(field));
+        GroundZones.Input bogForest = in(2, 1000, 3);
+        bogForest.canopy = 15;
+        bogForest.habitat = GroundZones.HAB_RAISED_BOG;
+        assertEquals(GroundZones.zone(in(2, 1000, 3)), GroundZones.zone(bogForest));
+
+        GroundZones.Input aue = in(0, 450, 2);
+        aue.habitat = GroundZones.AUE_RIVER << 3;
+        assertEquals(Zone.FLOODPLAIN, GroundZones.zone(aue));
+        GroundZones.Input auwald = in(1, 450, 2);
+        auwald.canopy = 20;
+        auwald.habitat = GroundZones.AUE_DELTA << 3;
+        assertEquals(Zone.RIPARIAN, GroundZones.zone(auwald));
+        GroundZones.Input shore = in(0, 560, 2);
+        shore.waterDist = 3;
+        shore.habitat = GroundZones.AUE_LAKE_SHORE << 3;
+        assertEquals(Zone.REED_SHORE, GroundZones.zone(shore));
+        GroundZones.Input high = in(0, 1900, 2);
+        high.habitat = GroundZones.AUE_LAKE_SHORE << 3;
+        assertEquals(Zone.ALPINE_LAKE_SHORE, GroundZones.zone(high));
+        GroundZones.Input fore = in(5, 2200, 10);
+        assertEquals(Zone.BOULDER_FIELD, GroundZones.zone(fore));
+        fore.habitat = GroundZones.AUE_GLACIER_FOREFIELD << 3;
+        assertEquals(Zone.FOREFIELD, GroundZones.zone(fore));
+
+        // flow: a mapped gully makes a debris channel, a mapped "none" overrides the local hollow
+        GroundZones.Input scree = in(5, 2000, 30);
+        scree.hollow = 2;
+        assertEquals(Zone.DEBRIS_CHANNEL, GroundZones.zone(scree));
+        scree.flow = 0;
+        assertEquals(Zone.SCREE_CONE, GroundZones.zone(scree));
+        scree.hollow = 0;
+        scree.flow = GroundZones.FLOW_GULLY;
+        assertEquals(Zone.DEBRIS_CHANNEL, GroundZones.zone(scree));
+        GroundZones.Input hollow = in(0, 800, 2);
+        hollow.flow = GroundZones.FLOW_HOLLOW;
+        assertEquals(Zone.WET_MEADOW, GroundZones.zone(hollow));
     }
 
     private static GroundZones.Input withSnow(GroundZones.Input c, int snow) {
