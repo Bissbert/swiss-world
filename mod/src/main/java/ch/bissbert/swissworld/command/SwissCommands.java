@@ -5,6 +5,7 @@ import ch.bissbert.swissworld.SwissRegistries;
 import ch.bissbert.swissworld.SwissRuntime;
 import ch.bissbert.swissworld.SwissWorld;
 import ch.bissbert.swissworld.cell.CellCache;
+import ch.bissbert.swissworld.gen.site.SiteCommands;
 import ch.bissbert.swissworld.cell.SwdCell;
 import ch.bissbert.swissworld.cell.SwissCoords;
 import ch.bissbert.swissworld.cell.Wgs84;
@@ -131,6 +132,10 @@ public final class SwissCommands {
                                 .executes(c -> goToPlace(c.getSource().getPlayerOrException(), StringArgumentType.getString(c, "place")))))
                 .then(Commands.literal("admin").requires(s -> s.hasPermission(2))
                         .then(Commands.literal("status").executes(c -> status(c.getSource())))
+                        .then(Commands.literal("stats").executes(c -> SiteCommands.stats(c.getSource()))
+                                .then(Commands.literal("reset").executes(c -> SiteCommands.resetStats(c.getSource()))))
+                        .then(Commands.literal("who").then(Commands.argument("pos", BlockPosArgument.blockPos())
+                                .executes(c -> SiteCommands.who(c.getSource(), BlockPosArgument.getBlockPos(c, "pos")))))
                         .then(Commands.literal("light").executes(c -> light(c.getSource()))
                                 .then(Commands.argument("pos", BlockPosArgument.blockPos())
                                         .executes(c -> lightAt(c.getSource(), BlockPosArgument.getBlockPos(c, "pos")))))
@@ -503,6 +508,7 @@ public final class SwissCommands {
                 "cells %d/%d cached, %d pending · chunks %d generated (%.1f ms/chunk), %d waiting, %d aborted · heap %d/%d MB · coverage %s",
                 cells.cachedCount(), cells.capacity(), cells.pendingCount(), SwissRuntime.chunksGenerated(), SwissRuntime.meanChunkMs(),
                 SwissRuntime.PENDING_CHUNKS.get(), SwissRuntime.abortedCount(), usedMb, maxMb, cells.hasCoverage() ? "loaded" : "missing")));
+        s.sendSystemMessage(Component.literal("gen (mean/p95 ms): " + ch.bissbert.swissworld.gen.site.GenStats.line()));
         MinecraftServer server = s.getServer();
         SwissRuntime.sidecar().status().whenComplete((JsonObject o, Throwable err) -> server.execute(() ->
                 s.sendSystemMessage(Component.literal(err == null ? "sidecar: " + o : "sidecar: not reachable (" + rootMessage(err) + ")"))));

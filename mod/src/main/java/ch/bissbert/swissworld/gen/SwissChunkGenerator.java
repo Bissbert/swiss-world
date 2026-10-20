@@ -9,6 +9,8 @@ import ch.bissbert.swissworld.gen.building.FurnishStage;
 import ch.bissbert.swissworld.gen.building.LootStage;
 import ch.bissbert.swissworld.gen.ground.GroundTextureStage;
 import ch.bissbert.swissworld.gen.ground.SnowStage;
+import ch.bissbert.swissworld.gen.site.GenStats;
+import ch.bissbert.swissworld.gen.site.WriteTrace;
 import ch.bissbert.swissworld.gen.stage.TerrainStage;
 import ch.bissbert.swissworld.gen.surface.OverlayStage;
 import ch.bissbert.swissworld.gen.surface.VegetationStage;
@@ -144,10 +146,29 @@ public final class SwissChunkGenerator extends ChunkGenerator {
         if (getBiomeSource() instanceof SwissBiomeSource biomes) {
             chunk.fillBiomesFromNoise(biomes.resolver(ctx), randomState.sampler());
         }
-        for (GenStage stage : PIPELINE) {
+        long t = System.nanoTime();
+        GenStats.record(GenStats.BIOMES, t - t0);
+        for (int i = 0; i < PIPELINE.size(); i++) {
+            GenStage stage = PIPELINE.get(i);
+            Object before = WriteTrace.ENABLED && i > 0 ? WriteTrace.snapshot(chunk) : null;
             stage.apply(ctx);
+            long now = System.nanoTime();
+            GenStats.record(STAGE_NAMES.get(i), now - t);
+            if (before != null) {
+                WriteTrace.diff(chunk, before, i);
+                now = System.nanoTime(); // the trace's own cost is not the stage's
+            }
+            t = now;
         }
         SwissRuntime.recordChunk(System.nanoTime() - t0);
+        GenStats.chunk(System.nanoTime() - t0);
+    }
+
+    /** Stage names by pipeline index, for {@link GenStats} and {@link WriteTrace}. */
+    public static final List<String> STAGE_NAMES = PIPELINE.stream().map(s -> s.getClass().getSimpleName()).toList();
+
+    static {
+        WriteTrace.stages(STAGE_NAMES);
     }
 
     @Override
@@ -218,5 +239,6 @@ public final class SwissChunkGenerator extends ChunkGenerator {
     public void addDebugScreenInfo(List<String> info, RandomState random, BlockPos pos) {
         SwissCoords c = SwissRuntime.coords();
         info.add("Swiss: E " + c.east(pos.getX()) + " N " + c.north(pos.getZ()) + " h " + Math.round(SwissCoords.toMetres(pos.getY())) + " m");
+        info.add("Swiss " + GenStats.compact());
     }
 }
