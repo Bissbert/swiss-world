@@ -241,16 +241,18 @@ a per-block dither. Neighbouring list entries are neighbouring noise values, so 
   - `habitat` (raw HABT byte, −1 without the layer): see the HABT rows in the zone rules.
   - Tests: `GroundZonesTest.habitatAndFlowLayers`, `ZoneMapTest.layersOverrideFallbacks` (all-zero layers = no layers;
     REGN/LITH win; lee adds, exposed removes snow), `ZoneMapTest.chunkBordersAgreeWithLayers`.
-  - Test cells: `uv run python augment_zones.py E_N …` (session scratchpad) ran `ZonesBuilder.build` with each cell's
-    pinned sources over 48 cells of the private clone (decode, add the four layers, re-encode), as sidecar-zones did.
+  - Test cells: for 48 cells of the private clone only (sweep areas and neighbours), a one-off script decoded each cell
+    (`swd.decode`), ran `ZonesBuilder().build(e, n, Config.from_env(), LayerResult(layers=cell.layers), manifest sources)`,
+    added the four layers and wrote it back (`swd.encode`, `swd.write_atomic`), as sidecar-zones did.
 
 ## Measured
 
 - Synthetic mountain bench (`ZoneMapTest.cheap`, 1,444 chunks): zones 0.12 + texture+snow 0.08 = **0.20 ms/chunk**.
   The cliff search is now a separable 13×13 max filter (was a disc scan per column).
-- Real cells with all four layers (`GroundSweepTest`, warm pass after an untimed one, zones / texture+snow ms/chunk):
-  forest 0.22/0.07, Grimsel 0.24/0.06, Aare 0.25/0.04, Interlaken 0.27/0.04, Oberaar 0.24/0.09, glacier 0.14/0.10,
-  fen 0.47/0.07 (busy machine; within 0.5 ms except noise).
+- Real cells with all four layers (`GroundSweepTest`, warm pass after an untimed one, 3 runs, zones + texture/snow):
+  0.17–0.41 ms/chunk per area (forest 0.27–0.31, Grimsel 0.29–0.41, Aare 0.25–0.37, Interlaken 0.16–0.25,
+  Oberaar 0.28–0.39, glacier 0.21–0.24, fen 0.27–0.30). One earlier, busier run measured 0.54 for the fen and 0.74 for Grimsel
+  before the cliff search became a max filter.
 - Zone shares (% of ground columns):
   - forest-slope: fir_spruce 95, avalanche_track 2.5, limestone_cliff 2.2.
   - alpine-grimsel: crystalline_cliff 44, alpine_pasture 25, alpine_turf 22, scree_cone 8.5.
@@ -273,3 +275,6 @@ a per-block dither. Neighbouring list entries are neighbouring noise values, so 
   - Grimsel: crystalline rock (stone/andesite/cobble/granite) 54, grass 7; biome rock 50 / alpine meadow 14.
   - Forest (Harder): grass/podzol/moss/coarse dirt under leaves.
   - Interlaken: grass + dirt paths.
+  - With the layers (second run): Oberaar 64/64 snow tops, biome snowfield 64; glacier ice (24196, 15047) 64 `snow_block`
+    tops over `blue_ice` 4 blocks down (47; 17 rock), biome snowfield 64; Grimsel fen grass 40, moss 11, mud 9;
+    Aare water 25, grass, gravel 5. No exceptions in `latest.log`.
