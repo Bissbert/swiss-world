@@ -67,3 +67,9 @@ refactoring checks.
 the rail column is built as open rail, small road-tunnel stubs and orphan lining/walls between the tracks are filled
 to the yard ballast (`yardDeck`, claim RAIL), absorbed platforms are built as platforms again. Fixes the stone-brick /
 grass bumps and pits between the tracks at Interlaken Ost.
+
+## Ground texture reads the claims
+
+`GroundTextureStage.apply(zm, b, site)` (mod-texture's stage, minimal seam): with a site plan only FREE, EARTHWORK and
+BANK columns are dressed (never way, structure, building, landing); FREE/EARTHWORK ground within 2 of a RAIL claim and
+12 of a BUILDING claim (a station yard) gets the INDUSTRIAL palette.

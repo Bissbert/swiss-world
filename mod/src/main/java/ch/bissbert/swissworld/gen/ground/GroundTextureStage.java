@@ -2,6 +2,8 @@ package ch.bissbert.swissworld.gen.ground;
 
 import ch.bissbert.swissworld.gen.GenContext;
 import ch.bissbert.swissworld.gen.GenStage;
+import ch.bissbert.swissworld.gen.site.Claim;
+import ch.bissbert.swissworld.gen.site.SitePlan;
 import ch.bissbert.swissworld.gen.surface.ColumnGrid;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
@@ -19,8 +21,11 @@ public final class GroundTextureStage implements GenStage {
 
     @Override
     public void apply(GenContext ctx) {
-        apply(zones(ctx), BlockAccess.of(ctx.chunk));
+        apply(zones(ctx), BlockAccess.of(ctx.chunk), ctx.site());
     }
+
+    /** Within this many columns of a rail and {@link #STATION} of a building, open ground is a rail yard. */
+    static final int YARD = 2, STATION = 12;
 
     /** The chunk's zones, computed once per chunk (the biome resolver usually asks first). */
     public static ZoneMap zones(GenContext ctx) {
@@ -29,13 +34,32 @@ public final class GroundTextureStage implements GenStage {
     }
 
     public static void apply(ZoneMap zm, BlockAccess b) {
+        apply(zm, b, null);
+    }
+
+    /**
+     * With a site plan (mod-siteplan): only columns the site leaves as ground (FREE, EARTHWORK, BANK) are dressed, never
+     * a way, structure, building or landing column; ground between the tracks of a station (rail within {@link #YARD},
+     * a building within {@link #STATION}) gets the INDUSTRIAL palette.
+     */
+    public static void apply(ZoneMap zm, BlockAccess b, SitePlan site) {
         for (int lz = 0; lz < 16; lz++) {
             for (int lx = 0; lx < 16; lx++) {
                 int x = zm.x0 + lx, z = zm.z0 + lz;
                 if (!zm.natural(x, z)) continue;
                 int y = top(b, x, z, ColumnGrid.y(zm.metres(x, z)));
                 if (y == ColumnGrid.NONE || !plain(b.get(x, y, z).getBlock())) continue;
-                Block top = GroundTexture.top(zm, x, z);
+                Block top;
+                if (site != null && site.covers(x, z)) {
+                    Claim c = site.claim(x, z);
+                    if (c != Claim.FREE && c != Claim.EARTHWORK && c != Claim.BANK) continue;
+                    boolean yard = c != Claim.BANK && site.distanceTo(Claim.RAIL, x, z) <= YARD
+                            && site.distanceTo(Claim.BUILDING, x, z) <= STATION;
+                    top = yard ? GroundTexture.palette(Zone.INDUSTRIAL).pick(Noise.patch(zm.east(x), zm.north(z), GroundTexture.SALT_PATCH))
+                            : GroundTexture.top(zm, x, z);
+                } else {
+                    top = GroundTexture.top(zm, x, z);
+                }
                 if (top == null) continue;
                 b.set(x, y, z, top.defaultBlockState());
                 for (int d = 1; d <= GroundTexture.UNDER; d++) {
