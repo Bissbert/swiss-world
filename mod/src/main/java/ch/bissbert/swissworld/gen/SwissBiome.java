@@ -9,7 +9,12 @@ import ch.bissbert.swissworld.cell.SwdCell;
 public enum SwissBiome {
     URBAN, COLLINE, COLLINE_FOREST, MONTANE_FOREST, SUBALPINE_FOREST, ALPINE_MEADOW, ROCK, SCREE, GLACIER, LAKE, RIVER,
     /** Outside Switzerland. */
-    OCEAN;
+    OCEAN,
+    /**
+     * Snow-covered ground by the ground zones (mod-texture): the only cold biome, so it snows exactly where snow lies.
+     * Chosen per quart by {@link SwissBiomeSource}, never by {@link #classify}.
+     */
+    SNOWFIELD;
 
     /** Upper limits of the forest belts and of open meadow, metres. */
     public static final double COLLINE_MAX = 800, MONTANE_MAX = 1500, MEADOW_MIN = 1800;
@@ -54,6 +59,6 @@ public enum SwissBiome {
         if (h < MEADOW_MIN) return COLLINE;
         if (h < 2600) return ALPINE_MEADOW;
         if (h < 3200) return ROCK;
-        return GLACIER;
+        return SNOWFIELD;
     }
 }

@@ -215,4 +215,7 @@ idea {
 tasks.named('test', Test) {
     useJUnitPlatform()
     systemProperty 'swissworld.fixtures', rootProject.file('../fixtures').absolutePath
+    // optional: real cells for the ground-zone sweeps and previews (skipped when unset), and where previews go
+    systemProperty 'swissworld.testStore', System.getenv('SWISSWORLD_STORE') ?: ''
+    systemProperty 'swissworld.previews', System.getenv('SWISSWORLD_PREVIEWS') ?: ''
 }

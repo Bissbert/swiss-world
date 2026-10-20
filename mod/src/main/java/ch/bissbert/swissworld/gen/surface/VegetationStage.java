@@ -5,6 +5,7 @@ import ch.bissbert.swissworld.gen.GenStage;
 import java.util.List;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.tags.BlockTags;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.LeavesBlock;
@@ -13,14 +14,14 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.ChunkAccess;
 
 /**
- * Trees, bushes, ground cover, orchard and vineyard rows, glacier ice by SURF class. Owner: mod-surface.
+ * Trees, bushes, ground cover, orchard and vineyard rows by SURF class. Owner: mod-surface.
  * Trees come from {@link TreePlan}: each chunk places the in-chunk blocks of every tree within reach, logs before
  * leaves, and only into air, before the ground cover (which then knows where the crowns shade the ground). Crowns
  * stay off building columns and clear of overlays ({@value TreePlan#OVERLAY_CLEARANCE} blocks above the deck).
  * Everything is keyed by world position, never by RNG state.
  */
 public final class VegetationStage implements GenStage {
-    private static final int SALT_COVER = 21, SALT_FLOWER = 22, SALT_ICE = 23, SALT_PODZOL = 24;
+    private static final int SALT_COVER = 21, SALT_FLOWER = 22, SALT_PODZOL = 24;
     /** No grass or flowers above this. */
     private static final double COVER_TOP = 2600;
     private static final double ALPINE = 1500;
@@ -88,11 +89,11 @@ public final class VegetationStage implements GenStage {
         int ground = g.ground(x, z);
         if (g.top(x, z) != ground) return;
         long e = g.east(x), n = g.north(z);
-        if (surf == 6) {
-            glacier(chunk, x, z, ground, 3 + ColumnHash.below(e, n, SALT_ICE, 6), pos);
-            return;
-        }
-        if (!chunk.getBlockState(pos.set(x, ground, z)).is(Blocks.GRASS_BLOCK)) return;
+        // glacier ice is SnowStage's (ground zones)
+        if (surf == 6) return;
+        // any earthy ground GroundTextureStage left: grass, podzol, moss, coarse or rooted dirt, mud (all #dirt)
+        BlockState groundState = chunk.getBlockState(pos.set(x, ground, z));
+        if (!groundState.is(BlockTags.DIRT)) return;
         if (!chunk.getBlockState(pos.set(x, ground + 1, z)).isAir()) return;
         double m = g.metres(x, z);
         double r = ColumnHash.unit(e, n, SALT_COVER);
@@ -110,7 +111,9 @@ public final class VegetationStage implements GenStage {
                     if (r < 0.02 && m < COVER_TOP) yield FLOWERS[ColumnHash.below(e, n, SALT_FLOWER, FLOWERS.length)].defaultBlockState();
                     yield r < 0.3 ? Blocks.SHORT_GRASS.defaultBlockState() : r < 0.36 ? Blocks.FERN.defaultBlockState() : null;
                 }
-                if (surf != 1 && ColumnHash.unit(e, n, SALT_PODZOL) < 0.35) chunk.setBlockState(pos.set(x, ground, z), Blocks.PODZOL.defaultBlockState(), false);
+                if (surf != 1 && groundState.is(Blocks.GRASS_BLOCK) && ColumnHash.unit(e, n, SALT_PODZOL) < 0.35) {
+                    chunk.setBlockState(pos.set(x, ground, z), Blocks.PODZOL.defaultBlockState(), false);
+                }
                 yield r < 0.1 ? Blocks.FERN.defaultBlockState() : r < 0.18 ? Blocks.MOSS_CARPET.defaultBlockState() : null;
             }
             case 14 -> r < 0.2 ? Blocks.SHORT_GRASS.defaultBlockState() : r < 0.23 ? Blocks.SWEET_BERRY_BUSH.defaultBlockState() : null;
@@ -127,15 +130,5 @@ public final class VegetationStage implements GenStage {
         return Math.floorMod(e, 5) == 0
                 ? Blocks.OAK_FENCE.defaultBlockState()
                 : Blocks.OAK_LEAVES.defaultBlockState().setValue(LeavesBlock.PERSISTENT, true);
-    }
-
-    /** Snow on top, packed ice under it, blue ice deeper: {@code depth} blocks of the column replaced. */
-    private static void glacier(ChunkAccess chunk, int x, int z, int ground, int depth, BlockPos.MutableBlockPos pos) {
-        for (int i = 0; i < depth; i++) {
-            BlockState s = i == 0 ? Blocks.SNOW_BLOCK.defaultBlockState()
-                    : i <= 2 ? Blocks.PACKED_ICE.defaultBlockState()
-                    : Blocks.BLUE_ICE.defaultBlockState();
-            chunk.setBlockState(pos.set(x, ground - i, z), s, false);
-        }
     }
 }

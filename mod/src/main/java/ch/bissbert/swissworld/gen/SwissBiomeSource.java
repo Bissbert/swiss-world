@@ -6,6 +6,11 @@ import ch.bissbert.swissworld.cell.CellCache;
 import ch.bissbert.swissworld.cell.Coverage;
 import ch.bissbert.swissworld.cell.SwdCell;
 import ch.bissbert.swissworld.cell.SwissCoords;
+import ch.bissbert.swissworld.gen.ground.ClimateLines;
+import ch.bissbert.swissworld.gen.ground.GroundTextureStage;
+import ch.bissbert.swissworld.gen.ground.Snow;
+import ch.bissbert.swissworld.gen.ground.Zone;
+import ch.bissbert.swissworld.gen.ground.ZoneMap;
 import com.mojang.serialization.MapCodec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
 import java.util.Arrays;
@@ -69,18 +74,45 @@ public final class SwissBiomeSource extends BiomeSource {
         int eKm = SwissCoords.cellKm(e), nKm = SwissCoords.cellKm(n);
         CellCache cells = SwissRuntime.cells();
         SwdCell cell = cells.getIfPresent(eKm, nKm);
-        if (cell != null) return holder(SwissBiome.classify(cell, SwissCoords.dx(e), SwissCoords.dz(n)));
+        if (cell != null) {
+            int dx = SwissCoords.dx(e), dz = SwissCoords.dz(n);
+            // no neighbours here: snowy if well above the regional snow line and dry
+            if (cell.inside(dx, dz) && Double.isNaN(cell.water(dx, dz)) && cell.surf(dx, dz) != 4
+                    && cell.terrain(dx + 0.5, dz + 0.5) > ClimateLines.snowLine(e, n) + Snow.BAND) {
+                return holder(SwissBiome.SNOWFIELD);
+            }
+            return holder(SwissBiome.classify(cell, dx, dz));
+        }
         if (cells.coverageState(eKm, nKm) == Coverage.OUTSIDE) return holder(SwissBiome.OCEAN);
         return holder(SwissBiome.fallback(SwissCoords.toMetres(QuartPos.toBlock(y))));
     }
 
-    /** For a chunk being generated: biomes from its cells (all loaded), quart centres. */
+    /**
+     * For a chunk being generated: biomes from its cells (all loaded), quart centres. A quart where the ground zones lay
+     * snow on at least half the columns is {@link SwissBiome#SNOWFIELD}, unless any of its columns holds water: a cold
+     * biome would freeze the sources there, and a frozen river source drains the water it feeds.
+     */
     public BiomeResolver resolver(GenContext ctx) {
         return (x, y, z, sampler) -> {
             int bx = QuartPos.toBlock(x) + 2, bz = QuartPos.toBlock(z) + 2;
             SwdCell cell = ctx.cellAt(bx, bz);
             if (cell == null) return holder(SwissBiome.OCEAN);
+            ZoneMap zm = GroundTextureStage.zones(ctx);
+            int qx = QuartPos.toBlock(x) - zm.x0, qz = QuartPos.toBlock(z) - zm.z0;
+            if (qx >= 0 && qz >= 0 && qx < 16 && qz < 16 && snowfield(zm, qx, qz)) return holder(SwissBiome.SNOWFIELD);
             return holder(SwissBiome.classify(cell, SwissCoords.dx(ctx.coords.east(bx)), SwissCoords.dz(ctx.coords.north(bz))));
         };
+    }
+
+    /** At least half the quart's columns snowy, none wet. Local quart corner (qx, qz). */
+    public static boolean snowfield(ZoneMap zm, int qx, int qz) {
+        if (zm.snowyColumns(qx, qz) < 8) return false;
+        for (int dz = 0; dz < 4; dz++) {
+            for (int dx = 0; dx < 4; dx++) {
+                int x = zm.x0 + qx + dx, z = zm.z0 + qz + dz;
+                if (zm.zone(x, z) == Zone.WATER || zm.waterDist(x, z) == 0) return false;
+            }
+        }
+        return true;
     }
 }

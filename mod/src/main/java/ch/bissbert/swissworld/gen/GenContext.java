@@ -12,6 +12,8 @@ public final class GenContext {
     public final ChunkAccess chunk;
     public final SwissCoords coords;
     private final CellLookup cells;
+    /** Per-chunk results shared by stages (and the biome resolver), see {@link #memo}. */
+    private final java.util.Map<Class<?>, Object> memo = new java.util.HashMap<>(4);
 
     public GenContext(ChunkAccess chunk, SwissCoords coords, CellLookup cells) {
         this.chunk = chunk;
@@ -27,6 +29,19 @@ public final class GenContext {
      */
     public SwdCell cellAt(int x, int z) {
         return cells.get(SwissCoords.cellKm(coords.east(x)), SwissCoords.cellKm(coords.north(z)));
+    }
+
+    /**
+     * A value computed once per chunk and shared by everyone who asks for {@code key}: e.g. the ground zones, which the
+     * biome resolver, the texture stage and the snow stage all read. Single-threaded, like the pipeline itself.
+     */
+    public <T> T memo(Class<T> key, java.util.function.Supplier<T> compute) {
+        Object v = memo.get(key);
+        if (v == null) {
+            v = compute.get();
+            memo.put(key, v);
+        }
+        return key.cast(v);
     }
 
     @FunctionalInterface
