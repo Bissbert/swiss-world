@@ -128,6 +128,46 @@ class TransportPlanTest {
         }
     }
 
+    /**
+     * Playtest 00.07 again (28980,-1255,49): a road bridge along a slope with nothing under it stood on a beam and a
+     * railing up to ten blocks over the downhill half. It is grassed fill with a slope beside it; one over a stream
+     * keeps its beam.
+     */
+    @Test
+    void sideHillBridgeIsFill() {
+        SwdCell c = Cells.flat(600);
+        Voxels.terrain(c, (x, z) -> 600 - 1.2 * x);
+        for (int z = -40; z <= 40; z++) {
+            for (int x = 0; x <= 7; x++) Cells.overlay(c, x, z, 3, ColumnGrid.BRIDGE, 600);
+        }
+        // the same bridge further south crosses a stream on its downhill side
+        for (int z = 20; z <= 40; z++) Cells.water(c, 6, z, 600 - 1.2 * 6 + 0.5, 2);
+        Voxels v = new Voxels(c, -6, -12, 24, 30, -1450, -1380);
+        int deepest = 0;
+        for (int z = -6; z <= 6; z++) {
+            int deck = v.deck[v.col(0, z)];
+            for (int x = 0; x <= 7; x++) {
+                int top = v.originalTop[v.col(x, z)];
+                deepest = Math.max(deepest, deck - 2 - top);
+                assertNotEquals(TransportPlan.Part.BEAM, v.part(x, deck - 1, z), "beam on the side-hill bridge at " + x + "," + z);
+                assertNotEquals(TransportPlan.Part.RAILING, v.part(x, deck + 1, z), "railing on the side-hill bridge at " + x + "," + z);
+                for (int y = top + 1; y < deck; y++) {
+                    assertEquals(TransportPlan.Part.SOIL, v.part(x, y, z), "fill at " + x + "," + y + "," + z);
+                }
+            }
+            // downhill of the edge the ground slopes away from the deck one block per column: no soil wall
+            for (int x = 8; x <= 10; x++) {
+                assertTrue(topSolid(v, x, z) >= deck - (x - 7), "slope at " + x + "," + z + ": " + topSolid(v, x, z) + " vs deck " + deck);
+            }
+            assertEquals(TransportPlan.Part.TOP, v.part(9, topSolid(v, 9, z), z), "grassed slope at 9," + z);
+        }
+        assertTrue(deepest > TransportPlan.LOW_BRIDGE + 4, "the downhill edge stands well above the ground: " + deepest);
+        for (int z = 24; z <= 30; z++) {
+            int deck = v.deck[v.col(0, z)];
+            assertEquals(TransportPlan.Part.BEAM, v.part(6, deck - 1, z), "beam over the stream at 6," + z);
+        }
+    }
+
     @Test
     void roadShoulderIsGradedToTheDeck() {
         Voxels v = new Voxels(slopedRoad(), -8, -40, 14, 40, -1440, -1370);
@@ -550,6 +590,105 @@ class TransportPlanTest {
                 assertEquals(through, t.railShape(x, z), "through line at " + x + "," + z);
             }
         }
+    }
+
+    /**
+     * The Brünig line at its passing loops (2339,-1987, 23339,-4986): the main line bends away where a loop track runs
+     * on straight, and the switch kept the straighter pair, the loop's, so the main line ended beside it. With the main
+     * line tagged (OFLG bit5) the switch keeps it; untagged (older cells) the straighter pair still wins.
+     */
+    @Test
+    void switchKeepsTheTaggedMainLine() {
+        for (boolean tagged : new boolean[] {true, false}) {
+            int main = RAIL | (tagged ? ColumnGrid.MAIN : 0);
+            SwdCell c = Cells.flat(600);
+            for (int x = -40; x <= 40; x++) {
+                for (int z = -3; z <= 40; z++) Cells.overlay(c, x, z, OverlayPlan.RAIL_BED, 0, Double.NaN);
+            }
+            // the main line: from the west along row 0, then south and a diagonal staircase to the south-east
+            for (int x = -40; x <= 0; x++) Cells.overlay(c, x, 0, OverlayPlan.RAIL_BED, main, Double.NaN);
+            Cells.overlay(c, 0, 1, OverlayPlan.RAIL_BED, main, Double.NaN);
+            for (int i = 0; i < 30; i++) {
+                Cells.overlay(c, i, i + 2, OverlayPlan.RAIL_BED, main, Double.NaN);
+                Cells.overlay(c, i + 1, i + 2, OverlayPlan.RAIL_BED, main, Double.NaN);
+            }
+            // the loop track runs on straight east
+            for (int x = 1; x <= 40; x++) Cells.overlay(c, x, 0, OverlayPlan.RAIL_BED, RAIL, Double.NaN);
+            TransportPlan t = new TransportPlan(Cells.grid(c, 0, 0, TransportPlan.MARGIN));
+            assertTrue(t.rail(0, 0) && t.rail(1, 0) && t.rail(0, 1), "switch and its three arms");
+            assertEquals(tagged ? Rail.SOUTH_WEST : Rail.EAST_WEST, t.railShape(0, 0), "tagged " + tagged);
+        }
+    }
+
+    /**
+     * The Brünig line at 2339,-1987: the main line runs a column beside a siding, the two thinned as one band and the
+     * main line's centres were dropped there, so its rails ran over onto the siding. The tagged main line keeps its
+     * centres; the siding gives way.
+     */
+    @Test
+    void mainLineKeepsItsCentresBesideATrack() {
+        SwdCell c = Cells.flat(600);
+        for (int x = -40; x <= 40; x++) {
+            for (int z = -3; z <= 20; z++) Cells.overlay(c, x, z, OverlayPlan.RAIL_BED, 0, Double.NaN);
+        }
+        for (int x = -40; x <= 40; x++) Cells.overlay(c, x, 0, OverlayPlan.RAIL_BED, RAIL | ColumnGrid.MAIN, Double.NaN);
+        // a siding comes up from the south-west, runs along the main line touching it, and leaves to the south-east
+        for (int i = 0; i < 12; i++) {
+            Cells.overlay(c, -12 - i, 1 + i, OverlayPlan.RAIL_BED, RAIL, Double.NaN);
+            Cells.overlay(c, 12 + i, 1 + i, OverlayPlan.RAIL_BED, RAIL, Double.NaN);
+        }
+        for (int x = -12; x <= 12; x++) Cells.overlay(c, x, 1, OverlayPlan.RAIL_BED, RAIL, Double.NaN);
+        TransportPlan t = new TransportPlan(Cells.grid(c, 0, 0, TransportPlan.MARGIN));
+        for (int x = -8; x <= 24; x++) assertTrue(t.rail(x, 0), "main line at " + x);
+    }
+
+    /**
+     * The Brünig line at 2339,-1989 (flags as in cell 2635_1172): the main line runs two columns beside a siding and
+     * a crossover between them. Its rails there are set off its centres onto untagged columns, and the switch counted
+     * that arm as not on the main line and took the crossover; the line ended at 2340,-1988.
+     */
+    @Test
+    void switchCountsMainLineRailsSetOffItsCentres() {
+        String[] rows = {
+            "                        ..RR.  ",
+            "                       .RRR.  .",
+            "                      .RRR.  .M",
+            "                    ..RRR. ..MM",
+            "                   .RRR.. .MMM.",
+            "                  .RRR.. .MM.. ",
+            "                ..RRR....MM.  .",
+            "               .RRRR. .MMM.  .R",
+            "              .RRRR. .MM..  .RR",
+            "            ..RRRR...MM.  ..RR.",
+            "           .RRRRR..MMM.  .RRR. ",
+            "          .RR.RR..MM..  .RR..  ",
+            "        ..RR.RR..MM.  ..RR.    ",
+            "       .RRR.RR.MMM.  .RRR.     ",
+            "      .RR..RR.MM..  .RR..      ",
+            "    ..RR..RR.MM.  ..RR.        ",
+            "   .RRR..RRMMM.  .RRR.         ",
+            "  .RR...RRMM..  .RR..          ",
+            "..RR. .RRMM.  ..RR.            ",
+            "RRR. .RRMM.  .RRR.             ",
+            "R....RMMM.  .RR..              ",
+            ". .RRMM.. ..RR.                ",
+            " .RRMM.  .RRR.                 ",
+            ".RMMM.  .RR..                  ",
+            "RMM..  .RR.                    ",
+            "MM.  .RRR.                     ",
+            "M.  .RR..                      ",
+        };
+        SwdCell c = Cells.flat(600);
+        for (int j = 0; j < rows.length; j++) {
+            for (int i = 0; i < rows[j].length(); i++) {
+                char ch = rows[j].charAt(i);
+                int flags = ch == 'M' ? RAIL | ColumnGrid.MAIN : ch == 'R' ? RAIL : 0;
+                if (ch != ' ') Cells.overlay(c, i - 14, j - 13, OverlayPlan.RAIL_BED, flags, Double.NaN);
+            }
+        }
+        TransportPlan t = new TransportPlan(Cells.grid(c, 0, 0, TransportPlan.MARGIN));
+        assertTrue(t.rail(0, 0) && t.rail(0, 1) && t.rail(1, 0), "switch with its arms south and east");
+        assertEquals(Rail.SOUTH_EAST, t.railShape(0, 0));
     }
 
     @Test

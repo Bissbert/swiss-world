@@ -47,7 +47,7 @@ public final class TransportPlan {
     private static final int UNSET = Integer.MAX_VALUE;
 
     private final ColumnGrid g;
-    private final int[] roadHalf, railBase, railProfile, railNode, railLevel, floor, ceil, wet, gap, joins, flipped;
+    private final int[] roadHalf, railBase, railProfile, railNode, railLevel, floor, ceil, wet, gap, joins, flipped, low;
     private final int[][] thinned;
 
     public TransportPlan(ColumnGrid g) {
@@ -65,6 +65,7 @@ public final class TransportPlan {
         gap = filled(n);
         joins = filled(n);
         flipped = filled(n);
+        low = filled(n);
         thinned = new int[THIN.length][];
         for (int i = 0; i < THIN.length; i++) thinned[i] = filled(n);
     }
@@ -123,9 +124,13 @@ public final class TransportPlan {
         return way(x, z) && g.flag(x, z, ColumnGrid.TUNNEL);
     }
 
-    /** A way on the ground: not a bridge, not in a tunnel. Its terrain is cut or filled to its deck. */
+    /**
+     * A way on the ground: not a bridge (unless built as an embankment, {@link #lowBridge}), not in a tunnel. Its
+     * terrain is cut or filled to its deck.
+     */
     public boolean open(int x, int z) {
-        return way(x, z) && !g.flag(x, z, ColumnGrid.BRIDGE) && !g.flag(x, z, ColumnGrid.TUNNEL) && !absorbed(x, z);
+        return way(x, z) && !g.flag(x, z, ColumnGrid.TUNNEL) && !absorbed(x, z)
+                && (!g.flag(x, z, ColumnGrid.BRIDGE) || lowBridge(x, z));
     }
 
     /**
@@ -365,7 +370,9 @@ public final class TransportPlan {
     /**
      * Two tracks drawn side by side (two centre lines touching, or one drawn two wide) thinned to one: pass by pass,
      * the centres with no centre on the pass's side are dropped where that keeps their neighbours joined and does not
-     * shorten a track (a simple point of the 4-connected centres). Each pass looks one column further around.
+     * shorten a track (a simple point of the 4-connected centres). Each pass looks one column further around. A
+     * main-line centre (swd-format §5, bit5) that touches another track's centre stays: the other track gives way, so
+     * where two tracks run side by side the main line keeps its rails (2339,-1987).
      */
     private boolean thin(int x, int z, int pass) {
         if (pass == 0) return c00(x, z);
@@ -375,10 +382,19 @@ public final class TransportPlan {
         boolean keep = thin(x, z, pass - 1);
         if (keep) {
             int[] d = DIRS[THIN[pass - 1]];
-            if (!thin(x + d[0], z + d[1], pass - 1) && simple(x, z, pass - 1)) keep = false;
+            if (!thin(x + d[0], z + d[1], pass - 1) && simple(x, z, pass - 1) && !mainBeside(x, z, pass - 1)) keep = false;
         }
         cache[k] = keep ? 1 : 0;
         return keep;
+    }
+
+    /** A main-line centre with a centre of another track (or a gap column between tracks) beside it. */
+    private boolean mainBeside(int x, int z, int pass) {
+        if (!g.flag(x, z, ColumnGrid.MAIN)) return false;
+        for (int[] d : DIRS) {
+            if (thin(x + d[0], z + d[1], pass) && !g.flag(x + d[0], z + d[1], ColumnGrid.MAIN)) return true;
+        }
+        return false;
     }
 
     /** Ring of the eight neighbours, clockwise from north. */
@@ -705,7 +721,9 @@ public final class TransportPlan {
      * switch block (a powered T junction turns, an unpowered one keeps its shape), so the branch is the side that
      * gives way. Two exceptions: an arm that ends within {@link #SWITCH_WALK} rails is a stub and gives way instead,
      * and of two arms that meet again at the same switch (a short loop, where two tracks drawn side by side were
-     * thinned apart) the longer one gives way, so both switches of the loop route the line the same way.
+     * thinned apart) the longer one gives way, so both switches of the loop route the line the same way. Before both,
+     * where the data tags a main line (swd-format §5) and exactly two arms run on it, those two carry on: at a Y where
+     * a loop or siding merges, the straighter pair is often the loop's, and the main line broke there.
      */
     private int track(int x, int z) {
         int m = links(x, z);
@@ -721,6 +739,8 @@ public final class TransportPlan {
             }
         }
         if (stubs == 1) return m & ~(1 << stub);
+        int main = mainPair(arm);
+        if (main != 0) return main;
         for (int d = 0; d < 4; d++) {
             for (int e = d + 1; e < 4; e++) {
                 if (arm[d] == null || arm[e] == null || arm[d][0] != ARM_SWITCH || arm[e][0] != ARM_SWITCH) continue;
@@ -759,6 +779,8 @@ public final class TransportPlan {
     private int crossing(int x, int z) {
         int[][] arm = new int[4][];
         for (int d = 0; d < 4; d++) arm[d] = arm(x, z, d);
+        int main = mainPair(arm);
+        if (main != 0) return main;
         int pick = 0;
         double best = Double.MAX_VALUE;
         for (int d = 0; d < 4; d++) {
@@ -779,16 +801,50 @@ public final class TransportPlan {
     private static final int ARM_OPEN = 0, ARM_END = 1, ARM_SWITCH = 2;
 
     /**
-     * Walks a switch's arm in direction d for up to {@link #SWITCH_WALK} rails: {kind, steps, x, z} where kind is
-     * {@link #ARM_END} (the track ends), {@link #ARM_SWITCH} (another switch, at x, z) or {@link #ARM_OPEN}.
+     * The two arms on the main line (at least half their walked rails on it, {@link #mainNear}) when exactly two are
+     * and neither is a stub, as a {@link #links} bit mask; else 0 (no tag, as in older cells, or a yard where more
+     * arms are tagged), and the shape rules decide.
+     */
+    private static int mainPair(int[][] arm) {
+        int m = 0;
+        for (int d = 0; d < 4; d++) {
+            if (arm[d] != null && arm[d][4] * 2 >= arm[d][1]) {
+                if (arm[d][0] == ARM_END) return 0;
+                m |= 1 << d;
+            }
+        }
+        return Integer.bitCount(m) == 2 ? m : 0;
+    }
+
+    /**
+     * A rail on a main line: on a tagged column, or on an untagged one (no track of its own) beside a main-line centre:
+     * where tracks run a column or two apart the rails of a main line are often set off its centres (see {@link #rail}).
+     */
+    private boolean mainNear(int x, int z) {
+        if (!g.present(x, z)) return false;
+        if (g.flag(x, z, ColumnGrid.RAIL)) return g.flag(x, z, ColumnGrid.MAIN);
+        for (int j = -1; j <= 1; j++) {
+            for (int i = -1; i <= 1; i++) {
+                int cx = x + i, cz = z + j;
+                if (g.present(cx, cz) && g.flag(cx, cz, ColumnGrid.MAIN) && OverlayPlan.railCentre(g, cx, cz)) return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Walks a switch's arm in direction d for up to {@link #SWITCH_WALK} rails: {kind, steps, x, z, main} where kind is
+     * {@link #ARM_END} (the track ends), {@link #ARM_SWITCH} (another switch, at x, z) or {@link #ARM_OPEN}, and main
+     * counts the walked rails on or beside a main line ({@link #mainNear}).
      */
     private int[] arm(int x, int z, int d) {
-        int px = x, pz = z, cx = x + DIRS[d][0], cz = z + DIRS[d][1];
+        int px = x, pz = z, cx = x + DIRS[d][0], cz = z + DIRS[d][1], main = 0;
         for (int step = 1; step <= SWITCH_WALK; step++) {
+            if (mainNear(cx, cz)) main++;
             int cm = links(cx, cz);
             int n = Integer.bitCount(cm);
-            if (n <= 1) return new int[] {ARM_END, step, cx, cz};
-            if (n >= 3) return new int[] {ARM_SWITCH, step, cx, cz};
+            if (n <= 1) return new int[] {ARM_END, step, cx, cz, main};
+            if (n >= 3) return new int[] {ARM_SWITCH, step, cx, cz, main};
             int nx = NONE, nz = NONE;
             for (int e = 0; e < 4; e++) {
                 int qx = cx + DIRS[e][0], qz = cz + DIRS[e][1];
@@ -802,7 +858,7 @@ public final class TransportPlan {
             cx = nx;
             cz = nz;
         }
-        return new int[] {ARM_OPEN, SWITCH_WALK, cx, cz};
+        return new int[] {ARM_OPEN, SWITCH_WALK, cx, cz, main};
     }
 
     private static boolean curve(int m) {
@@ -1346,12 +1402,66 @@ public final class TransportPlan {
     static final int LOW_BRIDGE = 2;
 
     /**
-     * A bridge column with at most {@link #LOW_BRIDGE} blocks of air between dry terrain and its beam: no water, no rail and
-     * no headroom under it. Playtest 00.07 (28980,-1255,49): such a deck showed as a long stone-brick wall on a slope.
+     * A bridge with nothing under it is built as fill where it runs along the ground: the column has at most
+     * {@link #SIDE_HILL_MAX} blocks of air under the beam, and a column of the same bridge within {@link #SIDE_HILL_REACH}
+     * along a straight line at most {@link #SIDE_HILL}.
+     */
+    static final int SIDE_HILL = 5, SIDE_HILL_MAX = 12, SIDE_HILL_REACH = 8;
+
+    /**
+     * A bridge column built as an embankment of soil (the earthwork beside it slopes down from its edge): dry, with
+     * no rail under it, and either at most {@link #LOW_BRIDGE} blocks of air between terrain and beam, or on a
+     * side-hill bridge ({@link #sideHill}). Playtest 00.07 (28980,-1255,49): such a deck showed as a long stone-brick
+     * wall on a slope, and then as a beam and railing standing on the downhill half.
      */
     boolean lowBridge(int x, int z) {
-        if (OverlayPlan.railUnderBridge(g, x, z) || wetTop(x, z) != NONE || g.source(x, z) != NONE) return false;
-        return deck(x, z) - 2 - g.top(x, z) <= LOW_BRIDGE; // air between terrain and beam
+        int k = g.index(x, z);
+        if (low[k] != UNSET) return low[k] == 1;
+        boolean r = !OverlayPlan.railUnderBridge(g, x, z) && wetTop(x, z) == NONE && g.source(x, z) == NONE
+                && (deck(x, z) - 2 - g.top(x, z) <= LOW_BRIDGE || sideHill(x, z)); // air between terrain and beam
+        low[k] = r ? 1 : 0;
+        return r;
+    }
+
+    /** Air between the terrain and the beam by the overlay's own deck (no smoothing: it looks far). */
+    private int rawAir(int x, int z) {
+        return g.deck(x, z) - 2 - g.top(x, z);
+    }
+
+    private boolean bridgeColumn(int x, int z) {
+        return g.present(x, z) && g.overlay(x, z) != 0 && g.flag(x, z, ColumnGrid.BRIDGE);
+    }
+
+    /**
+     * On a bridge along a slope with nothing under it: every bridge column within {@link #SIDE_HILL_REACH} is dry,
+     * carries no rail under it and meets no lower way or water beside it, and one reached along a straight
+     * line of bridge columns lies within {@link #SIDE_HILL} of the terrain. A bridge over a valley, water or a way keeps its beam: across its middle the
+     * terrain lies well below the deck; only its ends, near the ground, become fill.
+     */
+    private boolean sideHill(int x, int z) {
+        if (!bridgeColumn(x, z) || g.flag(x, z, ColumnGrid.RAIL) || rawAir(x, z) > SIDE_HILL_MAX) return false; // viaducts keep their beam
+        for (int j = -SIDE_HILL_REACH; j <= SIDE_HILL_REACH; j++) {
+            for (int i = -SIDE_HILL_REACH; i <= SIDE_HILL_REACH; i++) {
+                int cx = x + i, cz = z + j;
+                if (!bridgeColumn(cx, cz)) continue;
+                if (OverlayPlan.railUnderBridge(g, cx, cz) || g.source(cx, cz) != NONE) return false;
+                for (int[] e : DIRS) {
+                    int nx = cx + e[0], nz = cz + e[1];
+                    if (!g.present(nx, nz) || bridgeColumn(nx, nz)) continue;
+                    if (g.source(nx, nz) != NONE) return false; // water beside the footprint runs under it
+                    if (g.overlay(nx, nz) != 0 && g.deck(nx, nz) < g.deck(cx, cz) - LOW_BRIDGE - 2) return false; // a way under
+                }
+            }
+        }
+        // the ground comes near the deck along the bridge itself, not on another bridge beside it
+        for (int[] e : RING) {
+            for (int i = 0; i <= SIDE_HILL_REACH; i++) {
+                int cx = x + i * e[0], cz = z + i * e[1];
+                if (!bridgeColumn(cx, cz)) break;
+                if (rawAir(cx, cz) <= SIDE_HILL) return true;
+            }
+        }
+        return false;
     }
 
     /** A road or rail column outside a tunnel: embankment or cut, culvert roof over water, deck, slab or rail. */
