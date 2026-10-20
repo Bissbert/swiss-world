@@ -77,16 +77,24 @@ BANK columns are dressed (never way, structure, building, landing); FREE/EARTHWO
 ## Measured (headless, fresh world, bot flight, `/swiss admin stats`, mean / p95 ms per chunk)
 
 Both on main af4d13a's pipeline (with GroundTexture and Snow); "before" is 19e95a9 (timers only), "after" is this
-branch. Other agents ran on the machine at the same time, so treat single numbers as ±20 %.
+branch. Other agents ran on the machine at the same time, so treat single numbers as ±20 %. Forest Rugen's flights
+covered 1266 (before) and 1520 (after) chunks.
 
-| site | Overlay before → after | Vegetation | Water | chunk |
-|---|---|---|---|---|
-| interlaken-ost | 5.23 / 11.6 → 1.55 / 2.9 | 0.29 → 0.12 | 0.13 → 0.07 | 8.21 / 19.5 → 4.71 / 9.7 |
-| innertkirchen | 3.17 / 5.8 → 2.02 / 2.9 | 0.46 → 0.25 | 0.10 → 0.03 | 6.09 / 9.7 → 4.28 / 6.9 |
-| forest-rugen | 2.90 / 4.9 → 1.82 / 2.9 | 0.57 → 0.38 | 0.09 → 0.03 | 5.71 / 9.7 → 4.69 / 8.2 |
-| mountain-faulhorn | 2.73 / 4.1 → 2.15 / 2.9 | 0.11 → 0.03 | 0.08 → 0.03 | 4.58 / 6.9 → 4.31 / 5.8 |
+"chunk" is the chunk's own stage time and leaves out the tile plan, which runs once per 128×128 tile (64 chunks) on the
+same worldgen executor. "+plan/flight" adds the flight's plan total spread over its chunks (a flight touches ~50 chunks
+per tile); "+plan/tile" adds 215 ms / 64 = 3.4 ms, the steady state once every chunk of a tile is generated.
 
-Building ~unchanged (0.94 → 1.11 at Interlaken), GroundTexture 0.09–0.26 and Snow 0.001 both before and after.
-A plan costs ~205–225 ms once per tile (20–25 tiles per flight) on the worldgen executor; `plan-wait` (a chunk waiting
-on its tile's plan, off the chunk time, not blocking a thread) is ~20 ms mean, p95 ~220–260 ms: the first chunks of a
-tile. Guard violations 0 and plan cell misses 0 in all four flights.
+| site | Overlay before → after | chunk before → after | plan/flight | after +plan/flight | after +plan/tile |
+|---|---|---|---|---|---|
+| interlaken-ost | 5.23 / 11.6 → 1.55 / 2.9 | 8.21 / 19.5 → 4.71 / 9.7 | 4.0 | 8.7 | 8.1 |
+| innertkirchen | 3.17 / 5.8 → 2.02 / 2.9 | 6.09 / 9.7 → 4.28 / 6.9 | 4.2 | 8.4 | 7.7 |
+| forest-rugen | 2.90 / 4.9 → 1.82 / 2.9 | 5.71 / 9.7 → 4.69 / 8.2 | 3.2 | 7.9 | 8.1 |
+| mountain-faulhorn | 2.73 / 4.1 → 2.15 / 2.9 | 4.58 / 6.9 → 4.31 / 5.8 | 5.0 | 9.3 | 7.7 |
+
+So the work Overlay (and Water, Vegetation) no longer repeat per chunk moved into the plan: per-chunk p95 and the
+yard's worst chunks drop a lot, but total CPU per chunk is about even at Interlaken and 1.3–1.7× before elsewhere,
+because the plan (205–225 ms per tile) is paid also where little is built. `plan-wait` (a chunk waiting on its tile's
+plan, not blocking a thread) is ~20 ms mean, p95 ~220–260 ms: latency for the first chunks of each tile. Building
+~unchanged (0.94 → 1.11 at Interlaken), GroundTexture 0.09–0.26, Snow 0.001. Guard violations 0 and plan cell misses 0
+in all four flights. Next lever: make the plan cheaper (skip claim passes in tiles with no ways or buildings, cheaper
+column grid), it now dominates.
