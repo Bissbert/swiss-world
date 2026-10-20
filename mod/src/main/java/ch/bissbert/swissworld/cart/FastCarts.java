@@ -32,7 +32,9 @@ import net.minecraft.world.phys.Vec3;
  *
  * <p>The track ahead is walked ({@link RailWalk}) up to the braking distance from the cap: the cart brakes to vanilla
  * speed before the end of the track, and to a stop before a chunk that is not ready (unloaded, a placeholder, not yet
- * on the rider's client; {@link TerrainHold#terrainReady}, which would otherwise take the rider off the cart).
+ * on the rider's client, {@link TerrainHold#terrainReady}, which would otherwise take the rider off the cart; or not
+ * entity ticking, where the cart would freeze in mid-run while neighbouring chunks generate). Waiting, it keeps its
+ * heading and goes on when the chunk is ready.
  *
  * <p>Applies to carts with a player on board in Switzerland, or to every cart there but furnace carts with {@code
  * cartBoostUnridden}; never in water. The rider's forward and back keys are throttle and brake ({@code
@@ -69,15 +71,23 @@ public final class FastCarts {
         double v = Math.min(dm.horizontalDistance() * f, Math.max(cap, CartSpeed.VANILLA));
         double hx, hz;
         if (v < 0.005) {
-            boolean resume = input == 0 && cruise && fc.swissworld$target() > 0
-                    && (fc.swissworld$headingX() != 0 || fc.swissworld$headingZ() != 0);
+            // waiting (for terrain) or starting: keep the last heading unless the rider looks the other way
+            double sx = fc.swissworld$headingX(), sz = fc.swissworld$headingZ();
+            boolean stored = sx != 0 || sz != 0;
+            boolean resume = input == 0 && cruise && fc.swissworld$target() > 0 && stored;
             if (input <= 0 && !resume) {
                 fc.swissworld$setTarget(0);
                 vanilla.accept(pos, state);
                 return;
             }
-            double lx = resume ? fc.swissworld$headingX() : rider.getLookAngle().x;
-            double lz = resume ? fc.swissworld$headingZ() : rider.getLookAngle().z;
+            double lx = sx, lz = sz;
+            if (!resume) {
+                Vec3 look = rider.getLookAngle();
+                if (!stored || look.x * sx + look.z * sz < -0.3) {
+                    lx = look.x;
+                    lz = look.z;
+                }
+            }
             int[] e = RailWalk.exitAlong(shape, lx, lz);
             double n = Math.hypot(e[0], e[1]);
             hx = e[0] / n;
@@ -172,8 +182,10 @@ public final class FastCarts {
             ChunkPos cp = new ChunkPos(x >> 4, z >> 4);
             if (cp.toLong() == lastChunk) return lastReady;
             lastChunk = cp.toLong();
-            lastReady = rider != null ? TerrainHold.terrainReady(level, rider, cp)
-                    : level.getChunkSource().getChunkNow(cp.x, cp.z) != null && PlaceholderRepair.settled(cp);
+            // entity ticking too: a cart in a chunk whose neighbours are still generating stops ticking mid-run
+            lastReady = (rider != null ? TerrainHold.terrainReady(level, rider, cp)
+                    : level.getChunkSource().getChunkNow(cp.x, cp.z) != null && PlaceholderRepair.settled(cp))
+                    && level.isPositionEntityTicking(at.set(x, cart.getBlockY(), z));
             return lastReady;
         }
     }
