@@ -143,6 +143,31 @@ class CellCacheTest {
     }
 
     @Test
+    void statsCountHitsMissesAndDecodes() throws IOException {
+        putFixture();
+        CellCache c = cache();
+        c.get(E, N); // miss: decoded from the file
+        c.get(E, N);
+        c.get(E, N);
+        assertEquals(2, c.hits());
+        assertEquals(1, c.misses());
+        assertEquals(1, c.decodedCells());
+        assertEquals(2.0 / 3, c.hitRate(), 1e-9);
+        assertTrue(c.meanDecodeMs() >= 0);
+    }
+
+    @Test
+    void warmDecodesAFileThatIsThereWithoutPendingAnything() throws IOException {
+        CellCache c = cache();
+        assertFalse(c.warm(E, N), "no file yet");
+        putFixture();
+        assertTrue(c.warm(E, N));
+        assertNotNull(c.getIfPresent(E, N));
+        assertEquals(0, c.pendingCount());
+        assertFalse(c.warm(E, N), "already cached");
+    }
+
+    @Test
     void abortWaitingHoldsUntilResumed() {
         CellCache c = cache();
         CompletableFuture<CellCache.Result> f = c.get(E, N);

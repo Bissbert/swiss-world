@@ -46,6 +46,14 @@ public final class SwissConfig {
                     "shorter freezes but more placeholders. 0: use stallAbortSeconds")
             .defineInRange("playerStallAbortSeconds", 2.0, 0.0, 600.0);
 
+    public static final ModConfigSpec.IntValue IO_THREADS = B
+            .comment("Threads that read and decode cell files and talk to the sidecar (never the server thread).",
+                    "0: automatic, clamp(cores / 2, 2, 6)")
+            .defineInRange("ioThreads", 0, 0, 32);
+    public static final ModConfigSpec.IntValue PREFETCH_MAX_IN_FLIGHT = B
+            .comment("Most 'prefetch' requests for the cells ahead of a player that may be unanswered at once, per player")
+            .defineInRange("prefetchMaxInFlight", 2, 1, 16);
+
     public static final ModConfigSpec SPEC = B.build();
 
     private SwissConfig() {}

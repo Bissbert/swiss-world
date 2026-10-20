@@ -496,6 +496,10 @@ public final class SwissCommands {
         Runtime rt = Runtime.getRuntime();
         long usedMb = (rt.totalMemory() - rt.freeMemory()) >> 20, maxMb = rt.maxMemory() >> 20;
         s.sendSystemMessage(Component.literal(String.format(Locale.ROOT,
+                "cell cache: %.1f%% hit rate (%d/%d), %d decoded at %.1f ms each, %d evicted, %d stall aborts",
+                cells.hitRate() * 100, cells.hits(), cells.hits() + cells.misses(), cells.decodedCells(),
+                cells.meanDecodeMs(), cells.evictions(), cells.stallAborts())));
+        s.sendSystemMessage(Component.literal(String.format(Locale.ROOT,
                 "cells %d/%d cached, %d pending · chunks %d generated (%.1f ms/chunk), %d waiting, %d aborted · heap %d/%d MB · coverage %s",
                 cells.cachedCount(), cells.capacity(), cells.pendingCount(), SwissRuntime.chunksGenerated(), SwissRuntime.meanChunkMs(),
                 SwissRuntime.PENDING_CHUNKS.get(), SwissRuntime.abortedCount(), usedMb, maxMb, cells.hasCoverage() ? "loaded" : "missing")));

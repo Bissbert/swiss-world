@@ -14,7 +14,9 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.LongSupplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -60,6 +62,11 @@ public final class CellCache {
     private long coverageMtime = Long.MIN_VALUE, coverageCheckedAt = Long.MIN_VALUE;
     private volatile boolean aborted, holding;
     private volatile ScheduledExecutorService poller;
+    private final Set<Long> warming = ConcurrentHashMap.newKeySet();
+
+    // statistics for /swissworld status
+    private final AtomicLong hits = new AtomicLong(), misses = new AtomicLong(), decodes = new AtomicLong(),
+            decodeNanos = new AtomicLong(), evictions = new AtomicLong(), stallAborts = new AtomicLong();
 
     // sidecar health, only touched by the poller and request callbacks (synchronized on this)
     private long sidecarRetryAt, backoffMs;
@@ -74,7 +81,9 @@ public final class CellCache {
         this.lru = new LinkedHashMap<>(capacity, 0.75f, true) {
             @Override
             protected boolean removeEldestEntry(Map.Entry<Long, SwdCell> eldest) {
-                return size() > CellCache.this.capacity;
+                boolean evict = size() > CellCache.this.capacity;
+                if (evict) evictions.incrementAndGet();
+                return evict;
             }
         };
         refreshCoverage();
@@ -141,6 +150,41 @@ public final class CellCache {
         return capacity;
     }
 
+    /** {@link #get} calls answered from memory / not. */
+    public long hits() {
+        return hits.get();
+    }
+
+    public long misses() {
+        return misses.get();
+    }
+
+    /** Fraction of {@link #get} calls answered from memory, 0..1 (1 when there were none). */
+    public double hitRate() {
+        long h = hits.get(), m = misses.get();
+        return h + m == 0 ? 1.0 : (double) h / (h + m);
+    }
+
+    public long decodedCells() {
+        return decodes.get();
+    }
+
+    /** Mean time to read and decode one cell file, ms (0 before the first one). */
+    public double meanDecodeMs() {
+        long n = decodes.get();
+        return n == 0 ? 0 : decodeNanos.get() / 1e6 / n;
+    }
+
+    /** Cells pushed out of the LRU; a steady rise while players stand still means the cache is too small. */
+    public long evictions() {
+        return evictions.get();
+    }
+
+    /** Times {@link #abortWaiting()} gave up waiting cells (StallGuard aborts). */
+    public long stallAborts() {
+        return stallAborts.get();
+    }
+
     public synchronized boolean sidecarDown() {
         return sidecarDown;
     }
@@ -148,7 +192,11 @@ public final class CellCache {
     /** Completes with READY or OUTSIDE once that is certain; stays pending while the cell is being built. */
     public CompletableFuture<Result> get(int eKm, int nKm) {
         SwdCell hit = getIfPresent(eKm, nKm);
-        if (hit != null) return CompletableFuture.completedFuture(new Result(Status.READY, hit));
+        if (hit != null) {
+            hits.incrementAndGet();
+            return CompletableFuture.completedFuture(new Result(Status.READY, hit));
+        }
+        misses.incrementAndGet();
         if (aborted || holding) return CompletableFuture.completedFuture(Result.ABORTED);
         if (coverageState(eKm, nKm) == Coverage.OUTSIDE) return CompletableFuture.completedFuture(Result.OUTSIDE);
         Pending p = pending.computeIfAbsent(key(eKm, nKm), k -> new Pending(eKm, nKm));
@@ -170,6 +218,7 @@ public final class CellCache {
      */
     public int abortWaiting() {
         holding = true;
+        stallAborts.incrementAndGet();
         int n = 0;
         for (Pending p : pending.values()) {
             finish(p, Result.ABORTED);
@@ -193,7 +242,7 @@ public final class CellCache {
             Path f = cellFile(p.eKm, p.nKm);
             if (clock.getAsLong() < p.nextLoadAt || !Files.isRegularFile(f)) return;
             try {
-                SwdCell c = SwdReader.read(f);
+                SwdCell c = readTimed(f);
                 synchronized (this) {
                     lru.put(key(p.eKm, p.nKm), c);
                 }
@@ -207,6 +256,44 @@ public final class CellCache {
         } finally {
             p.busy.set(false);
         }
+    }
+
+    private SwdCell readTimed(Path f) throws IOException {
+        long t0 = System.nanoTime();
+        SwdCell c = SwdReader.read(f);
+        decodeNanos.addAndGet(System.nanoTime() - t0);
+        decodes.incrementAndGet();
+        return c;
+    }
+
+    /**
+     * Decodes the cell into memory on the IO pool if its file is already in the store, without making anything wait
+     * for it. Does nothing when it is cached, pending, being warmed, missing, or when the cache is more than
+     * three-quarters full (warming must never push out cells that chunks are using).
+     *
+     * @return true if a load was started
+     */
+    public boolean warm(int eKm, int nKm) {
+        long k = key(eKm, nKm);
+        synchronized (this) {
+            if (lru.containsKey(k) || lru.size() * 4 > capacity * 3) return false;
+        }
+        if (aborted || pending.containsKey(k) || coverageState(eKm, nKm) == Coverage.OUTSIDE) return false;
+        Path f = cellFile(eKm, nKm);
+        if (!Files.isRegularFile(f) || !warming.add(k)) return false;
+        io.execute(() -> {
+            try {
+                SwdCell c = readTimed(f);
+                synchronized (this) {
+                    if (!lru.containsKey(k)) lru.put(k, c);
+                }
+            } catch (IOException | RuntimeException e) {
+                // a broken file is reported when a chunk actually needs it
+            } finally {
+                warming.remove(k);
+            }
+        });
+        return true;
     }
 
     private void finish(Pending p, Result r) {
