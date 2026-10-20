@@ -621,6 +621,131 @@ class TransportPlanTest {
     }
 
     /**
+     * Meiringen (23789,-4868) and Interlaken Ost (172,-561): two main lines meet, so all three arms of the switch are
+     * tagged (bit5) and the straighter pair won; the line from Interlaken ended beside the one from Luzern. With the
+     * trunk tagged (bit6) the switch keeps it; without (older cells) the straighter pair still wins.
+     */
+    @Test
+    void switchKeepsTheTrunkWhereMainLinesMeet() {
+        for (boolean trunk : new boolean[] {true, false}) {
+            int bent = RAIL | ColumnGrid.MAIN | (trunk ? ColumnGrid.TRUNK : 0);
+            SwdCell c = Cells.flat(600);
+            for (int x = -40; x <= 40; x++) {
+                for (int z = -3; z <= 40; z++) Cells.overlay(c, x, z, OverlayPlan.RAIL_BED, 0, Double.NaN);
+            }
+            for (int x = -40; x <= 0; x++) Cells.overlay(c, x, 0, OverlayPlan.RAIL_BED, bent, Double.NaN);
+            Cells.overlay(c, 0, 1, OverlayPlan.RAIL_BED, bent, Double.NaN);
+            for (int i = 0; i < 30; i++) {
+                Cells.overlay(c, i, i + 2, OverlayPlan.RAIL_BED, bent, Double.NaN);
+                Cells.overlay(c, i + 1, i + 2, OverlayPlan.RAIL_BED, bent, Double.NaN);
+            }
+            // the other main line runs on straight east
+            for (int x = 1; x <= 40; x++) Cells.overlay(c, x, 0, OverlayPlan.RAIL_BED, RAIL | ColumnGrid.MAIN, Double.NaN);
+            TransportPlan t = new TransportPlan(Cells.grid(c, 0, 0, TransportPlan.MARGIN));
+            assertTrue(t.rail(0, 0) && t.rail(1, 0) && t.rail(0, 1), "switch and its three arms");
+            assertEquals(trunk ? Rail.SOUTH_WEST : Rail.EAST_WEST, t.railShape(0, 0), "trunk " + trunk);
+        }
+    }
+
+    /**
+     * Follows the rails from the first rail at x0..x0+n-1 in row z0, both ways, until a rail where {@code goal} holds
+     * or the line ends (a rail whose next one does not join back); the rail it stopped at.
+     */
+    private static int[] alongRails(TransportPlan t, int x0, int z0, int n, java.util.function.BiPredicate<Integer, Integer> goal) {
+        int sx = x0;
+        while (!t.rail(sx, z0) && sx < x0 + n) sx++;
+        assertTrue(t.rail(sx, z0), "no rail at the start");
+        int[] last = null;
+        for (int[] first : ends(t.railShape(sx, z0))) {
+            int x = sx, z = z0, px = sx + first[0], pz = z0 + first[1];
+            for (int steps = 0; steps < 400 && !goal.test(x, z); steps++) {
+                int[] next = null;
+                for (int[] e : ends(t.railShape(x, z))) if (x + e[0] != px || z + e[1] != pz) next = new int[] {x + e[0], z + e[1]};
+                if (next == null || !t.rail(next[0], next[1])) break;
+                boolean back = false;
+                for (int[] e : ends(t.railShape(next[0], next[1]))) back |= next[0] + e[0] == x && next[1] + e[1] == z;
+                if (!back) break;
+                px = x;
+                pz = z;
+                x = next[0];
+                z = next[1];
+            }
+            if (goal.test(x, z)) return new int[] {x, z};
+            last = new int[] {x, z};
+        }
+        return last;
+    }
+
+    /**
+     * Interlaken Ost (flags as in cell 2633_1171, x 150.., z -572..; platforms left out): the Brünig line (trunk, T)
+     * leaves the station north-east, the BOB (main line, M) east. Where they part the rails form a crossing at
+     * 171,-560 whose fourth arm is a one-rail stub of the BOB; the stub made the switch give up on the main lines and
+     * keep the straight pair, the BOB's, and the Brünig line ended at 172,-560. The trunk pair now wins past the stub.
+     */
+    @Test
+    void trunkLeavesTheYardPastAMainLineStub() {
+        String[] rows = {
+            "RRRRR......       ......RRRRRRR.....          ",
+            ".....       ......RRRRRRR.....                ",
+            "       .....RRRRRRR.....                   ...",
+            " .....RRRRRRR......                      ..TTT",
+            "RRRRRRR......                         ..TTTTR.",
+            "R......                            ...TTTR... ",
+            ".                               ...TTTT..     ",
+            "                             ...TTTT..        ",
+            "                          ...TTTT...    ......",
+            "                       ...TTTT... ......MMMMMM",
+            "                    ...TTTT.......MMMMMMM.....",
+            "                 ...TTTT....MMMMMMM.....      ",
+            "             ....TTTT.MMMMMMM......       ....",
+            "         ....TTTTTMMMMM......        .....RRRR",
+            "     ....TTTTTMMM......        .....RRRRRRR...",
+            "....TTTTTTMM.....        ......RRRRRR......   ",
+            "TTTTTM.....        ......RRRRRRR.....         ",
+            "......        .....RRRRRRR.....               ",
+            "        .....RRRRRRR.....                     ",
+            "  ......RRRRRR......                          ",
+            "..RRRRRRR.....                                ",
+            "RRR.....                                      ",
+            "..                                        ...RRR"
+        };
+        SwdCell c = Cells.flat(600);
+        for (int j = 0; j < rows.length; j++) {
+            for (int i = 0; i < rows[j].length(); i++) {
+                char ch = rows[j].charAt(i);
+                int main = RAIL | ColumnGrid.MAIN;
+                int flags = ch == 'T' ? main | ColumnGrid.TRUNK : ch == 'M' ? main : ch == 'R' ? RAIL : 0;
+                if (ch != ' ') Cells.overlay(c, i - 21, j - 12, OverlayPlan.RAIL_BED, flags, Double.NaN);
+            }
+        }
+        TransportPlan t = new TransportPlan(Cells.grid(c, 0, 0, TransportPlan.MARGIN));
+        // along the rails from the station (a rail of the trunk at 150..159, -557) to the north-east
+        int[] end = alongRails(t, -21, 3, 12, (x, z) -> z <= -8);
+        assertTrue(end[1] <= -8 && end[0] > 10, "line ends at " + (end[0] + 171) + "," + (end[1] - 560));
+    }
+
+    /**
+     * Meiringen (23788,-4868): two main lines run a column apart before they merge; the trunk keeps its centres and
+     * the other main line gives way.
+     */
+    @Test
+    void trunkKeepsItsCentresBesideAnotherMainLine() {
+        SwdCell c = Cells.flat(600);
+        for (int x = -40; x <= 40; x++) {
+            for (int z = -3; z <= 20; z++) Cells.overlay(c, x, z, OverlayPlan.RAIL_BED, 0, Double.NaN);
+        }
+        int main = RAIL | ColumnGrid.MAIN;
+        for (int x = -40; x <= 40; x++) Cells.overlay(c, x, 0, OverlayPlan.RAIL_BED, main | ColumnGrid.TRUNK, Double.NaN);
+        for (int i = 0; i < 12; i++) {
+            Cells.overlay(c, -12 - i, 1 + i, OverlayPlan.RAIL_BED, main, Double.NaN);
+            Cells.overlay(c, 12 + i, 1 + i, OverlayPlan.RAIL_BED, main, Double.NaN);
+        }
+        for (int x = -12; x <= 12; x++) Cells.overlay(c, x, 1, OverlayPlan.RAIL_BED, main, Double.NaN);
+        TransportPlan t = new TransportPlan(Cells.grid(c, 0, 0, TransportPlan.MARGIN));
+        for (int x = -8; x <= 24; x++) assertTrue(t.rail(x, 0), "trunk at " + x);
+    }
+
+    /**
      * The Brünig line at 2339,-1987: the main line runs a column beside a siding, the two thinned as one band and the
      * main line's centres were dropped there, so its rails ran over onto the siding. The tagged main line keeps its
      * centres; the siding gives way.

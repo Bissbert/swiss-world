@@ -29,6 +29,8 @@ public final class ColumnGrid {
     public static final int BRIDGE = 1, TUNNEL = 2, RAIL = 4, EDGE = 8, DAM_BODY = 16;
     /** swd-format §5: a rail centre (RAIL) on its railway's main line. Cells built before it have none. */
     public static final int MAIN = 32;
+    /** swd-format §5: a main-line centre (MAIN) on its network's trunk, kept where more than two main lines meet. */
+    public static final int TRUNK = 64;
 
     /** Margin of a {@link #home} view around the chunk: far enough for a tree's neighbours and their clearance. */
     public static final int HOME_MARGIN = 24;
