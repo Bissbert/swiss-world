@@ -18,6 +18,7 @@ from .config import Config
 from .landcover import LandcoverBuilder
 from .overlay import OverlayBuilder
 from .water import WaterBuilder
+from .zones import ZonesBuilder
 
 
 @dataclass
@@ -53,11 +54,11 @@ class DefaultSurface:
 from .alti import AltiTerrain  # noqa: E402
 from .coverage import BorderMask  # noqa: E402
 
-# Order matters: terrain (core) -> tlm (land cover, water, overlays, bathymetry into TERR) -> buildings -> canopy
-# (masks the columns of all of these) -> defaults.
+# Order matters: terrain (core) -> tlm (land cover, water, overlays, bathymetry into TERR) -> zones (reads WKND)
+# -> buildings -> canopy (masks the columns of all of these) -> defaults.
 # Each workstream inserts its builder here; keep DefaultSurface last.
-BUILDERS: list[LayerBuilder] = [AltiTerrain(), BorderMask(), WaterBuilder(), LandcoverBuilder(), OverlayBuilder(),
-                                BuildingsBuilder(), CanopyBuilder(), DefaultSurface()]
+BUILDERS: list[LayerBuilder] = [AltiTerrain(), BorderMask(), WaterBuilder(), LandcoverBuilder(), ZonesBuilder(),
+                                OverlayBuilder(), BuildingsBuilder(), CanopyBuilder(), DefaultSurface()]
 
 
 def assemble(e_km: int, n_km: int, cfg: Config, pinned: dict[str, object] | None = None,

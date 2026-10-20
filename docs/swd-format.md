@@ -80,6 +80,10 @@ Layer blobs follow, in directory order.
 | `BTBL` | no | see §6 | Building table |
 | `CNPY` | no | `u8[1000·1000]` | **Canopy height** in whole metres above `TERR`, from swissSURFACE3D minus swissALTI3D (max of the 0.5 m pixels in the column). 0 = no vegetation or below 2 m. Building footprints and water are 0. Absent = no canopy data. |
 | `TTOP` | no | see §6a | Tree tops detected from the canopy |
+| `REGN` | no | `u8[1000·1000]` | Biogeographic region, see §6b |
+| `LITH` | no | `u8[1000·1000]` | Lithology class (GK500), see §6b |
+| `TOPO` | no | `u8[1000·1000]` | Terrain position, flow and wind bitfield, see §6b |
+| `HABT` | no | `u8[1000·1000]` | Mires and floodplains (BAFU inventories), see §6b |
 | `BSPN` | no | see §6 | Building column spans |
 
 ### Coverage index (not a cell)
@@ -217,6 +221,77 @@ count × 8 bytes, sorted by (dz, dx):
 - Trees on building footprints, water or overlay columns are dropped by the sidecar.
 - A cell with `TTOP` replaces the mod's statistical tree placement **inside that cell**. Cells without it keep the statistical placement.
 
+## 6b. Zone inputs (`REGN`, `LITH`, `TOPO`, `HABT`)
+
+Per-column inputs for the mod's ground-zone classifier (packed zone id `region(3) | belt(3) | zone(6) | lithology(3) | spare(1)`). The sidecar writes all four together (builder `zones`, after land cover); `TOPO` is left out when the cell has no ALTI pin. **Absent layers read as 0**, which means unknown region and lithology, mid-slope / no flow / neutral wind, and no habitat. Every value is a pure function of national data at the column's world position, so neighbouring cells agree along their shared edges. Together they add ~40–75 KB per cell (compressed).
+
+### `REGN`: biogeographic region
+
+| Bits | Meaning |
+|---|---|
+| 0–2 | region: 0 unknown, 1 Jura, 2 Mittelland, 3 Alpennordflanke, 4 westliche Zentralalpen, 5 östliche Zentralalpen, 6 Alpensüdflanke |
+| 3–5 | last digit of the BAFU subregion number (`Unterregio`, e.g. 32 → 2), 0 unknown |
+| 6 | 1 = the column lies outside every region polygon (abroad, slivers) and took the nearest region |
+| 7 | reserved = 0 |
+
+The nearest-region fill uses one national 100 m raster (NW corner E 2,480,000 / N 1,300,000), so every cell gets the same answer.
+
+### `LITH`: lithology (swisstopo GK500)
+
+| Bits | Meaning |
+|---|---|
+| 0–2 | class: 0 unknown, 1 limestone/dolomite, 2 crystalline (granite/gneiss), 3 schist/flysch, 4 molasse, 5 quaternary loose sediment |
+| 3 | GK500 glacier/firn; class and detail are those of the nearest rock polygon |
+| 4 | GK500 lake; class 5 |
+| 5–7 | detail; the meaning depends on the class (below) |
+
+Detail by class (GK500 `LITHOHAUPT` code in brackets):
+
+| Class | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
+|---|---|---|---|---|---|---|---|---|
+| 1 limestone | limestone (40) | radiolarite, chert (42) | clay, rauwacke, gypsum (44) | dolomite (47) | marble (48) | | | |
+| 2 crystalline | granite, syenite (50) | porphyry, volcanics (52, 54) | quartzite (49) | gneiss (60) | mica schist, gneiss (62) | amphibolite (70) | basic rocks (72) | ultrabasic, serpentinite (74) |
+| 3 schist | claystone, slate (30) | marly schist, calc-phyllite, flysch (32) | quartz phyllite (61) | | | | | |
+| 4 molasse | marl, some sandstone (20) | sandstone (22) | conglomerate, Nagelfluh (24) | | | | | |
+| 5 quaternary | clay, silt, sand (10) | sand, gravel (12) | blocks, boulders (14) | | | | | |
+
+Columns with no lithology polygon (abroad) also take the nearest rock.
+
+### `TOPO`: terrain position, flow, wind
+
+| Bits | Field | Values |
+|---|---|---|
+| 0–1 | TPI 50 m | 0 mid-slope, 1 valley, 2 flat, 3 ridge |
+| 2–3 | TPI 300 m | same codes |
+| 4–5 | flow | 0 none, 1 gully, 2 channel, 3 wet hollow |
+| 6–7 | wind (snow drift) | 0 neutral, 1 lee, 2 exposed, 3 reserved |
+
+It is computed from the raw swissALTI3D 2 m pixels of the cell's tile and its 8 pinned neighbours (`sources.alti` / `altiNeighbours`), not from `TERR`. Each metric reads at most 320 m around the pixel, so a column's value doesn't depend on which cell computes it. One 2 m pixel sets its 2×2 columns.
+
+- **TPI**: height minus the mean height of the square window (101 or 301 pixels across). Ridge if TPI > +T, valley if TPI < −T, else flat if the slope is below 5°, else mid-slope. T = 2 m for 50 m and 20 m for 300 m.
+- **Flow**: D8 steepest descent, accumulated over a 300 m flow path.
+  - gully: at least 1,000 m² drains through the column;
+  - channel: at least 1 ha drains through it;
+  - wet hollow: a TPI-50 valley column with at least 100 m² draining in and less than 2 % descent onward. Wet hollow wins over gully/channel.
+  - Water columns (`WKND` ≠ 0) have flow 0.
+- **Wind**: Winstral's Sx, the maximum upwind slope within 300 m, averaged over winds from 270°, 292.5° and 315°.
+  - Lee: Sx > 0.30 (~17°).
+  - Exposed: Sx < −0.12 (~−7°).
+
+Columns without ALTI data (abroad) are 0.
+
+### `HABT`: mires and floodplains (BAFU federal inventories)
+
+| Bits | Meaning |
+|---|---|
+| 0 | raised bog (Hochmoor types 1, 2, 5) |
+| 1 | raised-bog margin (Hochmoor type 3) |
+| 2 | fen (Flachmoor) |
+| 3–5 | floodplain (Aue) type: 0 none, 1 glacier forefield, 2 alpine alluvial plain, 3 river floodplain, 4 delta, 5 lake shore |
+| 6–7 | reserved = 0 |
+
+Hochmoor type 4 (open water) is not marked; `WKND` covers it.
+
 ## 7. `manifest.json` (store root, written by the sidecar only)
 
 ```json
@@ -245,5 +320,15 @@ Extra keys the sidecar writes:
 - `cells.<key>.evicted`: an ISO timestamp, set when the file was evicted. The entry and its `sources` stay. A cell is **ready** only when the file exists **and** it has a manifest entry without `evicted`.
 
 - `sources.gwr`: the GWR snapshot used for the BTBL attributes, `gwr_<cantons>_<export date>`. This pin is **soft**: upstream keeps no old snapshots, so the sidecar archives each one it uses under `<store>/gwr/<id>.npz`. A rebuild uses the pinned snapshot while that archive exists; otherwise it uses the newest archived snapshot and records its id. Only GWR attributes (gwrCategory, gwrClass, gwrPeriod, floors) can change that way; geometry never does. It is the only soft pin.
+
+- Zone sources (§6b), each pinned as `<STAC item>@<item date>`; a rebuild refuses any other pin. All five are national files fetched once into `$SWISSDATA_RAW` (~36 MB together).
+
+  | Key | Pin | Dataset | Licence | Zip size |
+  |---|---|---|---|---|
+  | `bioRegions` | `biogeographische_regionen@2020-09-01` | BAFU Biogeographische Regionen der Schweiz (2020) | opendata.swiss "Open use" (BAFU OGD) | 4.1 MB |
+  | `lithology` | `geologie-geotechnik-gk500-lithologie_hauptgruppen@2006-03-04` | swisstopo GK500 Geotechnik, Lithologie Hauptgruppen (stored in LV03; shifted +2,000,000 / +1,000,000 m) | "Open use. Must provide the source" (© swisstopo) | 17.3 MB |
+  | `raisedBogs` | `bundesinventare-hochmoore@2025-12-01` | BAFU Bundesinventar der Hoch- und Übergangsmoore | "Open use" (BAFU OGD) | 3.0 MB |
+  | `fens` | `bundesinventare-flachmoore@2025-12-01` | BAFU Bundesinventar der Flachmoore | "Open use" (BAFU OGD) | 10.4 MB |
+  | `floodplains` | `bundesinventare-auen@2022-11-22` | BAFU Bundesinventar der Auengebiete (Anhang 1 and 2) | "Open use" (BAFU OGD) | 1.5 MB |
 
 **`sources` is never removed**, even when a cell file is evicted. A rebuild uses exactly these upstream item ids, so seams can't appear between rebuilt and saved areas.

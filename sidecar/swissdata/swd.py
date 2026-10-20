@@ -37,7 +37,7 @@ _COL = struct.Struct("<HHB")
 _TTOP_ENTRY = struct.Struct("<HHBBBB")
 
 U16_LAYERS = {"TERR", "WLVL", "OELV"}
-U8_LAYERS = {"SURF", "WKND", "OCLS", "OFLG", "INSD", "CNPY"}
+U8_LAYERS = {"SURF", "WKND", "OCLS", "OFLG", "INSD", "CNPY", "REGN", "LITH", "TOPO", "HABT"}
 
 KIND_UNKNOWN = 0
 KIND_CONIFER = 1
@@ -192,7 +192,7 @@ def encode(cell: Cell) -> bytes:
     if "TERR" not in cell.layers or "SURF" not in cell.layers:
         raise ValueError("TERR and SURF are required")
     blobs: list[tuple[str, bytes]] = []
-    order = ["TERR", "SURF", "WLVL", "WKND", "OCLS", "OELV", "OFLG", "INSD", "CNPY"]
+    order = ["TERR", "SURF", "WLVL", "WKND", "OCLS", "OELV", "OFLG", "INSD", "CNPY", "REGN", "LITH", "TOPO", "HABT"]
     for tag in order:
         if tag in cell.layers:
             blobs.append((tag, _layer_bytes(tag, cell.layers[tag])))
