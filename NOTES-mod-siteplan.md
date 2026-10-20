@@ -73,3 +73,20 @@ grass bumps and pits between the tracks at Interlaken Ost.
 `GroundTextureStage.apply(zm, b, site)` (mod-texture's stage, minimal seam): with a site plan only FREE, EARTHWORK and
 BANK columns are dressed (never way, structure, building, landing); FREE/EARTHWORK ground within 2 of a RAIL claim and
 12 of a BUILDING claim (a station yard) gets the INDUSTRIAL palette.
+
+## Measured (headless, fresh world, bot flight, `/swiss admin stats`, mean / p95 ms per chunk)
+
+Both on main af4d13a's pipeline (with GroundTexture and Snow); "before" is 19e95a9 (timers only), "after" is this
+branch. Other agents ran on the machine at the same time, so treat single numbers as ±20 %.
+
+| site | Overlay before → after | Vegetation | Water | chunk |
+|---|---|---|---|---|
+| interlaken-ost | 5.23 / 11.6 → 1.55 / 2.9 | 0.29 → 0.12 | 0.13 → 0.07 | 8.21 / 19.5 → 4.71 / 9.7 |
+| innertkirchen | 3.17 / 5.8 → 2.02 / 2.9 | 0.46 → 0.25 | 0.10 → 0.03 | 6.09 / 9.7 → 4.28 / 6.9 |
+| forest-rugen | 2.90 / 4.9 → 1.82 / 2.9 | 0.57 → 0.38 | 0.09 → 0.03 | 5.71 / 9.7 → 4.69 / 8.2 |
+| mountain-faulhorn | 2.73 / 4.1 → 2.15 / 2.9 | 0.11 → 0.03 | 0.08 → 0.03 | 4.58 / 6.9 → 4.31 / 5.8 |
+
+Building ~unchanged (0.94 → 1.11 at Interlaken), GroundTexture 0.09–0.26 and Snow 0.001 both before and after.
+A plan costs ~205–225 ms once per tile (20–25 tiles per flight) on the worldgen executor; `plan-wait` (a chunk waiting
+on its tile's plan, off the chunk time, not blocking a thread) is ~20 ms mean, p95 ~220–260 ms: the first chunks of a
+tile. Guard violations 0 and plan cell misses 0 in all four flights.
