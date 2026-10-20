@@ -4,6 +4,7 @@
   "package": "ch.bissbert.swissworld.mixin",
   "compatibilityLevel": "JAVA_21",
   "mixins": [
+    "AbstractMinecartMixin",
     "LayerLightSectionStorageAccessor",
     "LevelChunkMixin",
     "LevelLightEngineAccessor",

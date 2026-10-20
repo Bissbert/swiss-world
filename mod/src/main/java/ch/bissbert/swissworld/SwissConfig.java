@@ -46,6 +46,30 @@ public final class SwissConfig {
                     "shorter freezes but more placeholders. 0: use stallAbortSeconds")
             .defineInRange("playerStallAbortSeconds", 2.0, 0.0, 600.0);
 
+    public static final ModConfigSpec.BooleanValue FAST_CARTS = B
+            .comment("Faster minecarts in Switzerland: carts with a player on board run up to cartMaxSpeed, moved in",
+                    "substeps along the rails so they never jump a curve; they brake before the end of the track and stop",
+                    "before terrain that is not loaded yet. Elsewhere, and for carts without a player, vanilla")
+            .define("fastCarts", true);
+    public static final ModConfigSpec.DoubleValue CART_MAX_SPEED = B
+            .comment("Cruising cap of a fast cart, blocks per tick (1.0 = 20 m/s; vanilla 0.4 = 8 m/s)")
+            .defineInRange("cartMaxSpeed", 1.0, 0.4, 1.5);
+    public static final ModConfigSpec.DoubleValue CART_ACCELERATION = B
+            .comment("Speed gained per tick, blocks per tick, while the rider holds forward or after the cart slowed for",
+                    "the track ahead (0.02: from 0 to 20 m/s in 2.5 s). Braking (back key) is twice this")
+            .defineInRange("cartAcceleration", 0.02, 0.001, 0.2);
+    public static final ModConfigSpec.BooleanValue CART_THROTTLE = B
+            .comment("The rider's forward and back keys are throttle and brake of a fast cart (generated lines have no",
+                    "powered rails, so without this only powered rails speed a cart up)")
+            .define("cartRiderThrottle", true);
+    public static final ModConfigSpec.BooleanValue CART_CRUISE = B
+            .comment("A fast cart keeps its speed without a key (no friction, no slowing uphill); off: it coasts like vanilla")
+            .define("cartCruiseControl", true);
+    public static final ModConfigSpec.BooleanValue CART_BOOST_UNRIDDEN = B
+            .comment("Also run carts without a player (empty, chest, hopper ...; never furnace carts) up to cartMaxSpeed",
+                    "in Switzerland; they have no throttle, so only powered rails speed them up")
+            .define("cartBoostUnridden", false);
+
     public static final ModConfigSpec SPEC = B.build();
 
     private SwissConfig() {}
