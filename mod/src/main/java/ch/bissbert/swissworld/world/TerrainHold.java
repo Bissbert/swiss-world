@@ -146,7 +146,7 @@ public final class TerrainHold {
      * Whether the player's chunk is real terrain the client already has: loaded on the server, not a placeholder
      * (or one being filled in), and sent.
      */
-    static boolean terrainReady(ServerLevel level, ServerPlayer p, ChunkPos pos) {
+    public static boolean terrainReady(ServerLevel level, ServerPlayer p, ChunkPos pos) {
         if (level.getChunkSource().getChunkNow(pos.x, pos.z) == null) return false;
         if (!PlaceholderRepair.settled(pos)) return false;
         ChunkHolder holder = level.getChunkSource().chunkMap.getVisibleChunkIfPresent(pos.toLong());
