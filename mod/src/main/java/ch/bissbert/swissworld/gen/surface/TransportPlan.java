@@ -372,7 +372,8 @@ public final class TransportPlan {
      * the centres with no centre on the pass's side are dropped where that keeps their neighbours joined and does not
      * shorten a track (a simple point of the 4-connected centres). Each pass looks one column further around. A
      * main-line centre (swd-format §5, bit5) that touches another track's centre stays: the other track gives way, so
-     * where two tracks run side by side the main line keeps its rails (2339,-1987).
+     * where two tracks run side by side the main line keeps its rails (2339,-1987). Likewise a trunk centre (bit6) keeps
+     * its rails against another main line's (Meiringen, 23788,-4868).
      */
     private boolean thin(int x, int z, int pass) {
         if (pass == 0) return c00(x, z);
@@ -388,13 +389,19 @@ public final class TransportPlan {
         return keep;
     }
 
-    /** A main-line centre with a centre of another track (or a gap column between tracks) beside it. */
+    /** A main-line centre with a centre of a lower-ranked track (or a gap column between tracks) beside it. */
     private boolean mainBeside(int x, int z, int pass) {
-        if (!g.flag(x, z, ColumnGrid.MAIN)) return false;
+        int rank = rank(x, z);
+        if (rank == 0) return false;
         for (int[] d : DIRS) {
-            if (thin(x + d[0], z + d[1], pass) && !g.flag(x + d[0], z + d[1], ColumnGrid.MAIN)) return true;
+            if (thin(x + d[0], z + d[1], pass) && rank(x + d[0], z + d[1]) < rank) return true;
         }
         return false;
+    }
+
+    /** 2 on a trunk centre, 1 on another main-line centre, else 0. */
+    private int rank(int x, int z) {
+        return !g.flag(x, z, ColumnGrid.MAIN) ? 0 : g.flag(x, z, ColumnGrid.TRUNK) ? 2 : 1;
     }
 
     /** Ring of the eight neighbours, clockwise from north. */
@@ -723,10 +730,14 @@ public final class TransportPlan {
      * and of two arms that meet again at the same switch (a short loop, where two tracks drawn side by side were
      * thinned apart) the longer one gives way, so both switches of the loop route the line the same way. Before both,
      * where the data tags a main line (swd-format §5) and exactly two arms run on it, those two carry on: at a Y where
-     * a loop or siding merges, the straighter pair is often the loop's, and the main line broke there.
+     * a loop or siding merges, the straighter pair is often the loop's, and the main line broke there. First of all, a
+     * switch on a square of four rails (two tracks a column apart touching, Meiringen 23789,-4868) drops the side of
+     * the square through its larger corner ({@link #squareSide}), as does the switch at the opposite corner, so the
+     * line goes round the square the same way from both ends.
      */
     private int track(int x, int z) {
         int m = links(x, z);
+        if (Integer.bitCount(m) >= 3) m &= ~squareSide(x, z, m);
         if (Integer.bitCount(m) == 4) return crossing(x, z);
         if (Integer.bitCount(m) != 3) return m;
         int[][] arm = new int[4][];
@@ -801,32 +812,71 @@ public final class TransportPlan {
     private static final int ARM_OPEN = 0, ARM_END = 1, ARM_SWITCH = 2;
 
     /**
+     * The arm of switch (x, z) to drop on a square of four rails it is a corner of, where the two corners beside it
+     * are plain rails (two links): the one of them that is larger (z, then x). Seen from the opposite corner they are
+     * the same two, so both ends drop the same side. Bit mask as {@link #links}, 0 if none.
+     */
+    private int squareSide(int x, int z, int m) {
+        for (int d = 0; d < 2; d++) {
+            for (int e = 2; e < 4; e++) {
+                if ((m & 1 << d) == 0 || (m & 1 << e) == 0) continue;
+                int ax = x + DIRS[d][0], az = z + DIRS[d][1], bx = x + DIRS[e][0], bz = z + DIRS[e][1];
+                if (!rail(ax + DIRS[e][0], az + DIRS[e][1])) continue;
+                if (Integer.bitCount(links(ax, az)) != 2 || Integer.bitCount(links(bx, bz)) != 2) continue;
+                return az > bz || az == bz && ax > bx ? 1 << d : 1 << e;
+            }
+        }
+        return 0;
+    }
+
+    /**
      * The two arms on the main line (at least half their walked rails on it, {@link #mainNear}) when exactly two are
-     * and neither is a stub, as a {@link #links} bit mask; else 0 (no tag, as in older cells, or a yard where more
-     * arms are tagged), and the shape rules decide.
+     * and neither is a stub, as a {@link #links} bit mask. Where more are (two main lines meet: Interlaken Ost,
+     * Meiringen), the two arms on the trunk (bit6, at least half their walked rails, {@link #mainNear}) when exactly
+     * two are and neither is a stub; a main-line stub beside them is passed over (a corner column where the lines
+     * cross, 171,-559). Else 0 (no tag, as in older cells, or a yard where more arms are tagged), and the shape rules
+     * decide.
      */
     private static int mainPair(int[][] arm) {
-        int m = 0;
+        int m = 0, mains = 0;
+        boolean stub = false;
         for (int d = 0; d < 4; d++) {
             if (arm[d] != null && arm[d][4] * 2 >= arm[d][1]) {
-                if (arm[d][0] == ARM_END) return 0;
+                mains++;
+                if (arm[d][0] == ARM_END) {
+                    stub = true;
+                    continue;
+                }
                 m |= 1 << d;
             }
         }
-        return Integer.bitCount(m) == 2 ? m : 0;
+        int t = trunkArms(arm);
+        if (mains > 2 && Integer.bitCount(t) == 2) return t;
+        return !stub && Integer.bitCount(m) == 2 ? m : 0;
+    }
+
+    /** The arms on the trunk ({@link #mainPair}), not stubs, as a {@link #links} bit mask. */
+    private static int trunkArms(int[][] arm) {
+        int t = 0;
+        for (int d = 0; d < 4; d++) {
+            if (arm[d] != null && arm[d][0] != ARM_END && arm[d][4] * 2 >= arm[d][1] && arm[d][5] * 2 >= arm[d][1]) {
+                t |= 1 << d;
+            }
+        }
+        return t;
     }
 
     /**
      * A rail on a main line: on a tagged column, or on an untagged one (no track of its own) beside a main-line centre:
      * where tracks run a column or two apart the rails of a main line are often set off its centres (see {@link #rail}).
      */
-    private boolean mainNear(int x, int z) {
+    private boolean mainNear(int x, int z, int bit) {
         if (!g.present(x, z)) return false;
-        if (g.flag(x, z, ColumnGrid.RAIL)) return g.flag(x, z, ColumnGrid.MAIN);
+        if (g.flag(x, z, ColumnGrid.RAIL)) return g.flag(x, z, bit);
         for (int j = -1; j <= 1; j++) {
             for (int i = -1; i <= 1; i++) {
                 int cx = x + i, cz = z + j;
-                if (g.present(cx, cz) && g.flag(cx, cz, ColumnGrid.MAIN) && OverlayPlan.railCentre(g, cx, cz)) return true;
+                if (g.present(cx, cz) && g.flag(cx, cz, bit) && OverlayPlan.railCentre(g, cx, cz)) return true;
             }
         }
         return false;
@@ -834,17 +884,18 @@ public final class TransportPlan {
 
     /**
      * Walks a switch's arm in direction d for up to {@link #SWITCH_WALK} rails: {kind, steps, x, z, main} where kind is
-     * {@link #ARM_END} (the track ends), {@link #ARM_SWITCH} (another switch, at x, z) or {@link #ARM_OPEN}, and main
-     * counts the walked rails on or beside a main line ({@link #mainNear}).
+     * {@link #ARM_END} (the track ends), {@link #ARM_SWITCH} (another switch, at x, z) or {@link #ARM_OPEN}, main
+     * counts the walked rails on or beside a main line ({@link #mainNear}) and trunk those on or beside a trunk.
      */
     private int[] arm(int x, int z, int d) {
-        int px = x, pz = z, cx = x + DIRS[d][0], cz = z + DIRS[d][1], main = 0;
+        int px = x, pz = z, cx = x + DIRS[d][0], cz = z + DIRS[d][1], main = 0, trunk = 0;
         for (int step = 1; step <= SWITCH_WALK; step++) {
-            if (mainNear(cx, cz)) main++;
+            if (mainNear(cx, cz, ColumnGrid.MAIN)) main++;
+            if (mainNear(cx, cz, ColumnGrid.TRUNK)) trunk++;
             int cm = links(cx, cz);
             int n = Integer.bitCount(cm);
-            if (n <= 1) return new int[] {ARM_END, step, cx, cz, main};
-            if (n >= 3) return new int[] {ARM_SWITCH, step, cx, cz, main};
+            if (n <= 1) return new int[] {ARM_END, step, cx, cz, main, trunk};
+            if (n >= 3) return new int[] {ARM_SWITCH, step, cx, cz, main, trunk};
             int nx = NONE, nz = NONE;
             for (int e = 0; e < 4; e++) {
                 int qx = cx + DIRS[e][0], qz = cz + DIRS[e][1];
@@ -858,7 +909,7 @@ public final class TransportPlan {
             cx = nx;
             cz = nz;
         }
-        return new int[] {ARM_OPEN, SWITCH_WALK, cx, cz, main};
+        return new int[] {ARM_OPEN, SWITCH_WALK, cx, cz, main, trunk};
     }
 
     private static boolean curve(int m) {
