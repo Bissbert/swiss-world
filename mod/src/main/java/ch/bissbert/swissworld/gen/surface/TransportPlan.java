@@ -1375,12 +1375,11 @@ public final class TransportPlan {
     static final int LOW_BRIDGE = 2;
 
     /**
-     * A bridge with nothing under it is built as fill where every column of its cross-section has at most
-     * {@link #SIDE_HILL_MAX} blocks of air under the beam. The cross-section is the shortest chord of bridge columns
-     * through the column, at most {@link #SIDE_HILL_CHORD} each way.
+     * A bridge with nothing under it is built as fill where it runs along the ground: the column has at most
+     * {@link #SIDE_HILL_MAX} blocks of air under the beam, and a column of the same bridge within {@link #SIDE_HILL_REACH}
+     * along a straight line at most {@link #SIDE_HILL}.
      */
-    static final int SIDE_HILL_MAX = 12, SIDE_HILL_CHORD = 12;
-    private static final int[][] CHORDS = {{1, 0}, {0, 1}, {1, 1}, {1, -1}};
+    static final int SIDE_HILL = 5, SIDE_HILL_MAX = 12, SIDE_HILL_REACH = 8;
 
     /**
      * A bridge column built as an embankment of soil (the earthwork beside it slopes down from its edge): dry, with
@@ -1407,41 +1406,35 @@ public final class TransportPlan {
     }
 
     /**
-     * On a bridge along a slope or over a shallow dry hollow with nothing under it: the shortest chord of bridge
-     * columns through this column (its cross-section) is dry, carries no rail under it, meets no lower way or water
-     * beside it, and has no column more than {@link #SIDE_HILL_MAX} above the terrain. A bridge over a deep valley,
-     * water or a way keeps its beam; only its approaches, where the ground comes near the deck, become fill.
+     * On a bridge along a slope with nothing under it: every bridge column within {@link #SIDE_HILL_REACH} is dry,
+     * carries no rail under it and meets no lower way or water beside it, and one reached along a straight
+     * line of bridge columns lies within {@link #SIDE_HILL} of the terrain. A bridge over a valley, water or a way keeps its beam: across its middle the
+     * terrain lies well below the deck; only its ends, near the ground, become fill.
      */
     private boolean sideHill(int x, int z) {
-        if (!bridgeColumn(x, z) || rawAir(x, z) > SIDE_HILL_MAX) return false;
-        int[] best = null;
-        int len = Integer.MAX_VALUE;
-        for (int[] d : CHORDS) {
-            int a = extent(x, z, -d[0], -d[1]), b = extent(x, z, d[0], d[1]);
-            if (a == NONE || b == NONE || a + b >= len) continue;
-            len = a + b;
-            best = new int[] {x - a * d[0], z - a * d[1], d[0], d[1]};
-        }
-        if (best == null) return false;
-        for (int i = 0; i <= len; i++) {
-            int cx = best[0] + i * best[2], cz = best[1] + i * best[3];
-            if (rawAir(cx, cz) > SIDE_HILL_MAX || OverlayPlan.railUnderBridge(g, cx, cz) || g.source(cx, cz) != NONE) return false;
-            for (int[] e : DIRS) {
-                int nx = cx + e[0], nz = cz + e[1];
-                if (!g.present(nx, nz) || bridgeColumn(nx, nz)) continue;
-                if (g.source(nx, nz) != NONE) return false; // water beside the footprint runs under it
-                if (g.overlay(nx, nz) != 0 && g.deck(nx, nz) < g.deck(cx, cz) - LOW_BRIDGE - 2) return false; // a way under
+        if (!bridgeColumn(x, z) || g.flag(x, z, ColumnGrid.RAIL) || rawAir(x, z) > SIDE_HILL_MAX) return false; // viaducts keep their beam
+        for (int j = -SIDE_HILL_REACH; j <= SIDE_HILL_REACH; j++) {
+            for (int i = -SIDE_HILL_REACH; i <= SIDE_HILL_REACH; i++) {
+                int cx = x + i, cz = z + j;
+                if (!bridgeColumn(cx, cz)) continue;
+                if (OverlayPlan.railUnderBridge(g, cx, cz) || g.source(cx, cz) != NONE) return false;
+                for (int[] e : DIRS) {
+                    int nx = cx + e[0], nz = cz + e[1];
+                    if (!g.present(nx, nz) || bridgeColumn(nx, nz)) continue;
+                    if (g.source(nx, nz) != NONE) return false; // water beside the footprint runs under it
+                    if (g.overlay(nx, nz) != 0 && g.deck(nx, nz) < g.deck(cx, cz) - LOW_BRIDGE - 2) return false; // a way under
+                }
             }
         }
-        return true;
-    }
-
-    /** Bridge columns beyond (x, z) towards (dx, dz), or NONE when the run is longer than {@link #SIDE_HILL_CHORD}. */
-    private int extent(int x, int z, int dx, int dz) {
-        for (int i = 1; i <= SIDE_HILL_CHORD + 1; i++) {
-            if (!bridgeColumn(x + i * dx, z + i * dz)) return i - 1;
+        // the ground comes near the deck along the bridge itself, not on another bridge beside it
+        for (int[] e : RING) {
+            for (int i = 0; i <= SIDE_HILL_REACH; i++) {
+                int cx = x + i * e[0], cz = z + i * e[1];
+                if (!bridgeColumn(cx, cz)) break;
+                if (rawAir(cx, cz) <= SIDE_HILL) return true;
+            }
         }
-        return NONE;
+        return false;
     }
 
     /** A road or rail column outside a tunnel: embankment or cut, culvert roof over water, deck, slab or rail. */

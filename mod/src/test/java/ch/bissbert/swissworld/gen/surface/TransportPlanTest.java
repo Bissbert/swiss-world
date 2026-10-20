@@ -107,9 +107,9 @@ class TransportPlanTest {
         SwdCell c = Cells.flat(600);
         for (int z = -30; z <= 30; z++) {
             for (int x = 0; x <= 3; x++) Cells.overlay(c, x, z, 3, ColumnGrid.BRIDGE, 602);
-            for (int x = 10; x <= 13; x++) Cells.overlay(c, x, z, 3, ColumnGrid.BRIDGE, 602 + TransportPlan.SIDE_HILL_MAX + 4);
+            for (int x = 10; x <= 13; x++) Cells.overlay(c, x, z, 3, ColumnGrid.BRIDGE, 608);
         }
-        Voxels v = new Voxels(c, -4, -10, 16, 10, -1440, -1370);
+        Voxels v = new Voxels(c, -4, -10, 16, 10, -1440, -1380);
         for (int z = -5; z <= 5; z++) {
             for (int x = 0; x <= 3; x++) {
                 int deck = v.deck[v.col(x, z)], top = v.originalTop[v.col(x, z)];
