@@ -215,3 +215,56 @@ def test_rail_bit_under_road_bridge_only_for_road_decks():
     assert overlay.under_road_bridge(overlay.SECONDARY, swd.OFLG_BRIDGE)
     assert not overlay.under_road_bridge(overlay.RAIL, swd.OFLG_BRIDGE)  # rail bridge: rail is on the deck
     assert not overlay.under_road_bridge(overlay.SECONDARY, 0)
+
+
+def _burn_order(tunnels, areas, roads, rails=()):
+    return tunnels + areas + roads + overlay.kept_rail_tunnels(tunnels, areas, roads) + list(rails)
+
+
+def test_rail_tunnel_keeps_its_centre_under_areas_and_paths():
+    """Brienz: a pitch, a car park and a footpath over the station tunnel used to take its rail and tunnel bits."""
+    e_km, n_km = 2646, 1178
+    e0, n0 = e_km * 1000, n_km * 1000
+    line = shapely.LineString([(e0 + 100, n0 + 500, 560.0), (e0 + 900, n0 + 500, 568.0)])
+    tunnel = overlay.Feature(overlay._buffer(line, 4.0), overlay.RAIL, swd.OFLG_TUNNEL, line=line, rail_line=line)
+    areas = [overlay.Feature(shapely.box(e0 + 200, n0 + 480, e0 + 260, n0 + 530), overlay.PITCH),
+             overlay.Feature(shapely.box(e0 + 400, n0 + 470, e0 + 436, n0 + 520), overlay.PARKING)]
+    path = overlay.Feature(overlay._buffer(shapely.LineString([(e0 + 600, n0 + 400), (e0 + 600, n0 + 600)]), 2.0),
+                           overlay.FOOTPATH)
+    ocls, oelv, oflg = overlay.rasterise(_burn_order([tunnel], areas, [path]), e_km, n_km)
+    dz, dx = np.array(overlay.grid_path(line, e_km, n_km)).T
+    assert np.all(oflg[dz, dx] & (swd.OFLG_RAIL | swd.OFLG_TUNNEL) == swd.OFLG_RAIL | swd.OFLG_TUNNEL)
+    assert np.all(ocls[dz, dx] == overlay.RAIL)
+    assert np.allclose(swd.decode_height(oelv[dz, dx]), 560 + 8 * (dx + 0.5 - 100) / 800, atol=0.1)  # tunnel floor
+    beside = 500 - 20  # the areas and the path keep their columns off the tunnel
+    assert ocls[beside, 230] == overlay.PITCH and ocls[beside + 30, 420] == overlay.PARKING
+    assert ocls[beside, 600] == overlay.FOOTPATH
+
+
+def test_rail_tunnel_under_a_road_keeps_its_centre_only_where_the_road_runs_along_it():
+    e_km, n_km = 2646, 1178
+    e0, n0 = e_km * 1000, n_km * 1000
+    line = shapely.LineString([(e0 + 100, n0 + 500.5, 560.0), (e0 + 900, n0 + 500.5, 560.0)])
+    tunnel = overlay.Feature(overlay._buffer(line, 4.0), overlay.RAIL, swd.OFLG_TUNNEL, line=line, rail_line=line)
+    across = overlay.Feature(overlay._buffer(shapely.LineString([(e0 + 300, n0 + 400), (e0 + 300, n0 + 600)]), 6.0),
+                             overlay.SECONDARY)
+    along = overlay.Feature(overlay._buffer(shapely.LineString([(e0 + 500, n0 + 501), (e0 + 560, n0 + 501)]), 6.0),
+                            overlay.MINOR)
+    ocls, _, oflg = overlay.rasterise(_burn_order([tunnel], [], [across, along]), e_km, n_km)
+    centre = 499  # dz of the column row the line runs through
+    assert ocls[centre, 300] == overlay.SECONDARY and not oflg[centre, 300] & swd.OFLG_TUNNEL  # mod bores under it
+    assert np.all(ocls[centre, 500:560] == overlay.RAIL)
+    assert np.all(oflg[centre, 500:560] & swd.OFLG_RAIL) and np.all(oflg[centre, 500:560] & swd.OFLG_TUNNEL)
+    assert ocls[centre - 2, 530] == overlay.MINOR and ocls[centre + 2, 530] == overlay.MINOR  # deck beside the strip
+
+
+def test_surface_rail_keeps_its_centre_across_a_road():
+    e_km, n_km = 2646, 1178
+    e0, n0 = e_km * 1000, n_km * 1000
+    line = shapely.LineString([(e0 + 100, n0 + 500, 560.0), (e0 + 900, n0 + 500, 560.0)])
+    rail = overlay.Feature(overlay._buffer(line, 4.0), overlay.RAIL, rail_line=line)
+    road = overlay.Feature(overlay._buffer(shapely.LineString([(e0 + 300, n0 + 400), (e0 + 300, n0 + 600)]), 6.0),
+                           overlay.SECONDARY)
+    ocls, _, oflg = overlay.rasterise(_burn_order([], [], [road], [rail]), e_km, n_km)
+    dz, dx = np.array(overlay.grid_path(line, e_km, n_km)).T
+    assert np.all(oflg[dz, dx] & swd.OFLG_RAIL) and np.all(ocls[dz, dx] == overlay.RAIL)
