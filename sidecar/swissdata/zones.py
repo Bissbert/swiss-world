@@ -37,8 +37,9 @@ writes its 2×2 columns (pixel (r, c) holds columns dx = 2c, 2c+1, dz = 2r, 2r+1
 - Wind: Winstral's Sx (max upwind slope within 300 m), averaged over the directions 270°, 292.5° and 315°
   (westerly to north-westerly, the snow-drift winds of the Swiss Alps), sampled at fixed integer offsets.
   Lee above LEE_SX, exposed below EXPOSED_SX.
-Cost: ~1 s per cell on top of reading the 9 ALTI tiles (kept in raw in dev; in production the own tile was
-just released by the terrain builder and is fetched again).
+Cost: ~1 s per cell on top of reading the 9 ALTI tiles (kept in raw in dev). In production (keepRaw off) the own
+tile was just released by the terrain builder and is fetched again, and neighbour tiles that are not in raw are
+fetched; read_alti deletes whatever it downloaded, so raw does not grow (up to 9 × ~1 MB of downloads per cell).
 """
 
 from __future__ import annotations
@@ -60,7 +61,7 @@ from shapely.geometry import shape
 from . import stac, swd, tlm
 from .alti import TILE_PX, read_tile
 from .config import Config
-from .fetch import fetch
+from .fetch import cache_path, fetch
 
 log = logging.getLogger(__name__)
 
@@ -481,6 +482,17 @@ def topo_columns(px: np.ndarray, wknd: np.ndarray | None) -> np.ndarray:
     return cols.astype("u1")
 
 
+def read_alti(cfg: Config, item: str) -> np.ndarray:
+    """Pixels of an ALTI item. Unless keepRaw, a COG this call had to download is deleted again, the same
+    policy as AltiTerrain's release: TOPO never leaves tiles in raw that were not there before."""
+    path = cache_path(cfg, stac.alti_href(item))
+    present = path.exists()
+    px = read_tile(fetch(cfg, stac.alti_href(item)))
+    if not present and not cfg.keep_raw:
+        path.unlink(missing_ok=True)
+    return px
+
+
 class ZonesBuilder:
     """LayerBuilder for REGN, LITH, TOPO and HABT; runs after land cover (TOPO reads WKND).
     `vectors` (a Vectors) and `tile_for` (ALTI item -> 500×500 metres) are injectable for tests."""
@@ -509,7 +521,7 @@ class ZonesBuilder:
         layers = {"REGN": vec.regn(e_km, n_km), "LITH": vec.lith(e_km, n_km), "HABT": vec.hab(e_km, n_km)}
         items = self.tile_items(e_km, n_km, {**(pinned or {}), **partial.sources})
         if items is not None:
-            read = self._tile_for or (lambda item: read_tile(fetch(cfg, stac.alti_href(item))))
+            read = self._tile_for or (lambda item: read_alti(cfg, item))
             hm = mosaic({d: (read(it) if it else None) for d, it in items.items()})
             layers["TOPO"] = topo_columns(topo_pixels(hm), partial.layers.get("WKND"))
         return LayerResult(layers=layers, sources={s.key: s.pin for s in SOURCES})

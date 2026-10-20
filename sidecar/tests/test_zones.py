@@ -188,3 +188,23 @@ def test_zone_layers_round_trip():
 def test_registered_after_landcover():
     names = [b.name for b in build.BUILDERS]
     assert names.index("tlm-landcover") < names.index("zones") < names.index("default-surface")
+
+
+def test_read_alti_deletes_only_what_it_downloaded(tmp_path, monkeypatch):
+    cfg = Config(raw=tmp_path, store=None, scratch=None, keep_raw=False)
+    kept = zones.cache_path(cfg, zones.stac.alti_href("swissalti3d_2025_2632-1170"))
+    kept.parent.mkdir(parents=True)
+    kept.write_bytes(b"x")
+
+    def fake_fetch(cfg_, url):
+        p = zones.cache_path(cfg_, url)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(b"x")
+        return p
+
+    monkeypatch.setattr(zones, "fetch", fake_fetch)
+    monkeypatch.setattr(zones, "read_tile", lambda p: np.zeros((TILE_PX, TILE_PX)))
+    zones.read_alti(cfg, "swissalti3d_2025_2632-1170")
+    zones.read_alti(cfg, "swissalti3d_2025_2633-1170")
+    assert kept.exists()
+    assert not zones.cache_path(cfg, zones.stac.alti_href("swissalti3d_2025_2633-1170")).exists()
