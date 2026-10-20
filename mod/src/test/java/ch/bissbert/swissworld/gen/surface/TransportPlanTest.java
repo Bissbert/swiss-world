@@ -648,6 +648,53 @@ class TransportPlanTest {
     }
 
     /**
+     * Meiringen (flags as in cell 2656_1175, x 23764.., z -4880..): the line from Interlaken (trunk, T) and the one
+     * from Luzern (main line, M) run a column or two apart and merge. Their rails touch in squares of four rails, a
+     * switch at two opposite corners (23789,-4868); each switch kept its straight pair, the two went round a square
+     * on different sides, and the line from Interlaken ended there. Both switches of a square now drop the same side,
+     * and where three arms run on the trunk the switch keeps two of them.
+     */
+    @Test
+    void trunkRunsThroughWhereTwoMainLinesMerge() {
+        String[] rows = {
+            ".                                         ",
+            "R...                                      ",
+            "MMMRR...                                  ",
+            "..MMMMRR....                              ",
+            "  ...MMMMRRR...                           ",
+            "...  ...MMMMRRRR...                       ",
+            "TTT...  ...MMM.RRRRR...                   ",
+            "..TTTTT... ..MMMM..RRRR....               ",
+            "  ....TTTT......MMMM..RRRRR...            ",
+            ".     ...TTTTT.....MMM....RRRRR...        ",
+            "RR...     ...TTTTT...MMMM.....RRRRR...    ",
+            ".RRRRR...     ...TTTTT..MMM.......RRRR....",
+            " ....RRRR....    ....TTTT.MMMM... ...RRRRR",
+            "     ...RRRRR....    ...TTTTTMMMM...  ...R",
+            "....     ...RRRRR...     ...TTTTTMMM...  .",
+            "RRRR...     ....RRRRR...    ....TTTTMMM...",
+            "...RRRRR...     ....RRRRR...    ...TTTTTMM",
+            "   ....RRRRR...     ...RRRRR....    ...TTT",
+            "..     ....RRRR....    ....RRRRR...     ..",
+            "RR...      ...RRRRR...     ...RRRRRR...   ",
+            ".RRRRR...      ...RRRRR...    ...RRRRRRR..",
+        };
+        SwdCell c = Cells.flat(600);
+        for (int j = 0; j < rows.length; j++) {
+            for (int i = 0; i < rows[j].length(); i++) {
+                char ch = rows[j].charAt(i);
+                int main = RAIL | ColumnGrid.MAIN;
+                int flags = ch == 'T' ? main | ColumnGrid.TRUNK : ch == 'M' ? main : ch == 'R' ? RAIL : 0;
+                if (ch != ' ') Cells.overlay(c, i - 25, j - 12, OverlayPlan.RAIL_BED, flags, Double.NaN);
+            }
+        }
+        TransportPlan t = new TransportPlan(Cells.grid(c, 0, 0, TransportPlan.MARGIN));
+        // along the rails from the trunk (a rail of it at 23768..23779, -4872) towards the station
+        int[] end = alongRails(t, -21, -4, 12, (x, z) -> x >= 11);
+        assertTrue(end[0] >= 11, "line ends at " + (end[0] + 23789) + "," + (end[1] - 4868));
+    }
+
+    /**
      * Follows the rails from the first rail at x0..x0+n-1 in row z0, both ways, until a rail where {@code goal} holds
      * or the line ends (a rail whose next one does not join back); the rail it stopped at.
      */

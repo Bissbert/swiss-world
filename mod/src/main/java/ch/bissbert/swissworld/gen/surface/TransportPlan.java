@@ -730,10 +730,14 @@ public final class TransportPlan {
      * and of two arms that meet again at the same switch (a short loop, where two tracks drawn side by side were
      * thinned apart) the longer one gives way, so both switches of the loop route the line the same way. Before both,
      * where the data tags a main line (swd-format §5) and exactly two arms run on it, those two carry on: at a Y where
-     * a loop or siding merges, the straighter pair is often the loop's, and the main line broke there.
+     * a loop or siding merges, the straighter pair is often the loop's, and the main line broke there. First of all, a
+     * switch on a square of four rails (two tracks a column apart touching, Meiringen 23789,-4868) drops the side of
+     * the square through its larger corner ({@link #squareSide}), as does the switch at the opposite corner, so the
+     * line goes round the square the same way from both ends.
      */
     private int track(int x, int z) {
         int m = links(x, z);
+        if (Integer.bitCount(m) >= 3) m &= ~squareSide(x, z, m);
         if (Integer.bitCount(m) == 4) return crossing(x, z);
         if (Integer.bitCount(m) != 3) return m;
         int[][] arm = new int[4][];
@@ -806,6 +810,24 @@ public final class TransportPlan {
     }
 
     private static final int ARM_OPEN = 0, ARM_END = 1, ARM_SWITCH = 2;
+
+    /**
+     * The arm of switch (x, z) to drop on a square of four rails it is a corner of, where the two corners beside it
+     * are plain rails (two links): the one of them that is larger (z, then x). Seen from the opposite corner they are
+     * the same two, so both ends drop the same side. Bit mask as {@link #links}, 0 if none.
+     */
+    private int squareSide(int x, int z, int m) {
+        for (int d = 0; d < 2; d++) {
+            for (int e = 2; e < 4; e++) {
+                if ((m & 1 << d) == 0 || (m & 1 << e) == 0) continue;
+                int ax = x + DIRS[d][0], az = z + DIRS[d][1], bx = x + DIRS[e][0], bz = z + DIRS[e][1];
+                if (!rail(ax + DIRS[e][0], az + DIRS[e][1])) continue;
+                if (Integer.bitCount(links(ax, az)) != 2 || Integer.bitCount(links(bx, bz)) != 2) continue;
+                return az > bz || az == bz && ax > bx ? 1 << d : 1 << e;
+            }
+        }
+        return 0;
+    }
 
     /**
      * The two arms on the main line (at least half their walked rails on it, {@link #mainNear}) when exactly two are
