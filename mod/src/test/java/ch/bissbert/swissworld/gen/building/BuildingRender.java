@@ -126,6 +126,21 @@ final class BuildingRender {
         return seen;
     }
 
+    /** True if no body column of the building has a side onto open ground (not its own body, not a neighbour). */
+    static boolean enclosed(BuildingRender r) {
+        Columns c = r.p.cols();
+        for (int z = c.minZ; z <= c.maxZ; z++) {
+            for (int x = c.minX; x <= c.maxX; x++) {
+                if (!c.body(x, z)) continue;
+                for (Dir d : Dir.values()) {
+                    int nx = x + d.dx, nz = z + d.dz;
+                    if (!c.body(nx, nz) && !r.view.foreign(nx, nz, r.p.gid())) return false;
+                }
+            }
+        }
+        return true;
+    }
+
     /** Problems of this render: "leak ...", "nodoor", "door ..." (empty if fine). */
     static java.util.List<String> check(BuildingRender r) {
         java.util.List<String> res = new java.util.ArrayList<>();
@@ -176,7 +191,8 @@ final class BuildingRender {
         if (p.rooms().isEmpty()) return res;
         BuildingPlan.Door dr = p.door();
         if (dr == null) {
-            res.add("nodoor");
+            // a building whose every facade faces a neighbour gets no door (BuildingPlan#findDoor): hemmed in
+            res.add(enclosed(r) ? "hemmed enclosed" : "nodoor");
             return res;
         }
         int y0 = p.floorY(0) + dr.up(), x = dr.x(), z = dr.z();

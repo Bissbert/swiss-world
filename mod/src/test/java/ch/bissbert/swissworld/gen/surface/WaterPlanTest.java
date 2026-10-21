@@ -79,7 +79,7 @@ class WaterPlanTest {
     }
 
     @Test
-    void cornerOfADiagonalStepIsAReedNotWaterOrRock() {
+    void cornerOfADiagonalStepIsAPourOfFallingWater() {
         SwdCell c = Cells.flat(590);
         // upper river at 601 m west and north of (0, 0), lower river at 600 m on (0, 0) and east and south of it
         for (int x = -3; x <= 3; x++) {
@@ -88,18 +88,36 @@ class WaterPlanTest {
         ColumnGrid g = Cells.grid(c, 0, 0);
         WaterPlan.Fill corner = WaterPlan.fill(g, 0, 0);
         assertEquals(2, WaterPlan.sourcesAt(g, 0, 0, -1399));
-        // no stone on the water surface: sand under sugar cane (no source, not solid), the flowing top above it
-        assertTrue(corner.reed());
-        assertFalse(corner.rock());
+        // no stone, sand or plant on the water surface: falling water from a pit below the bed up to the flowing top
+        assertTrue(corner.pour());
         assertEquals(-1399, corner.fallTop());
+        assertTrue(corner.floor() < g.ground(0, 0) + 1);
         // along the straight parts of the step one source feeds the flowing top: water, as before
         WaterPlan.Fill edge = WaterPlan.fill(g, 2, 0);
-        assertFalse(edge.rock());
+        assertFalse(edge.pour());
         assertTrue(edge.falls());
         assertEquals(-1399, edge.fallTop());
-        // the reed is no source, so the columns beside the corner stay water
-        assertFalse(WaterPlan.fill(g, 1, 0).rock());
-        assertFalse(WaterPlan.fill(g, 0, 1).rock());
+        assertFalse(WaterPlan.fill(g, 1, 0).pour());
+        assertFalse(WaterPlan.fill(g, 0, 1).pour());
+        Voxels v = new Voxels(c, -3, -3, 3, 3, -1415, -1390);
+        List<String> unstable = v.unstableWater(1);
+        assertTrue(unstable.isEmpty(), () -> "water that would move: " + unstable);
+    }
+
+    @Test
+    void tallStepCornerIsAPourNotRock() {
+        SwdCell c = Cells.flat(590);
+        for (int x = -4; x <= 4; x++) {
+            for (int z = -4; z <= 4; z++) Cells.water(c, x, z, x < 0 || z < 0 ? 606 : 600, 2);
+        }
+        ColumnGrid g = Cells.grid(c, 0, 0);
+        WaterPlan.Fill corner = WaterPlan.fill(g, 0, 0);
+        assertTrue(corner.pour());
+        assertEquals(-1394, corner.fallTop());
+        Voxels v = new Voxels(c, -4, -4, 4, 4, -1415, -1385);
+        List<String> stones = v.stonesInWater(1), unstable = v.unstableWater(1);
+        assertTrue(stones.isEmpty(), () -> "stone in the river: " + stones);
+        assertTrue(unstable.isEmpty(), () -> "water that would move: " + unstable);
     }
 
     /** A river with a one-block step that jogs: upper level on {x >= 1, z <= 0} and {x >= 2, z >= 1}. */
@@ -121,8 +139,7 @@ class WaterPlanTest {
         assertTrue(stones.isEmpty(), () -> "stone in the river: " + stones);
         assertTrue(unstable.isEmpty(), () -> "water that would move: " + unstable);
         ColumnGrid g = Cells.grid(joggedStep(1), 0, 0);
-        assertTrue(WaterPlan.fill(g, 1, 1).reed()); // the inner corner of the jog
-        assertTrue(WaterPlan.fill(g, 0, 1).lip());
+        assertTrue(WaterPlan.fill(g, 1, 1).pour()); // the inner corner of the jog
     }
 
     @Test

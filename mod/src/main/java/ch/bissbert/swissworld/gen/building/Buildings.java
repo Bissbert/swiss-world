@@ -28,7 +28,12 @@ public final class Buildings {
     record Key(long gid, int cells) {}
 
     public static List<BuildingPlan> near(CellView view, int x0, int z0) {
-        int ax = x0 - MARGIN, az = z0 - MARGIN, bx = x0 + 15 + MARGIN, bz = z0 + 15 + MARGIN;
+        return near(view, x0, z0, MARGIN);
+    }
+
+    /** The buildings whose bbox lies within {@code margin} of the 16 x 16 chunk at (x0, z0). */
+    public static List<BuildingPlan> near(CellView view, int x0, int z0, int margin) {
+        int ax = x0 - margin, az = z0 - margin, bx = x0 + 15 + margin, bz = z0 + 15 + margin;
         Set<SwdCell> cells = Collections.newSetFromMap(new IdentityHashMap<>());
         for (int x : new int[]{ax, bx}) {
             for (int z : new int[]{az, bz}) {
@@ -49,7 +54,7 @@ public final class Buildings {
     }
 
     /** Cached plan; two threads may both compute it, which is harmless as planning is deterministic. */
-    static BuildingPlan plan(CellView view, SwdCell cell, SwdCell.Building b) {
+    public static BuildingPlan plan(CellView view, SwdCell cell, SwdCell.Building b) {
         // a neighbour cell built later must not be shadowed by a plan made without it
         int ax = view.blockX(cell, b.minX()) - MARGIN, bx = view.blockX(cell, b.maxX()) + MARGIN;
         int az = view.blockZ(cell, b.minZ()) - MARGIN, bz = view.blockZ(cell, b.maxZ()) + MARGIN;

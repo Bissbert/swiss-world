@@ -98,3 +98,51 @@ plan, not blocking a thread) is ~20 ms mean, p95 ~220–260 ms: latency for the 
 ~unchanged (0.94 → 1.11 at Interlaken), GroundTexture 0.09–0.26, Snow 0.001. Guard violations 0 and plan cell misses 0
 in all four flights. Next lever: make the plan cheaper (skip claim passes in tiles with no ways or buildings, cheaper
 column grid), it now dominates.
+
+## mod-site2: plan cost, door landings, river steps
+
+**Plan cost.** The tile plan got cheap where little is built. `ColumnGrid` samples row by row (one cell lookup per km
+crossed) and keeps prefix sums of overlay, so `TransportPlan` skips every box without overlay (no way, bore, dam or
+bridge can be there). `TransportPlan` memoizes `wayKind`/`open` per column, and earthwork reach fields are computed per
+block as Chebyshev dilations instead of a window scan per column. `SitePlans.prefetch` (called from
+`net/PlayerPrefetch`, mod-core) starts the plans of the tiles a moving player's view reaches in 6 s, when their cells are
+already local (≤ 6 per player and second).
+
+**Door landings (LANDING).** `SitePlan` plans the way out of every door of a building with rooms whose bbox lies within
+PAD + `LANDING_REACH` (= `BuildingStage.MAX_RUN` + 2) of the tile (`BuildingStage.landing`), in gid order, and claims its
+columns LANDING with G = the path's walking level (only FREE, EARTHWORK and BANK columns; the first landing on a column
+wins). Overlay writes on LANDING only below G, GroundTexture and Vegetation leave it alone (no tree in front of a door).
+A way column the path ends on is a doorstep: Overlay puts no half slab there (a slab under the door is a step up
+against the lintel). `BuildingStage` builds the steps for doors up to `STEPS_REACH` outside the chunk.
+
+Rules of the way out (`BuildingStage.trace`): it never runs into water (`CellView.wet`), and it ends on a way level with
+it (no step up right outside the door, at most one later). `findDoor` falls back to a door whose outside is not a
+neighbour; a building whose every side faces its own body or a neighbour (a courtyard wing mapped on its own) gets
+**no door**: it is reached through the others (watertight reports it as "hemmed enclosed"). When the best door has no
+traced way out, or only one through a facade column (level 3), `plan` raises the ground floor up to `RAISE` = 6 blocks
+(roof permitting) and takes the first height with a proper door.
+
+Checks: `EntranceSweepTest` (real terrain, whole pipeline, store env): every door with generated surroundings opens
+onto air with a walk of ≤ 1-block steps to 3 blocks out. 1895 chunks, 454 doors, 0 bad (playtest spots ± 2 chunks
+plus `SWISSWORLD_ENTRANCE_AREAS` round Interlaken). Watertight origin cell: 0 bad door, 1 pit; store cells
+2631/2633_1170, 2632_1171/1169: 0 bad door, 1 pit (base 0), 1 new thin inside-blocked barn.
+
+**River steps.** `WaterPlan.Fill` carries `floor` and `pour`: a column below a neighbour's water gets falling water from
+the floor to the upper level (a rapids column), no stone on the border. `SitePlan.resolve` claims a building footprint
+before water: a building mapped into the river stands on its walls and the river flows round it.
+`RiverStepSweepTest` (22 Aare/Lütschine cells, 229 step chunks, 31591 water columns): no solid block inside a WATER
+claim.
+
+Timings (headless, fresh world, warm-up flight first, same 4 flights, load 6–12; total = chunk mean + the flight's
+plan total spread over its chunks; plan-wait p95 = first chunks of a tile):
+
+| site | main: total / plan-wait p95 | mod-site2: total / plan-wait p95 | target |
+|---|---|---|---|
+| interlaken-ost | 22.3 / 623 | 6.8 / 46 | 8.2 |
+| innertkirchen | 17.0 / 524 | 4.5 / 2 | 6.1 |
+| forest-rugen | 18.3 / 441 | 6.4 / 3 | 5.7 |
+| mountain-faulhorn | 17.6 / 441 | 3.5 / 16 | 4.6 |
+
+Rugen sits ~10 % over its target in this run (5.4 in a cold run before it): its plan is the dearest (114 ms/tile,
+forest with many ways). In-game probes: 60 door outside cells air with ground under, 80 river step columns water from
+floor to top.

@@ -219,3 +219,9 @@ tasks.named('test', Test) {
     systemProperty 'swissworld.testStore', System.getenv('SWISSWORLD_STORE') ?: ''
     systemProperty 'swissworld.previews', System.getenv('SWISSWORLD_PREVIEWS') ?: ''
 }
+
+// dev only: extra test JVM args (e.g. JFR) from the environment
+tasks.withType(Test).configureEach {
+    if (System.getenv('SWISSWORLD_TEST_JVM_ARGS')) jvmArgs System.getenv('SWISSWORLD_TEST_JVM_ARGS').split(' ')
+    testLogging { showStandardStreams = System.getenv('SWISSWORLD_PERF') != null }
+}

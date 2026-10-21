@@ -3,6 +3,10 @@ package ch.bissbert.swissworld.gen.site;
 import ch.bissbert.swissworld.cell.SwdCell;
 import ch.bissbert.swissworld.cell.SwissCoords;
 import ch.bissbert.swissworld.gen.GenContext;
+import ch.bissbert.swissworld.gen.building.BuildingPlan;
+import ch.bissbert.swissworld.gen.building.BuildingStage;
+import ch.bissbert.swissworld.gen.building.Buildings;
+import ch.bissbert.swissworld.gen.building.CellView;
 import ch.bissbert.swissworld.gen.surface.ColumnGrid;
 import ch.bissbert.swissworld.gen.surface.OverlayPlan;
 import ch.bissbert.swissworld.gen.surface.TransportPlan;
@@ -81,6 +85,7 @@ public final class SitePlan {
         for (int z = z0 - PAD; z < z0 + TILE + PAD; z++) {
             for (int x = x0 - PAD; x < x0 + TILE + PAD; x++) resolve(x, z);
         }
+        landings();
         trees = TreePlan.trees(grid, treeData, x0, z0, x0 + TILE - 1, z0 + TILE - 1);
         nanos = System.nanoTime() - t0;
     }
@@ -275,12 +280,14 @@ public final class SitePlan {
                 c = TransportPlan.roadClass(cls) ? Claim.ROAD : Claim.PATH;
                 gy = g.deck(x, z);
             }
+        } else if (g.hasBuilding(x, z)) {
+            // a building mapped into the water (a mill, a house on the bank) stands on its own walls: the river flows
+            // round it, not through it
+            c = Claim.BUILDING;
+            gy = g.top(x, z);
         } else if (WaterPlan.sourceLevel(g, x, z) != ColumnGrid.NONE) {
             c = Claim.WATER;
             gy = g.ground(x, z);
-        } else if (g.hasBuilding(x, z)) {
-            c = Claim.BUILDING;
-            gy = g.top(x, z);
         } else {
             int ew = t.earthwork(x, z);
             if (ew != ColumnGrid.NONE) {
@@ -296,6 +303,63 @@ public final class SitePlan {
         }
         claims[k] = (byte) c.ordinal();
         ground[k] = gy;
+    }
+
+    /** How far a door's way out reaches from its building's bbox: the path's run plus the landing cell. */
+    static final int LANDING_REACH = BuildingStage.MAX_RUN + 2;
+
+    /**
+     * LANDING: the columns the way out of every door builds on (landing, steps, the cut three wide), where the ground
+     * is natural, banked or an earthwork, take the claim with G at the path's walking level, ahead of the terrain
+     * grading and the trees. Water and ways keep theirs (the path never runs into water and ends on a way level
+     * with it), and so do buildings. The way column a path ends on is a door step: no half slab on it. Every building
+     * whose way out can reach the tile plus {@link #PAD} is planned, in gid order; the first landing on a column wins,
+     * so every tile agrees.
+     */
+    private void landings() {
+        CellView view = new CellView(coords, lookup);
+        int ax = x0 - PAD - LANDING_REACH, az = z0 - PAD - LANDING_REACH;
+        int bx = x0 + TILE + PAD - 1 + LANDING_REACH, bz = z0 + TILE + PAD - 1 + LANDING_REACH;
+        java.util.Map<SwdCell, Boolean> cells = new java.util.IdentityHashMap<>();
+        for (int x : new int[] {ax, bx}) {
+            for (int z : new int[] {az, bz}) {
+                SwdCell c = view.cell(x, z);
+                if (c != null && c.buildings() != null) cells.put(c, true);
+            }
+        }
+        java.util.TreeMap<Long, BuildingPlan> plans = new java.util.TreeMap<>();
+        for (SwdCell cell : cells.keySet()) {
+            for (SwdCell.Building b : cell.buildings()) {
+                if (view.blockX(cell, b.maxX()) < ax || view.blockX(cell, b.minX()) > bx
+                        || view.blockZ(cell, b.maxZ()) < az || view.blockZ(cell, b.minZ()) > bz) continue;
+                if (plans.containsKey(b.gid())) continue;
+                BuildingPlan p = Buildings.plan(view, cell, b);
+                if (p.door() != null && !p.rooms().isEmpty()) plans.put(b.gid(), p);
+            }
+        }
+        boolean[] taken = new boolean[SIDE * SIDE];
+        for (BuildingPlan p : plans.values()) {
+            BuildingStage.landing(p, view, (x, z, y) -> {
+                if (!covers(x, z)) return;
+                int k = index(x, z);
+                if (y == Integer.MIN_VALUE) {
+                    doorsteps.set(k);
+                    return;
+                }
+                Claim c = Claim.of(claims[k]);
+                if (taken[k] || c != Claim.FREE && c != Claim.EARTHWORK && c != Claim.BANK) return;
+                taken[k] = true;
+                claims[k] = (byte) Claim.LANDING.ordinal();
+                ground[k] = y;
+            });
+        }
+    }
+
+    private final java.util.BitSet doorsteps = new java.util.BitSet(SIDE * SIDE);
+
+    /** A way column a door's path ends on: the way keeps its claim but gets no half slab. Valid within {@link #PAD}. */
+    public boolean doorstep(int x, int z) {
+        return doorsteps.get(index(x, z));
     }
 
     private Claim wayClaim(int x, int z) {
