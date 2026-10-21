@@ -229,10 +229,9 @@ it loaded (sidecar-buildings' code; flagged, not changed).
 
 ### TLM extract margin
 
-The TLM extract (`tlm.EXTRACT_BBOX` = 2626–2674 × 1152–1183 km) covers every store cell, but there is no
-margin west of E2626. Features lying entirely west of 2626 000 are missing for a builder that looks beyond
-the cell edge of column E2626. Features that cross into the cell are complete (bbox filter keeps whole
-features).
+Resolved by extract v3 (whole country, see NOTES-sidecar-tlm.md "National extract (v3)"). Before, the extract
+(`tlm.EXTRACT_BBOX`, now `LEGACY_BBOX` = 2626–2674 × 1152–1183 km) had no margin west of E2626, and cells outside it
+got no TLM layers at all; `python -m swissdata.rebuild --only-missing-tlm` rebuilds those.
 
 ### Rebuild run (2026-10-19, shared store, 8 worker processes, no server running)
 

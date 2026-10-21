@@ -1,10 +1,12 @@
 """Rebuilds stored cells with the current BUILDERS, keeping each cell's pinned sources. Owner: sidecar-core.
 
-    python -m swissdata.rebuild (--bbox E0 N0 E1 N1 | --all) [--workers N] [--dry-run]
+    python -m swissdata.rebuild (--bbox E0 N0 E1 N1 | --all | --only-missing-tlm) [--workers N] [--dry-run]
 
 Cells come from manifest.json (live entries only; evicted ones are rebuilt on demand by the server). The bbox
-is inclusive in km. With the dev guard on (SWISSDATA_DEV_BBOX, default), cells outside the dev area are never
-touched. Order: mod-core's origin area first, then the rest, west to east.
+is inclusive in km. --only-missing-tlm keeps the cells to which the whole-country TLM extract (v3) gives features
+the test-box extract (v1/v2) lacked (tlm.missing_in_legacy): everything outside the test box, built without roads,
+water or land cover, and cells at its edge. With the dev guard on (SWISSDATA_DEV_BBOX, default), cells outside the
+dev area are never touched. Order: mod-core's origin area first, then the rest, west to east.
 
 Each cell is assembled with its manifest sources as `pinned`; builders keep those and add keys they did not
 have yet (tlm, bathy, buildings, gwr), which are pinned by recording them (build.merge_sources refuses a
@@ -25,7 +27,7 @@ import sys
 import time
 from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
 
-from . import build, stac, swd
+from . import build, stac, swd, tlm
 from .config import Config
 from .manifest import cell_key
 from .store import Store
@@ -150,12 +152,16 @@ def main(argv: list[str] | None = None) -> int:
     g = ap.add_mutually_exclusive_group(required=True)
     g.add_argument("--bbox", nargs=4, type=int, metavar=("E0", "N0", "E1", "N1"), help="inclusive, in km")
     g.add_argument("--all", action="store_true")
+    g.add_argument("--only-missing-tlm", action="store_true",
+                   help="only cells that lacked TLM features under the test-box extract (run with SWISSDATA_DEV_BBOX=0)")
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--dry-run", action="store_true", help="only list how many cells would be rebuilt")
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s: %(message)s")
     cfg = Config.from_env()
     cells = select(Store(cfg).manifest.file.read(), tuple(args.bbox) if args.bbox else None, cfg.dev_bbox)
+    if args.only_missing_tlm:
+        cells = tlm.missing_in_legacy(cfg, cells)
     log.info("%d cells to rebuild in %s", len(cells), cfg.store)
     if args.dry_run or not cells:
         return 0

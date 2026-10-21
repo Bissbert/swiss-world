@@ -21,8 +21,10 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
+import fiona
 import numpy as np
 import shapely
+from shapely.geometry import shape
 
 from . import bathy, swd, tlm
 from .config import Config
@@ -81,58 +83,134 @@ class RiverNetwork:
     tree: shapely.STRtree
 
 
-@lru_cache(maxsize=2)
-def river_network(extract: Path) -> RiverNetwork:
-    """Water levels for every surface watercourse in the extract, monotonic downstream across the network."""
-    segs: list[tuple[np.ndarray, bool, bool]] = []
-    for g, p in tlm.read_all(extract, "TLM_FLIESSGEWAESSER"):
+# Levels are monotonic downstream across the whole network, so a line's level depends on everything upstream of
+# it. They are propagated once per extract over the whole country and stored as one inflow cap per line (side
+# file); a cell rebuilds the levels of the lines near it from their own Z and the cap, exactly as the
+# propagation does. Line keys are fid * PARTS + part index, so key order is the extract order.
+RIVERS_SIDE = "rivers-v1.npz"
+PARTS = 1 << 16
+
+
+def _segments(features):
+    """(key, densified coordinates, waterfall, named) per surface watercourse part, in key order."""
+    for fid, g, p in features:
         if p["OBJEKTART"] not in FLOW_KINDS or p["VERLAUF"] not in (VERLAUF_SURFACE, VERLAUF_FALL):
             continue
-        for part in tlm.single_lines(g):
+        for j, part in enumerate(tlm.single_lines(g)):
             c = shapely.get_coordinates(shapely.segmentize(part, 1.0), include_z=True)
             if len(c) >= 2:
-                segs.append((c, p["VERLAUF"] == VERLAUF_FALL, p["NAME"] is not None))
-    levels = propagate_levels([c for c, _, _ in segs])
-    lines = np.array([shapely.linestrings(c[:, 0], c[:, 1], lv) for (c, _, _), lv in zip(segs, levels)])
-    return RiverNetwork(lines, np.array([f for _, f, _ in segs], dtype=bool),
-                        np.array([n for _, _, n in segs], dtype=bool), shapely.STRtree(lines))
+                yield fid * PARTS + j, c, p["VERLAUF"] == VERLAUF_FALL, p["NAME"] is not None
+
+
+def _make_river_caps(extract: Path, dest: Path) -> None:
+    """Inflow cap of every surface watercourse part in the extract.
+
+    The features extract v2 held (tlm.LEGACY_BBOX) are propagated first on their own, exactly as v2 did, and
+    keep those caps, so cells built from v2 do not change; the rest of the country is then propagated with
+    them held fixed (a line flowing out of the old area is capped by their levels; one flowing into it is not)."""
+    layer = "TLM_FLIESSGEWAESSER"
+    legacy = tlm.legacy_fids(extract, layer)
+    keys, starts, ends, zmin = [], [], [], []
+    with fiona.open(extract, layer=layer) as s:
+        feats = ((fid, shape(f.geometry), f.properties) for fid, f in s.items() if f.geometry is not None)
+        for key, c, _, _ in _segments(feats):
+            keys.append(key)
+            starts.append(_node(c[0]))
+            ends.append(_node(c[-1]))
+            zmin.append(float(c[:, 2].min()))
+    keys = np.array(keys, dtype=np.int64)
+    zmin = np.array(zmin)
+    assert np.all(np.diff(keys) > 0)
+    old = np.nonzero(np.isin(keys // PARTS, np.fromiter(legacy, dtype=np.int64, count=len(legacy))))[0]
+    fixed_caps = propagate_caps([starts[k] for k in old], [ends[k] for k in old], zmin[old])
+    caps = propagate_caps(starts, ends, zmin, fixed=dict(zip(old.tolist(), fixed_caps.tolist())))
+    np.savez(dest, keys=keys, caps=caps, legacy=old)
+
+
+@lru_cache(maxsize=2)
+def river_caps(extract: Path) -> tuple[np.ndarray, np.ndarray]:
+    side = tlm.ensure_side(extract, RIVERS_SIDE, lambda part: _make_river_caps(extract, part))
+    with np.load(side) as z:
+        return z["keys"], z["caps"]
+
+
+def river_network(cfg: Config, e_km: int, n_km: int, margin: float = NEAR) -> RiverNetwork:
+    """The surface watercourse parts of the features whose envelope intersects the cell ± `margin`, with their
+    water levels, in extract order (index order of the whole-country network)."""
+    keys, caps = river_caps(tlm.ensure_extract(cfg))
+    # a superset: the caller's STRtree query (envelope test, as before) picks the lines near the cell
+    segs = list(_segments(tlm.read_envelope(cfg, "TLM_FLIESSGEWAESSER", tlm.cell_bbox(e_km, n_km, margin))))
+    pos = np.searchsorted(keys, [k for k, _, _, _ in segs])
+    if len(segs):
+        assert np.all(keys[np.minimum(pos, len(keys) - 1)] == [k for k, _, _, _ in segs]), "stale river side file"
+    lines = np.array([shapely.linestrings(c[:, 0], c[:, 1], levels(c[:, 2], caps[i]))
+                      for (_, c, _, _), i in zip(segs, pos)], dtype=object)
+    return RiverNetwork(lines, np.array([f for _, _, f, _ in segs], dtype=bool),
+                        np.array([n for _, _, _, n in segs], dtype=bool), shapely.STRtree(lines))
+
+
+def levels(z: np.ndarray, cap: float) -> np.ndarray:
+    """Stepped water level along a line (Z digitised downstream) whose inflow is capped at `cap`."""
+    return np.floor(np.minimum.accumulate(np.minimum(z, cap)))
+
+
+def _node(xy) -> tuple[float, float]:
+    return (round(float(xy[0]), 1), round(float(xy[1]), 1))
+
+
+def propagate_caps(starts: list, ends: list, zmin: np.ndarray, fixed: dict[int, float] | None = None) -> np.ndarray:
+    """Inflow cap per line (start/end node, lowest Z, digitised downstream): the lowest end level of the lines
+    flowing into its start, inf for a source. A line's end level is floor(min(lowest Z, cap)). `fixed` lines keep
+    the given cap and ignore their inflows. Topological order; a cycle (braided channel) is broken at the lowest
+    unprocessed index."""
+    n = len(starts)
+    fixed = fixed or {}
+    ending_at = defaultdict(list)
+    for k, e in enumerate(ends):
+        ending_at[e].append(k)
+    preds = [ending_at.get(st, []) for st in starts]
+    succs = defaultdict(list)
+    for k, ps in enumerate(preds):
+        for q in ps:
+            succs[q].append(k)
+    indeg = [len(ps) for ps in preds]
+    caps = np.full(n, np.inf)
+    out_level = [np.inf] * n
+    done = np.zeros(n, dtype=bool)
+    ready = [k for k in range(n) if indeg[k] == 0 and k not in fixed]
+
+    def finish(k: int) -> None:
+        out_level[k] = float(np.floor(min(zmin[k], caps[k])))
+        done[k] = True
+        for sc in succs[k]:
+            indeg[sc] -= 1
+            if indeg[sc] == 0:
+                ready.append(sc)
+
+    for k, cap in sorted(fixed.items()):
+        caps[k] = cap
+        finish(k)
+    ndone, lowest = len(fixed), 0
+    while ndone < n:
+        if not ready:
+            while done[lowest]:
+                lowest += 1
+            ready = [lowest]
+        k = ready.pop()
+        if done[k]:
+            continue
+        caps[k] = min((out_level[q] for q in preds[k]), default=np.inf)
+        finish(k)
+        ndone += 1
+    return caps
 
 
 def propagate_levels(coords: list[np.ndarray]) -> list[np.ndarray]:
     """Per line (x, y, z coordinates, digitised downstream): z made non-increasing along the line and
     never above the end level of any line flowing into its start, then floored to whole metres."""
-    def key(xy):
-        return (round(float(xy[0]), 1), round(float(xy[1]), 1))
-
-    ending_at = defaultdict(list)
-    for k, c in enumerate(coords):
-        ending_at[key(c[-1])].append(k)
-    preds = [ending_at.get(key(c[0]), []) for c in coords]
-    succs = defaultdict(list)
-    for k, ps in enumerate(preds):
-        for p in ps:
-            succs[p].append(k)
-    indeg = [len(ps) for ps in preds]
-    out_level = [np.inf] * len(coords)
-    result: list[np.ndarray | None] = [None] * len(coords)
-    ready = [k for k in range(len(coords)) if indeg[k] == 0]
-    done = 0
-    while done < len(coords):
-        if not ready:  # a cycle (braided channel): continue with the lowest unprocessed index
-            ready = [min(k for k in range(len(coords)) if result[k] is None)]
-        k = ready.pop()
-        if result[k] is not None:
-            continue
-        cap = min((out_level[p] for p in preds[k]), default=np.inf)
-        z = np.minimum.accumulate(np.minimum(coords[k][:, 2], cap))
-        result[k] = np.floor(z)
-        out_level[k] = float(result[k][-1])
-        done += 1
-        for s in succs[k]:
-            indeg[s] -= 1
-            if indeg[s] == 0:
-                ready.append(s)
-    return result
+    caps = propagate_caps([_node(c[0]) for c in coords], [_node(c[-1]) for c in coords],
+                          np.array([c[:, 2].min() for c in coords]))
+    return [levels(c[:, 2], cap) for c, cap in zip(coords, caps)]
 
 
 class WaterBuilder:
@@ -144,7 +222,7 @@ class WaterBuilder:
 
         tlm.check_pinned(pinned)
         lakes = lakes_near(cfg, e_km, n_km)
-        net = river_network(tlm.ensure_extract(cfg))
+        net = river_network(cfg, e_km, n_km)
         near = net.tree.query(tlm.cell_box(e_km, n_km, NEAR))
         near = near[np.argsort(near)]
         box = tlm.cell_box(e_km, n_km, 5)

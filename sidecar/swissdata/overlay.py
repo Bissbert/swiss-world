@@ -14,11 +14,14 @@ wider on every side so the edge flag (a road column next to a non-overlay column
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from functools import lru_cache
 
+import fiona
 import numpy as np
 import shapely
+from shapely.geometry import shape
 
 from . import swd, tlm
 
@@ -189,18 +192,42 @@ def trunk_parts(lines: list) -> set[int]:
     return {i for k in trunk for i in chains[k][2]}
 
 
+# Trunks are computed once per extract over the whole country and stored as digests of the trunk parts' 2D WKB.
+TRUNK_SIDE = "trunk-v1.npy"
+
+
+def _digest(part) -> bytes:
+    return hashlib.blake2b(shapely.force_2d(part).wkb, digest_size=16).digest()
+
+
+def _make_trunk(extract, dest) -> None:
+    """The features extract v2 held (tlm.LEGACY_BBOX) keep the trunk of the v2 networks, so cells built from v2 do
+    not change; every other main-line part takes its trunk membership from the whole-country networks."""
+    legacy = tlm.legacy_fids(extract, "TLM_EISENBAHN")
+    lines, old = [], []
+    with fiona.open(extract, layer="TLM_EISENBAHN") as s:
+        for fid, f in s.items():
+            if f.geometry is None or not is_main_line(f.properties):
+                continue
+            for q in tlm.single_lines(shape(f.geometry)):
+                old.append(fid in legacy)
+                lines.append(shapely.force_2d(q))
+    old_idx = [i for i, o in enumerate(old) if o]
+    trunk = {old_idx[i] for i in trunk_parts([lines[i] for i in old_idx])}
+    trunk |= {i for i in trunk_parts(lines) if not old[i]}
+    digests = sorted(_digest(lines[i]) for i in trunk)
+    np.save(dest, np.frombuffer(b"".join(digests), dtype=np.uint8).reshape(-1, 16))
+
+
 @lru_cache(maxsize=2)
-def _trunk_wkb(path) -> frozenset:
-    lines = []
-    for g, p in tlm.read_all(path, "TLM_EISENBAHN"):
-        if is_main_line(p):
-            lines.extend(shapely.force_2d(q) for q in tlm.single_lines(g))
-    return frozenset(lines[i].wkb for i in trunk_parts(lines))
+def _trunk_digests(extract) -> frozenset:
+    side = tlm.ensure_side(extract, TRUNK_SIDE, lambda part: _make_trunk(extract, part))
+    return frozenset(row.tobytes() for row in np.load(side))
 
 
 def is_trunk(cfg, part) -> bool:
-    """`part` (a main-line part) lies on the trunk of its network (trunk_parts, over the whole extract)."""
-    return shapely.force_2d(part).wkb in _trunk_wkb(tlm.ensure_extract(cfg))
+    """`part` (a main-line part) lies on the trunk of its network (trunk_parts, over the whole country)."""
+    return _digest(part) in _trunk_digests(tlm.ensure_extract(cfg))
 
 
 def rail_class(p: dict) -> int:

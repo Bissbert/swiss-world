@@ -22,7 +22,7 @@ Total is about 3.2 GB, over the ~2 GB guideline only because of the TLM file the
 
 ## Extract
 
-- `$SWISSDATA_RAW/extracts/swisstlm3d_2026-02_tlm-extract.gpkg` (210 MB, built in ~25 s with `python -I -m swissdata.tlm`).
+- `$SWISSDATA_RAW/extracts/swisstlm3d_2026-02_tlm-extract-v3.gpkg`: **the whole country** (6.3 GB, built in 406 s, peak RSS 263 MB, with `python -I -m swissdata.tlm`). v1/v2 held only the test box `tlm.LEGACY_BBOX` (2626–2674 × 1152–1183 km, 210 MB), so store cells outside it had no roads, water or land cover. See "National extract (v3)" below.
 - It holds 14 layers with only the attributes used.
 - Process-safe: flock, then `.part.gpkg`, then `os.replace`.
 - **Select, don't clip:** features that intersect the bbox are copied whole. Z stays exact, lines stay continuous (needed for river levels across the bbox), and lake polygons keep their full shoreline for distance-to-shore.
@@ -44,12 +44,11 @@ Total is about 3.2 GB, over the ~2 GB guideline only because of the TLM file the
 
 - **Lake levels** are the median Z of the TLM lake polygon, **rounded to whole metres**: Brienzersee 563.74 → 564, Thunersee 557.67 → 558, Grimsel 1908, Räterichsboden 1762. This matches the brief's numbers and whole-block water surfaces.
 - **Lake kinds:** reservoir if a Staumauer/Staudamm lies within 30 m (Wehr excluded, otherwise Brienzersee would count), pond if under 0.5 ha, otherwise lake.
-- **River levels** are computed network-wide in-process from all extract watercourses (~12.7k lines, ~1 s, cached):
+- **River levels** are computed network-wide from all extract watercourses (now a side file, see "National extract (v3)"):
   1. Lines are digitised downstream (verified: every sloped line runs downhill).
   2. Lines are topologically sorted at shared endpoints, so a confluence caps the downstream line; cycles are broken arbitrarily.
   3. Levels take a running minimum, then a floor to whole metres, which gives stepped levels.
   - Levels come only from TLM, so neighbouring cells agree at seams.
-  - **For the whole country this must become a precomputed, tiled table.** Note for later.
 - **Footprints:**
   - Wide rivers use the BODENBEDECKUNG "Fliessgewaesser" polygons (WKND 2).
   - Other lines are buffered to 2 m (named) or ~1.4 m (unnamed; 0.71 m radius keeps them 8-connected) as WKND 3.
@@ -134,3 +133,15 @@ Regenerate with `uv run --group dev python -I -m swissdata.tlm_preview 2646 1178
 - Farmland.
 - Lake-shore beaches are only the gravel fallback.
 - Seam consistency across neighbouring cells is checked by design, not by a test with two real cells.
+
+## National extract (v3)
+
+- `EXTRACT_VERSION = 3` copies every feature of the 14 layers: CH and FL (the FGDB includes Liechtenstein; Vaduz 2757–2760 × 1221–1224 has 1,003 roads, 2,858 footprints). Counts: 848k land cover, 2.1M roads, 671k watercourses, 4.1M building footprints. The GeoPackage R-tree is kept.
+- **No whole-extract reads per process any more.** `water.read_all`/`overlay._trunk_wkb` loaded every line of the extract; nationally that is ~50x more. Both now come from side files next to the extract (`<extract stem>.rivers-v1.npz`, `.trunk-v1.npy`), built once under flock with atomic rename (`tlm.ensure_side`), then read per cell:
+  - rivers: inflow cap per watercourse part (key fid·65536+part), 5.6 MB; the per-cell network reads lines from the R-tree (`tlm.read_envelope`, envelope test as the old STRtree) and applies `levels(z, cap)`.
+  - trunk: blake2b-128 digests of the 2D WKB of every trunk part, 61 KB.
+- **Legacy rule (byte-identical inside the old box):** the features v2 held (`items(bbox=LEGACY_BBOX)` of v3, verified identical to v2 in content and fid order for all 14 layers) are propagated alone first and keep those river caps / trunk parts; the rest of the country is propagated with them held fixed. So a line flowing into the old area from outside does not lower its levels there.
+- **`tlm.read` returns fid (source) order.** OGR's spatial filter yields R-tree traversal order, which changes with everything else in the extract; landcover burns overlapping polygons last-wins, so SURF of 2646_1178 and 2660_1173 differed between v2 and v3. With the sort v2 and v3 give identical TLM layers for interior cells (tests/test_national.py pins five). Stored cells built before keep their R-tree order SURF until rebuilt.
+- **`python -m swissdata.rebuild --only-missing-tlm`** rebuilds the cells to which v3 gives features v2 lacked (`tlm.missing_in_legacy`: R-tree envelope test of each layer around the cell, at the builders' read reach, 250 m, dams 3 km, against the legacy fids). Run with `SWISSDATA_DEV_BBOX=0`, otherwise the dev guard drops the cells outside the dev area.
+- **Still test-box only:** GWR is `gwr.CANTONS = ("be",)` (buildings outside BE have no GWR attributes), bathymetry is `bathy.ITEMS` (3 lakes; others get the synthetic bed), and the dev guard (`stac.DEV_RANGES`) still refuses alti outside the dev area unless `SWISSDATA_DEV_BBOX=0`.
+

@@ -1,9 +1,10 @@
 """swissTLM3D: one-time extract of the layers we need, then fast per-cell reads. Owner: sidecar-tlm.
 
-The national gdb.zip (2.9 GB) is fetched once. `ensure_extract` copies every feature that intersects
-EXTRACT_BBOX from the needed layers (only the attributes we use, Z kept) into a small GeoPackage under
-$SWISSDATA_RAW/extracts/. Features are selected, not cut, so lines and lake polygons stay whole and Z
-values stay exact; cells never open the national file again.
+The national gdb.zip (2.9 GB) is fetched once. `ensure_extract` copies every feature of the needed layers
+(the whole of Switzerland and Liechtenstein; only the attributes we use, Z kept) into a GeoPackage with an
+R-tree index under $SWISSDATA_RAW/extracts/. Features are copied whole, so lines and lake polygons keep
+their full shape and exact Z; cells never open the national file again. Network-wide results (river levels,
+main-line trunks) are precomputed once per extract into side files next to it (water.py, overlay.py).
 
 OBJEKTART and the other attributes are integer codes; the names in the comments below come from the
 FGDB's own subtype/domain tables (GDB_Items).
@@ -13,7 +14,7 @@ from __future__ import annotations
 
 import fcntl
 import os
-from functools import lru_cache
+import sqlite3
 from pathlib import Path
 
 import fiona
@@ -32,8 +33,10 @@ TLM_URL = (f"https://data.geo.admin.ch/ch.swisstopo.swisstlm3d/{TLM_ITEM}/"
            f"{TLM_ITEM}_2056_5728.gdb.zip")
 TLM_GDB = "swissTLM3D_2026_LV95_LN02.gdb"
 
-# Test bbox (WGS84 7.80-8.39 E, 46.56-46.80 N) in LV95 plus a 2 km margin.
-EXTRACT_BBOX = (2_626_000, 1_152_000, 2_674_000, 1_183_000)
+# Extract v1/v2 held only the features intersecting this box (the test bbox WGS84 7.80-8.39 E, 46.56-46.80 N
+# in LV95 plus a 2 km margin). The network-wide computations keep their v2 results for those features
+# (LEGACY_BBOX in water.py/overlay.py), so cells built from v2 inside the box stay byte-identical.
+LEGACY_BBOX = (2_626_000, 1_152_000, 2_674_000, 1_183_000)
 
 # layer -> attributes kept (besides OBJEKTART).
 LAYERS: dict[str, tuple[str, ...]] = {
@@ -67,7 +70,8 @@ def check_pinned(pinned: dict | None) -> None:
 # Bumped whenever LAYERS gains an attribute: ensure_extract only checks that the file exists, so a new
 # version makes it extract once more instead of reading an old file without the attribute.
 # 2: TLM_EISENBAHN.ACHSE_DKM (the main-line tag, overlay.py).
-EXTRACT_VERSION = 2
+# 3: the whole country instead of LEGACY_BBOX.
+EXTRACT_VERSION = 3
 
 
 def extract_path(cfg: Config) -> Path:
@@ -100,21 +104,107 @@ def _copy_layer(src: str, layer: str, fields: tuple[str, ...], dest: Path) -> No
         with fiona.open(dest, "w", driver="GPKG", layer=layer, schema=schema, crs=s.crs) as d:
             d.writerecords(
                 {"geometry": f.geometry, "properties": {k: f.properties[k] for k in props}}
-                for f in s.filter(bbox=EXTRACT_BBOX) if f.geometry is not None)
+                for f in s if f.geometry is not None)
 
 
 def read(cfg: Config, layer: str, bbox: tuple[float, float, float, float]) -> list[tuple[object, dict]]:
-    """Features of `layer` whose bbox intersects `bbox` (LV95), as (shapely geometry with Z, attributes)."""
+    """Features of `layer` whose bbox intersects `bbox` (LV95), as (shapely geometry with Z, attributes), in fid
+    (= source) order. Builders burn overlapping features last-wins, so the order is part of the output; OGR's
+    spatial filter yields R-tree traversal order, which depends on everything else in the extract."""
     path = ensure_extract(cfg)
     with fiona.open(path, layer=layer) as s:
-        return [(shape(f.geometry), dict(f.properties)) for f in s.filter(bbox=bbox)]
+        return [(shape(f.geometry), dict(f.properties)) for _, f in sorted(s.items(bbox=bbox), key=lambda t: t[0])]
 
 
-@lru_cache(maxsize=4)
-def read_all(path: Path, layer: str) -> tuple[tuple[object, dict], ...]:
-    """Whole extract layer, cached per process (for network-wide computations like river levels)."""
+def read_envelope(cfg: Config, layer: str, bbox: tuple[float, float, float, float]
+                  ) -> list[tuple[int, object, dict]]:
+    """Features of `layer` whose envelope intersects `bbox` (LV95), as (fid, geometry, attributes), by fid.
+
+    Unlike `read` (OGR tests the geometry itself against the box), this is the envelope test of a shapely
+    STRtree query, which the network-wide side files were computed with; it reads the GeoPackage R-tree (float32
+    envelopes rounded outward, so a superset) and leaves the exact envelope test to the caller."""
+    path = ensure_extract(cfg)
+    with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as db:
+        (col,) = db.execute("SELECT column_name FROM gpkg_geometry_columns WHERE table_name = ?", (layer,)).fetchone()
+        fids = [r[0] for r in db.execute(
+            f'SELECT id FROM "rtree_{layer}_{col}" WHERE maxx >= ? AND minx <= ? AND maxy >= ? AND miny <= ?',
+            (bbox[0], bbox[2], bbox[1], bbox[3]))]
+    fids.sort()
     with fiona.open(path, layer=layer) as s:
-        return tuple((shape(f.geometry), dict(f.properties)) for f in s)
+        out = []
+        for fid in fids:
+            f = s[fid]
+            if f.geometry is not None:
+                out.append((fid, shape(f.geometry), dict(f.properties)))
+        return out
+
+
+def side_path(extract: Path, name: str) -> Path:
+    """A file derived from the whole extract (e.g. river levels), next to it, so a new extract gets its own."""
+    return extract.with_name(f"{extract.stem}.{name}")
+
+
+def ensure_side(extract: Path, name: str, make) -> Path:
+    """Builds side file `name` once with `make(part_path)`. Safe across processes (flock, then atomic rename).
+    `name` should carry its own format version, bumped when `make` changes its result."""
+    dest = side_path(extract, name)
+    if dest.exists():
+        return dest
+    with open(dest.with_name(dest.name + ".lock"), "w") as lf:
+        fcntl.flock(lf, fcntl.LOCK_EX)
+        if dest.exists():
+            return dest
+        part = dest.with_name(f"{dest.stem}.part{dest.suffix}")
+        part.unlink(missing_ok=True)
+        make(part)
+        os.replace(part, dest)
+    return dest
+
+
+def legacy_fids(extract: Path, layer: str) -> set[int]:
+    """Features of `layer` that extract v2 held: those OGR selects for LEGACY_BBOX (the same filter v2 used)."""
+    with fiona.open(extract, layer=layer) as s:
+        return {fid for fid, _ in s.items(bbox=LEGACY_BBOX)}
+
+
+# How far beyond its cell a builder reads each layer: water's river lines (NEAR) are the widest per-cell read,
+# except the dams searched around a lake (water.lakes_near).
+READ_REACH = {"TLM_STAUBAUTE": 3000.0}
+DEFAULT_READ_REACH = 250.0
+
+
+def _inside(b: tuple[float, float, float, float], box: tuple[float, float, float, float]) -> bool:
+    return b[0] >= box[0] and b[1] >= box[1] and b[2] <= box[2] and b[3] <= box[3]
+
+
+def missing_in_legacy(cfg: Config, cells: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    """The cells (of `cells`) that a builder would now give TLM features extract v1/v2 lacked: some feature of
+    the whole-country extract within the cell's read reach lies outside LEGACY_BBOX's selection. Those cells
+    were built with missing roads, water or land cover (all of them, outside the box) and need a rebuild; every
+    other cell would come out byte-identical. Envelope tests, so a few extra cells may be listed."""
+    reach = max(DEFAULT_READ_REACH, *READ_REACH.values())
+    cand = [c for c in cells if not _inside(cell_bbox(*c, reach), LEGACY_BBOX)]
+    if not cand:
+        return []
+    path = ensure_extract(cfg)
+    legacy: dict[str, set[int]] = {}
+    out = []
+    with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as db:
+        cols = dict(db.execute("SELECT table_name, column_name FROM gpkg_geometry_columns"))
+        for c in cand:
+            for layer in LAYERS:
+                b = cell_bbox(*c, READ_REACH.get(layer, DEFAULT_READ_REACH))
+                if _inside(b, LEGACY_BBOX):
+                    continue
+                fids = [r[0] for r in db.execute(
+                    f'SELECT id FROM "rtree_{layer}_{cols[layer]}" WHERE maxx >= ? AND minx <= ? AND maxy >= ? '
+                    'AND miny <= ?', (b[0], b[2], b[1], b[3]))]
+                if fids and layer not in legacy:
+                    legacy[layer] = legacy_fids(path, layer)
+                if any(f not in legacy[layer] for f in fids):
+                    out.append(c)
+                    break
+    return out
 
 
 def cell_bbox(e_km: int, n_km: int, margin: float = 0.0) -> tuple[float, float, float, float]:
