@@ -148,7 +148,7 @@ def test_neighbouring_cells_agree_at_the_seam():
     assert np.array_equal(a.cls[w - 8:w, w:-w], b.cls[w + TILE_PX - 8:w + TILE_PX, w:-w])
     assert np.array_equal(a.cls[w:-w, w - 8:w], c.cls[w:-w, w + TILE_PX - 8:w + TILE_PX])
     sa, sc = gmat.smooth_lcorr(a.lcorr), gmat.smooth_lcorr(c.lcorr)
-    assert np.array_equal(sa[w:-w, w - 4:w], sc[w:-w, w + TILE_PX - 4:w + TILE_PX])
+    assert np.array_equal(sa[w:-w, w - 4:w], sc[w:-w, w + TILE_PX - 4:w + TILE_PX], equal_nan=True)
     assert len(np.unique(a.cls)) >= 4
 
 

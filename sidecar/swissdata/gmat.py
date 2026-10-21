@@ -18,7 +18,7 @@ agree on every pixel both compute; per-tile quantities are computed from the who
 3. Photo class from shadow-invariant chromaticity (excess green, red/blue balance, saturation) plus the corrected
    brightness: green grass, dry grass, bare soil, grey (rock or scree), snow. Snow counts only above the regional
    snow line (ClimateLines.snowLine in the mod, ported verbatim); below it, and in shadows too dark to read, the
-   pixel is unknown.
+   pixel is unknown; below-line snow also drops its brightness (rock under it splits light/dark by LITH, tone 7).
 4. Coherence: a pixel with at most one 3×3 neighbour of its class takes the 3×3 majority (1-pixel paths survive),
    then unknown pixels take the most common known class within FILL_R pixels. Integer counts, fixed tie order.
 5. Per column (priors, after the filter so the filter never reads a neighbour cell's layers): water (WKND) 9,
@@ -77,6 +77,7 @@ RB_DRY = 0.045  # r − b chroma for yellow-brown
 SNOW_L, SNOW_SAT = 185.0, 0.12
 SOIL_MAX_L = 125.0  # dry grass is lighter than bare soil
 FILL_R = 6
+TONE_UNKNOWN = 7  # tone where the photo shows no ground (masked snow, no photo)
 TONE_R = 1  # tone from the 3×3 pixel (6 m) mean: JPEG noise otherwise dominates the layer's size
 ISOLATED = 2  # own-class count in 3×3 (incl. itself) at or below which a pixel is replaced
 
@@ -328,6 +329,8 @@ def photo_pixels(e_km: int, n_km: int, rgb_tiles: dict, dem_tiles: dict, params:
     nn = n_km * 1000 + 999 - PX_M * (np.arange(n) - w)
     above = np.isfinite(h) & (h > snow_line(ee[None, :], nn[:, None]))
     cls = classify_photo(bal, np.nan_to_num(lcorr), valid, dark, above)
+    # snow below the snow line (summer patches): its brightness says nothing about the ground beneath
+    lcorr = np.where((cls == UNKNOWN) & valid & ~dark, np.nan, lcorr)
     return Pixels(coherent(cls), lcorr, slope_deg)
 
 
@@ -382,7 +385,8 @@ def gmat_columns(pix: Pixels, layers: dict[str, np.ndarray], spans: dict | None 
     if lith is not None:
         lut = np.array([LIGHT_ROCK_L.get(k, LIGHT_ROCK_L[zones.UNKNOWN]) for k in range(8)])
         thr = lut[lith & 7]
-    cls[rock] = np.where(np.nan_to_num(lum[rock]) > thr[rock], ROCK_LIGHT, ROCK_DARK)
+    light = np.where(np.isfinite(lum), lum > thr, thr <= LIGHT_ROCK_L[zones.LIMESTONE])  # no brightness: by LITH
+    cls[rock] = np.where(light[rock], ROCK_LIGHT, ROCK_DARK)
 
     if "CNPY" in layers:
         cls[layers["CNPY"] > CANOPY_M] = TREE
@@ -402,6 +406,7 @@ def gmat_columns(pix: Pixels, layers: dict[str, np.ndarray], spans: dict | None 
     cls[cls == GREY] = UNKNOWN  # cannot happen; keeps the nibble in range
 
     tone = np.zeros(cls.shape, dtype="u1")
+    tone[:] = TONE_UNKNOWN
     lumf = np.nan_to_num(lum, nan=-1.0)
     for c, (lo, hi) in TONE_RANGE.items():
         m = (cls == c) & (lumf >= 0)
@@ -424,13 +429,10 @@ def _services(cfg: Config) -> tuple[OrthoIndex, Pins]:
 
 
 def read_ortho_item(cfg: Config, item: str) -> np.ndarray:
-    """RGB of an ortho item; unless keepRaw, a COG this call had to download is deleted again."""
-    path = cache_path(cfg, ortho_href(item))
-    present = path.exists()
-    rgb = read_ortho(fetch(cfg, ortho_href(item)))
-    if not present and not cfg.keep_raw:
-        path.unlink(missing_ok=True)
-    return rgb
+    """RGB of an ortho item. The 2 m COGs are always kept (~160 KB/km², ~6.6 GB for CH), even with keepRaw off:
+    each tile is read by the 9 cells around it, and deleting it after use would refetch it up to 9 times and race
+    with parallel workers reading it."""
+    return read_ortho(fetch(cfg, ortho_href(item)))
 
 
 class GmatBuilder:
