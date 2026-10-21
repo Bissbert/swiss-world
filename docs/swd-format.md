@@ -84,6 +84,7 @@ Layer blobs follow, in directory order.
 | `LITH` | no | `u8[1000·1000]` | Lithology class (GK500), see §6b |
 | `TOPO` | no | `u8[1000·1000]` | Terrain position, flow and wind bitfield, see §6b |
 | `HABT` | no | `u8[1000·1000]` | Mires and floodplains (BAFU inventories), see §6b |
+| `GMAT` | no | `u8[1000·1000]` | Ground material from the orthophoto (class + tone), see §6c |
 | `BSPN` | no | see §6 | Building column spans |
 
 ### Coverage index (not a cell)
@@ -292,6 +293,25 @@ Columns without ALTI data (abroad) are 0.
 
 Hochmoor type 4 (open water) is not marked; `WKND` covers it.
 
+## 6c. Ground material (`GMAT`)
+
+`u8[1000·1000]`, index `dz·1000 + dx`. Optional and additive like the §6b layers; absent reads as 0 everywhere.
+
+| Bits | Meaning |
+|---|---|
+| 0–3 | class: 0 unknown/no data, 1 tree canopy, 2 green grass/meadow, 3 dry or sparse grass (yellow/brown), 4 bare soil/field/path, 5 light rock (limestone, light grey), 6 dark rock (crystalline, schist, dark grey/brown), 7 scree/gravel/debris, 8 snow/firn/ice, 9 water, 10 sealed/built; 11–15 reserved |
+| 4–7 | tone 0–15: shadow-corrected surface brightness within the class (0 darkest, 15 lightest) |
+
+Source: SWISSIMAGE 10 cm (STAC `ch.swisstopo.swissimage-dop10`), its 2 m RGB asset `<item>_2_2056.tif` per 1 km tile, newest flight year, © swisstopo "Open use. Must provide the source". Its 500×500 grid is the swissALTI3D 2 m grid, so one photo pixel sets its 2×2 columns (class and tone). Pinned per tile like ALTI: `sources.ortho` and `sources.orthoNeighbours` (§7). A cell without an own photo tile has no `GMAT`.
+
+How it is derived (`sidecar/swissdata/gmat.py`):
+
+- Per tile: white balance from near-neutral pixels (gains within ±6 %), and the flight's sun azimuth/elevation fitted to the photo against the ALTI hillshade. Neighbouring flight years thereby meet without a colour seam.
+- Per pixel: luminance is divided by the illumination for that sun (cos i, plus a horizon ray-march for cast terrain shadows, 40 % skylight); shadowed pixels get a skylight colour correction. The class comes from shadow-invariant chromaticity (excess green, red–blue, saturation) and the corrected brightness. Snow counts only above the regional snow line (the mod's `ClimateLines.snowLine`); below it, and in shadows too dark to read, the pixel is unknown.
+- Coherence: a pixel with at most one 3×3 neighbour of its class takes the 3×3 majority, then unknown pixels take the most common class within 6 pixels (12 m). Everything reads at most 130 m of terrain and 16 m of photo around a pixel, so neighbouring cells agree at their edges.
+- Priors per column (after the filter): water (`WKND`) → 9; buildings (`BSPN`), sealed `SURF`, paved `OCLS` (roads, platforms, runways, parking) → 10; canopy `CNPY` > 3 m → 1; rail ballast → 7; grey ground → scree on TLM scree/gravel, glacier debris and slopes below 38°, else rock, light or dark by brightness against a threshold per `LITH` class; TLM glacier → 8 (dark debris on it → 7); anything still unknown follows `SURF`.
+- Tone: the 3×3-pixel mean of the corrected brightness, mapped from a fixed national range per class to 0–15.
+
 ## 7. `manifest.json` (store root, written by the sidecar only)
 
 ```json
@@ -317,6 +337,7 @@ Hochmoor type 4 (open water) is not marked; `WKND` covers it.
 Extra keys the sidecar writes:
 
 - `sources.altiNeighbours`: `{"E-N": itemId | null}`, the neighbouring ALTI tiles used for edge nodes. A rebuild needs them to reproduce identical edges.
+- `sources.ortho` / `sources.orthoNeighbours`: the SWISSIMAGE item of the cell's tile and of its 8 neighbours (`{"E-N": itemId | null}`) used for `GMAT` (§6c); `ortho` is null where no photo exists.
 - `cells.<key>.evicted`: an ISO timestamp, set when the file was evicted. The entry and its `sources` stay. A cell is **ready** only when the file exists **and** it has a manifest entry without `evicted`.
 
 - `sources.gwr`: the GWR snapshot used for the BTBL attributes, `gwr_<cantons>_<export date>`. This pin is **soft**: upstream keeps no old snapshots, so the sidecar archives each one it uses under `<store>/gwr/<id>.npz`. A rebuild uses the pinned snapshot while that archive exists; otherwise it uses the newest archived snapshot and records its id. Only GWR attributes (gwrCategory, gwrClass, gwrPeriod, floors) can change that way; geometry never does. It is the only soft pin.
