@@ -29,13 +29,8 @@ class WaterStageTest {
     }
 
     @Test
-    void bankOnLooseGroundIsGravelAndCornersNeverFall() {
-        var bank = WaterStage.natural(Blocks.SAND.defaultBlockState());
-        assertEquals(Blocks.GRAVEL.defaultBlockState(), bank);
-        // a step corner stands over water: no falling block there
-        assertFalse(WaterStage.rock(bank, true).getBlock() instanceof FallingBlock);
-        assertFalse(WaterStage.rock(bank, false).getBlock() instanceof FallingBlock);
-        assertEquals(Blocks.DIRT.defaultBlockState(), WaterStage.rock(Blocks.GRASS_BLOCK.defaultBlockState(), false));
+    void bankOnLooseGroundIsGravel() {
+        assertEquals(Blocks.GRAVEL.defaultBlockState(), WaterStage.natural(Blocks.SAND.defaultBlockState()));
     }
 
     @Test

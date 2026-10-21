@@ -6,6 +6,7 @@ import ch.bissbert.swissworld.SwissRuntime;
 import ch.bissbert.swissworld.cell.CellCache;
 import ch.bissbert.swissworld.cell.Coverage;
 import ch.bissbert.swissworld.cell.SwissCoords;
+import ch.bissbert.swissworld.gen.site.SitePlans;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -17,6 +18,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
+import net.minecraft.Util;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -150,6 +152,10 @@ public final class PlayerPrefetch {
                 st.ahead = List.of();
             }
             requestAhead(st, now);
+            if (v != null && Math.hypot(v[0], v[1]) >= MIN_AHEAD_SPEED) {
+                // the site plans of the tiles the view reaches next (mod-site2): their first chunks then find them made
+                SitePlans.prefetch(SwissRuntime.cells(), c, p.getX(), p.getZ(), v[0], -v[1], viewM, Util.backgroundExecutor());
+            }
         }
         STATES.keySet().retainAll(seen);
     }

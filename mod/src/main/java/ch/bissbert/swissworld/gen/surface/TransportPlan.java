@@ -49,6 +49,12 @@ public final class TransportPlan {
     private final ColumnGrid g;
     private final int[] roadHalf, railBase, railProfile, railNode, railLevel, floor, ceil, wet, gap, joins, flipped, low, sealed;
     private final int[][] thinned;
+    /** Memos: {@link #wayKind}, {@link #open} (0 unknown, 1 no, 2 yes), {@link #earthwork} (UNSET until asked). */
+    private final byte[] kinds, opens;
+    private final int[] earthworks;
+    /** {@link #earthwork}'s reach fields per {@link #EW_BLOCK} square block of the grid, computed on first use. */
+    private final java.util.concurrent.atomic.AtomicReferenceArray<int[][]> ewBlocks;
+    private final int ewBlocksPerRow;
 
     public TransportPlan(ColumnGrid g) {
         if (g.margin() < MARGIN) throw new IllegalArgumentException("grid margin " + g.margin() + " < " + MARGIN);
@@ -69,6 +75,12 @@ public final class TransportPlan {
         sealed = filled(n);
         thinned = new int[THIN.length][];
         for (int i = 0; i < THIN.length; i++) thinned[i] = filled(n);
+        kinds = new byte[n];
+        opens = new byte[n];
+        earthworks = filled(n);
+        int side = g.width() + 2 * g.margin();
+        ewBlocksPerRow = (side + EW_BLOCK - 1) / EW_BLOCK;
+        ewBlocks = new java.util.concurrent.atomic.AtomicReferenceArray<>(ewBlocksPerRow * ewBlocksPerRow);
     }
 
     private static int[] filled(int n) {
@@ -94,7 +106,29 @@ public final class TransportPlan {
     }
 
     public boolean road(int x, int z) {
-        return g.present(x, z) && roadClass(g.overlay(x, z)) && !drowned(x, z);
+        return (wayKind(x, z) & KIND_ROAD) != 0;
+    }
+
+    private static final int KIND_KNOWN = 1, KIND_ROAD = 2, KIND_RAIL = 4;
+
+    /**
+     * {@link #road} and {@link #railWay} of a column, memoized: almost every rule scans a window of columns for them. A
+     * pure function of the grid, so a racing duplicate write is harmless.
+     */
+    private int wayKind(int x, int z) {
+        int k = g.index(x, z);
+        int v = kinds[k];
+        if (v == 0) {
+            boolean dry = g.present(x, z) && !drowned(x, z);
+            int cls = dry ? g.overlay(x, z) : 0;
+            v = KIND_KNOWN;
+            if (dry && roadClass(cls)) v |= KIND_ROAD;
+            if (dry && (cls == OverlayPlan.RAIL_BED || cls == OverlayPlan.RACK_BED || OverlayPlan.railUnderBridge(g, x, z))) {
+                v |= KIND_RAIL;
+            }
+            kinds[k] = (byte) v;
+        }
+        return v;
     }
 
     /**
@@ -111,14 +145,11 @@ public final class TransportPlan {
 
     /** Rail bed (class 8, rack 9), or a rail centre under a road bridge. */
     public boolean railWay(int x, int z) {
-        if (!g.present(x, z)) return false;
-        int cls = g.overlay(x, z);
-        if (drowned(x, z)) return false;
-        return cls == OverlayPlan.RAIL_BED || cls == OverlayPlan.RACK_BED || OverlayPlan.railUnderBridge(g, x, z);
+        return (wayKind(x, z) & KIND_RAIL) != 0;
     }
 
     public boolean way(int x, int z) {
-        return road(x, z) || railWay(x, z);
+        return (wayKind(x, z) & (KIND_ROAD | KIND_RAIL)) != 0;
     }
 
     public boolean tunnel(int x, int z) {
@@ -130,8 +161,14 @@ public final class TransportPlan {
      * terrain is cut or filled to its deck.
      */
     public boolean open(int x, int z) {
-        return way(x, z) && !g.flag(x, z, ColumnGrid.TUNNEL) && !absorbed(x, z)
-                && (!g.flag(x, z, ColumnGrid.BRIDGE) || lowBridge(x, z));
+        int k = g.index(x, z);
+        int v = opens[k];
+        if (v == 0) {
+            boolean o = way(x, z) && !g.flag(x, z, ColumnGrid.TUNNEL) && !absorbed(x, z)
+                    && (!g.flag(x, z, ColumnGrid.BRIDGE) || lowBridge(x, z));
+            opens[k] = (byte) (v = o ? 2 : 1);
+        }
+        return v == 2;
     }
 
     /**
@@ -1121,20 +1158,43 @@ public final class TransportPlan {
      * lining columns are left alone.
      */
     public int earthwork(int x, int z) {
+        int k = g.index(x, z);
+        int v = earthworks[k];
+        if (v == UNSET) earthworks[k] = v = computeEarthwork(x, z);
+        return v;
+    }
+
+    private int computeEarthwork(int x, int z) {
         if (!g.present(x, z) || g.overlay(x, z) != 0 || g.flags(x, z) != 0 || g.hasBuilding(x, z)) return NONE;
         if (water(x, z) != NONE || structure(x, z)) return NONE;
-        int lo = Integer.MIN_VALUE, hi = Integer.MAX_VALUE, near = Integer.MAX_VALUE;
-        for (int j = -EARTHWORK_REACH; j <= EARTHWORK_REACH; j++) {
-            for (int i = -EARTHWORK_REACH; i <= EARTHWORK_REACH; i++) {
-                if (!open(x + i, z + j)) continue;
-                int k = Math.max(Math.abs(i), Math.abs(j));
-                int d = shoulderDeck(x + i, z + j);
-                lo = Math.max(lo, d - (k - 1));
-                hi = Math.min(hi, d + (k - 1));
-                near = Math.min(near, k);
+        // every open way column has overlay: none within the reach, no earthwork
+        int r = EARTHWORK_REACH;
+        if (!g.anyOverlay(x - r, z - r, x + r, z + r)) return NONE;
+        // lo = max(D - (k - 1)), hi = min(D + (k - 1)), near = min(k) over the open way columns within the reach
+        int lo, hi, near;
+        if (ewInside(x, z)) {
+            int[][] f = earthworkBlock(x, z);
+            int i = Math.floorMod(x - (g.areaMinX() - g.margin()), EW_BLOCK), j = Math.floorMod(z - (g.areaMinZ() - g.margin()), EW_BLOCK);
+            lo = f[0][j * EW_BLOCK + i];
+            hi = f[1][j * EW_BLOCK + i];
+            near = f[2][j * EW_BLOCK + i];
+        } else {
+            // near the grid's edge, outside the blocks' window: the plain scan
+            lo = EW_LOW;
+            hi = EW_HIGH;
+            near = EW_HIGH;
+            for (int j = -r; j <= r; j++) {
+                for (int i = -r; i <= r; i++) {
+                    if (!open(x + i, z + j)) continue;
+                    int k = Math.max(Math.abs(i), Math.abs(j));
+                    int d = shoulderDeck(x + i, z + j);
+                    lo = Math.max(lo, d - (k - 1));
+                    hi = Math.min(hi, d + (k - 1));
+                    near = Math.min(near, k);
+                }
             }
         }
-        if (lo == Integer.MIN_VALUE) return NONE;
+        if (near > EARTHWORK_REACH) return NONE;
         int top = g.top(x, z);
         int t = Math.max(Math.min(top, Math.max(lo, hi)), Math.min(lo, hi));
         // beyond the 1:1 slope the cut or fill eases back into the terrain, meeting it at the terrain's own slope, so
@@ -1147,6 +1207,131 @@ public final class TransportPlan {
         int ns = neighbourWet(x, z);
         if (ns != NONE) t = Math.max(t, ns);
         return t == top ? NONE : t;
+    }
+
+    /** Side of an {@link #earthwork} block: its fields are computed over the block plus {@link #EARTHWORK_REACH}. */
+    static final int EW_BLOCK = 32;
+    private static final int EW_LOW = Integer.MIN_VALUE / 4, EW_HIGH = Integer.MAX_VALUE / 4;
+
+    /** Column x lies where {@link #earthworkBlock}'s window holds its whole reach (MARGIN - EARTHWORK_REACH inside). */
+    private boolean ewInside(int x, int z) {
+        int sx = g.areaMinX() - g.margin(), sz = g.areaMinZ() - g.margin(), pad = MARGIN - EARTHWORK_REACH;
+        int last = g.width() + 2 * g.margin() - 1 - pad;
+        return x - sx >= pad && x - sx <= last && z - sz >= pad && z - sz <= last;
+    }
+
+    /**
+     * The reach fields of the block holding (x, z): for each of its columns lo, hi and near as the window scan over
+     * the open way columns within {@link #EARTHWORK_REACH} (Chebyshev) gives them, computed as EARTHWORK_REACH rounds of
+     * a 3 x 3 dilation (Chebyshev distance is the 8-neighbour step count, so a max-minus-step dilation of D + 1 is
+     * max(D + 1 - k) exactly). Same values as the scan, a fraction of the open() look-ups.
+     */
+    private int[][] earthworkBlock(int x, int z) {
+        int sx = g.areaMinX() - g.margin(), sz = g.areaMinZ() - g.margin();
+        int bi = Math.floorDiv(x - sx, EW_BLOCK), bj = Math.floorDiv(z - sz, EW_BLOCK);
+        int bk = bj * ewBlocksPerRow + bi;
+        int[][] f = ewBlocks.get(bk);
+        if (f != null) return f;
+        int bx0 = sx + bi * EW_BLOCK, bz0 = sz + bj * EW_BLOCK, r = EARTHWORK_REACH;
+        // the window of open() look-ups, kept where open() itself may look (a column asked for its earthwork lies at
+        // least MARGIN - EARTHWORK_REACH inside the grid, so its own window is always inside this one)
+        int pad = MARGIN - r;
+        int x0 = Math.max(bx0 - r, sx + pad), z0 = Math.max(bz0 - r, sz + pad);
+        int side = g.width() + 2 * g.margin();
+        int x1 = Math.min(bx0 + EW_BLOCK - 1 + r, sx + side - 1 - pad), z1 = Math.min(bz0 + EW_BLOCK - 1 + r, sz + side - 1 - pad);
+        int w = x1 - x0 + 1, h = z1 - z0 + 1;
+        int[] lo = new int[Math.max(0, w * h)], hi = new int[lo.length], near = new int[lo.length];
+        int ox0 = Integer.MAX_VALUE, oz0 = Integer.MAX_VALUE, ox1 = Integer.MIN_VALUE, oz1 = Integer.MIN_VALUE;
+        for (int j = 0; j < h; j++) {
+            for (int i = 0; i < w; i++) {
+                int p = j * w + i, qx = x0 + i, qz = z0 + j;
+                if (open(qx, qz)) {
+                    int d = shoulderDeck(qx, qz);
+                    lo[p] = d + 1;
+                    hi[p] = d - 1;
+                    near[p] = 0;
+                    ox0 = Math.min(ox0, i);
+                    ox1 = Math.max(ox1, i);
+                    oz0 = Math.min(oz0, j);
+                    oz1 = Math.max(oz1, j);
+                } else {
+                    lo[p] = EW_LOW;
+                    hi[p] = EW_HIGH;
+                    near[p] = EW_HIGH;
+                }
+            }
+        }
+        if (ox0 != Integer.MAX_VALUE) {
+            // only within the reach of the open columns' bounding box does anything change (a Chebyshev path between
+            // two columns stays in their bounding box)
+            int ri0 = Math.max(0, ox0 - r), ri1 = Math.min(w - 1, ox1 + r), rj0 = Math.max(0, oz0 - r), rj1 = Math.min(h - 1, oz1 + r);
+            int[][] tmp = new int[3][lo.length];
+            for (int step = 0; step < r; step++) dilate(lo, hi, near, tmp, w, ri0, ri1, rj0, rj1);
+        }
+        f = new int[3][EW_BLOCK * EW_BLOCK];
+        for (int j = 0; j < EW_BLOCK; j++) {
+            for (int i = 0; i < EW_BLOCK; i++) {
+                int qx = bx0 + i, qz = bz0 + j, p = j * EW_BLOCK + i;
+                if (qx < x0 || qx > x1 || qz < z0 || qz > z1) {
+                    f[0][p] = EW_LOW;
+                    f[1][p] = EW_HIGH;
+                    f[2][p] = EW_HIGH;
+                    continue;
+                }
+                int q = (qz - z0) * w + (qx - x0);
+                f[0][p] = lo[q];
+                f[1][p] = hi[q];
+                f[2][p] = near[q];
+            }
+        }
+        ewBlocks.compareAndSet(bk, null, f);
+        return ewBlocks.get(bk);
+    }
+
+    /**
+     * One round over columns [i0, i1] x [j0, j1] of a window w wide: lo = max(lo, max of its 3 x 3 neighbours - 1), hi
+     * and near = min(.., min of their 3 x 3 neighbours + 1); outside the range counts as nothing.
+     */
+    private static void dilate(int[] lo, int[] hi, int[] near, int[][] tmp, int w, int i0, int i1, int j0, int j1) {
+        int[] tl = tmp[0], th = tmp[1], tn = tmp[2];
+        for (int j = j0; j <= j1; j++) {
+            for (int i = i0; i <= i1; i++) {
+                int p = j * w + i;
+                int l = lo[p], u = hi[p], n = near[p];
+                if (i > i0) {
+                    l = Math.max(l, lo[p - 1]);
+                    u = Math.min(u, hi[p - 1]);
+                    n = Math.min(n, near[p - 1]);
+                }
+                if (i < i1) {
+                    l = Math.max(l, lo[p + 1]);
+                    u = Math.min(u, hi[p + 1]);
+                    n = Math.min(n, near[p + 1]);
+                }
+                tl[p] = l;
+                th[p] = u;
+                tn[p] = n;
+            }
+        }
+        for (int j = j0; j <= j1; j++) {
+            for (int i = i0; i <= i1; i++) {
+                int p = j * w + i;
+                int l = tl[p], u = th[p], n = tn[p];
+                if (j > j0) {
+                    l = Math.max(l, tl[p - w]);
+                    u = Math.min(u, th[p - w]);
+                    n = Math.min(n, tn[p - w]);
+                }
+                if (j < j1) {
+                    l = Math.max(l, tl[p + w]);
+                    u = Math.min(u, th[p + w]);
+                    n = Math.min(n, tn[p + w]);
+                }
+                lo[p] = Math.max(lo[p], l - 1);
+                hi[p] = Math.min(hi[p], u + 1);
+                near[p] = Math.min(near[p], n + 1);
+            }
+        }
     }
 
     // ---------------------------------------------------------------- tunnels

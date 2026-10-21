@@ -73,6 +73,81 @@ public final class SitePlans {
         });
     }
 
+    /** Seconds of travel the plans ahead of a moving player are started before its view reaches them. */
+    static final double PREFETCH_LEAD_S = 6;
+    /** Plans started per player and call at most (a call is once a second). */
+    static final int PREFETCH_MAX = 6;
+
+    /**
+     * Tiles (tx, tz) the view square of half-size {@code viewBlocks} reaches when its centre has moved {@link
+     * #PREFETCH_LEAD_S} seconds at (vx, vz) blocks/s from (x, z), and that it does not reach now: those its chunks will
+     * ask for next. Nearest to the projected centre first. Pure.
+     */
+    public static java.util.List<int[]> aheadTiles(double x, double z, double vx, double vz, int viewBlocks) {
+        double ax = x + vx * PREFETCH_LEAD_S, az = z + vz * PREFETCH_LEAD_S;
+        int r = viewBlocks;
+        int tx0 = SitePlan.tile((int) Math.floor(ax) - r), tx1 = SitePlan.tile((int) Math.floor(ax) + r);
+        int tz0 = SitePlan.tile((int) Math.floor(az) - r), tz1 = SitePlan.tile((int) Math.floor(az) + r);
+        int nx0 = SitePlan.tile((int) Math.floor(x) - r), nx1 = SitePlan.tile((int) Math.floor(x) + r);
+        int nz0 = SitePlan.tile((int) Math.floor(z) - r), nz1 = SitePlan.tile((int) Math.floor(z) + r);
+        java.util.List<int[]> out = new java.util.ArrayList<>();
+        for (int tz = tz0; tz <= tz1; tz++) {
+            for (int tx = tx0; tx <= tx1; tx++) {
+                if (tx >= nx0 && tx <= nx1 && tz >= nz0 && tz <= nz1) continue;
+                out.add(new int[] {tx, tz});
+            }
+        }
+        double cx = ax / SitePlan.TILE - 0.5, cz = az / SitePlan.TILE - 0.5;
+        out.sort(java.util.Comparator.<int[]>comparingDouble(t -> Math.hypot(t[0] - cx, t[1] - cz))
+                .thenComparingInt(t -> t[0]).thenComparingInt(t -> t[1]));
+        return out;
+    }
+
+    /**
+     * Starts the plans of {@link #aheadTiles} whose cells are all in memory or on disk (no cell is asked of the
+     * sidecar from here: the cell prefetch does that), so the first chunks of a tile find its plan done. At most
+     * {@link #PREFETCH_MAX} new plans. Never blocks; returns how many it started.
+     */
+    public static int prefetch(CellCache cache, SwissCoords coords, double x, double z, double vx, double vz,
+                               int viewBlocks, Executor exec) {
+        int started = 0;
+        for (int[] t : aheadTiles(x, z, vx, vz, viewBlocks)) {
+            if (started == PREFETCH_MAX) break;
+            if (planned(t[0], t[1]) || !local(cache, coords, tileBox(t[0], t[1]))) continue;
+            forColumn(cache, coords, t[0] * SitePlan.TILE, t[1] * SitePlan.TILE, exec);
+            started++;
+        }
+        return started;
+    }
+
+    /** Some plan of tile (tx, tz) is cached or being made. */
+    private static boolean planned(int tx, int tz) {
+        synchronized (PLANS) {
+            for (Key k : PLANS.keySet()) if (k.tx == tx && k.tz == tz) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Every cell under the box's corners is in memory or lies outside the coverage. One that is not yet is warmed (read
+     * from the store on the IO pool, if its file is there), so a later call finds it.
+     */
+    private static boolean local(CellCache cache, SwissCoords coords, int[] box) {
+        boolean all = true;
+        for (int x = box[0]; ; x = Math.min(box[2], x + 1000)) {
+            for (int z = box[1]; ; z = Math.min(box[3], z + 1000)) {
+                int e = SwissCoords.cellKm(coords.east(x)), n = SwissCoords.cellKm(coords.north(z));
+                if (cache.getIfPresent(e, n) == null && cache.coverageState(e, n) != ch.bissbert.swissworld.cell.Coverage.OUTSIDE) {
+                    cache.warm(e, n);
+                    all = false;
+                }
+                if (z == box[3]) break;
+            }
+            if (x == box[2]) break;
+        }
+        return all;
+    }
+
     private static void start(CompletableFuture<SitePlan> f, Key key, CellCache cache, SwissCoords coords,
                               Map<Long, CompletableFuture<CellCache.Result>> tile, Map<Long, SwdCell> cells, Executor exec) {
         Map<Long, CompletableFuture<CellCache.Result>> more = new HashMap<>(tile);

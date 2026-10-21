@@ -225,6 +225,25 @@ public record BuildingPlan(long gid, Style style, Columns cols, int storey, List
                     layFloors(flat);
                     door = findDoor();
                 }
+                if (door != null && (!traced || doorLevel == 3)) {
+                    // no door with a way out at this level (dug into a slope under a road, between neighbours), or only
+                    // one through a facade column (thin): raise the ground floor block by block while the roof leaves
+                    // room, and take the first with a proper one
+                    int base = floors.get(0), top = Math.min(ceiling - 3, roofRoom(ceiling));
+                    boolean found = false;
+                    for (int y = base + 1; y <= Math.min(base + RAISE, top) && !found; y++) {
+                        layFloors(y);
+                        Door d = findDoor();
+                        if (d != null && traced && doorLevel < 3) {
+                            door = d;
+                            found = true;
+                        }
+                    }
+                    if (!found) {
+                        layFloors(base);
+                        door = findDoor();
+                    }
+                }
                 wanted = floors.size();
                 // upper floors no stair or ladder reaches are dropped, leaving a taller top storey
                 while (floors.size() > 1 && (stairs = findStairs()) == null) floors.remove(floors.size() - 1);
@@ -263,7 +282,15 @@ public record BuildingPlan(long gid, Style style, Columns cols, int storey, List
          * with such a candidate wins, with the shortest path (a path of at most {@link #SHORT_PATH} cells wins at once).
          * If none has a path, the first candidate found is used anyway.
          */
+        /** Most blocks {@link #plan} raises the ground floor to give a door a way out. */
+        static final int RAISE = 6;
+        /** The last {@link #findDoor} found a door whose way out reaches the terrain. */
+        boolean traced;
+        /** The level of {@link #findDoor}'s rule the last door it found met (3: its inside cell is a facade column). */
+        int doorLevel;
+
         Door findDoor() {
+            traced = true;
             int y0 = floors.get(0);
             Dir first = doorSide();
             Dir[] sides = {first, first.cw().cw(), first.cw(), first.cw().cw().cw()};
@@ -272,11 +299,13 @@ public record BuildingPlan(long gid, Style style, Columns cols, int storey, List
             Door fallback = null;
             boolean fallbackBlocked = false;
             Door lastResort = null;
+            boolean lastResortBlocked = false;
             Door walled = null; // has a path to the terrain, but it ends in a pocket
             Door sunkenBest = null; // a door found at level 0 or 1 whose landing lies in a hole: only if nothing better turns up
             int sunkenDepth = Integer.MAX_VALUE;
             for (int level = 0; level < 4; level++) {
                 if (level == 2 && sunkenBest != null) return sunkenBest;
+                doorLevel = level;
                 Door best = null;
                 int bestDepth = 0, bestRoad = 0;
                 for (int si = 0; si < 4; si++) {
@@ -317,7 +346,11 @@ public record BuildingPlan(long gid, Style style, Columns cols, int storey, List
                             sideLen = cost;
                             if (sideLen <= SHORT_PATH) break;
                         } else if (level == 3) { // the inside cell is a wall itself: only if nothing else works
-                            if (lastResort == null) lastResort = d;
+                            boolean blocked = terrain.foreign(d.x + d.out.dx, d.z + d.out.dz, gid);
+                            if (lastResort == null || lastResortBlocked && !blocked) {
+                                lastResort = d;
+                                lastResortBlocked = blocked;
+                            }
                         } else if (t != null && walled == null) {
                             walled = d;
                         } else if (t == null || t.length < sideLen) {
@@ -349,7 +382,14 @@ public record BuildingPlan(long gid, Style style, Columns cols, int storey, List
                 }
             }
             if (sunkenBest != null) return sunkenBest;
-            return walled != null ? walled : fallback != null ? fallback : lastResort;
+            if (walled != null) return walled;
+            traced = false;
+            // a door onto a neighbour's wall is the very last choice, after one in a wall of its own room
+            if (fallback != null && !fallbackBlocked) return fallback;
+            if (lastResort != null && !lastResortBlocked) return lastResort;
+            // every side opens onto a neighbour: a building inside others (a courtyard wing, a part mapped on its own)
+            // is reached through them, and a door onto their wall would be a door into stone
+            return enclosed() ? null : fallback != null ? fallback : lastResort;
         }
 
         /**
@@ -366,6 +406,19 @@ public record BuildingPlan(long gid, Style style, Columns cols, int storey, List
                 }
             }
             return worst;
+        }
+
+        /** No body column has a side onto open ground (not its own body, not a neighbour's). */
+        boolean enclosed() {
+            for (int z = c.minZ; z <= c.maxZ; z++) {
+                for (int x = c.minX; x <= c.maxX; x++) {
+                    if (!c.body(x, z)) continue;
+                    for (Dir d : Dir.values()) {
+                        if (!c.body(x + d.dx, z + d.dz) && !terrain.foreign(x + d.dx, z + d.dz, gid)) return false;
+                    }
+                }
+            }
+            return true;
         }
 
         /** True if the cell outside the door has a wall of this building or a neighbour on either side: a pit rather than a forecourt. */

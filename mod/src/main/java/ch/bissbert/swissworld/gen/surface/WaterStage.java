@@ -19,13 +19,9 @@ public final class WaterStage implements GenStage {
     private static final BlockState WATER = Blocks.WATER.defaultBlockState();
     private static final BlockState FALLING = WATER.setValue(LiquidBlock.LEVEL, 8);
     private static final BlockState FLOWING = WATER.setValue(LiquidBlock.LEVEL, 1);
-    private static final BlockState LIP = WATER.setValue(LiquidBlock.LEVEL, 2);
-    private static final BlockState REED = Blocks.SUGAR_CANE.defaultBlockState();
-    private static final BlockState REED_BED = Blocks.SAND.defaultBlockState();
     private static final BlockState FILL = Blocks.DIRT.defaultBlockState();
     private static final BlockState BANK_TOP = Blocks.GRAVEL.defaultBlockState();
     private static final BlockState GRASS = Blocks.GRASS_BLOCK.defaultBlockState();
-    private static final BlockState ROCK = Blocks.MOSSY_COBBLESTONE.defaultBlockState();
     /** SURF classes of water and river gravel (docs/swd-format.md §4): what a bank should not copy. */
     private static final int SURF_LAKE = 7, SURF_RIVER = 8, SURF_GRAVEL = 15;
 
@@ -64,12 +60,6 @@ public final class WaterStage implements GenStage {
         return null;
     }
 
-    /** A step corner beside falling water: the ground's block, never one that falls (mossy rock where it would). */
-    static BlockState rock(BlockState ground, boolean top) {
-        if (ground == BANK_TOP) return ROCK;
-        return top ? ground : under(ground);
-    }
-
     @Override
     public void apply(GenContext ctx) {
         ChunkAccess chunk = ctx.chunk;
@@ -94,28 +84,14 @@ public final class WaterStage implements GenStage {
                     }
                 }
                 WaterPlan.Fill f = WaterPlan.fill(g, x, z);
-                if (f != null && f.reed()) {
-                    int s = f.sourceTop();
-                    for (int y = bottom; y < s - 1; y++) w.set(x, y, z, FILL);
-                    w.set(x, s - 1, z, REED_BED);
-                    w.set(x, s, z, REED);
+                if (f != null && f.pour()) {
+                    // a step's inner corner: falling water from its pit up to the flowing top, no source to turn
+                    for (int y = f.floor(); y < f.fallTop(); y++) w.set(x, y, z, FALLING);
                     w.set(x, f.fallTop(), z, FLOWING);
-                    continue;
-                }
-                if (f != null && f.cane()) {
-                    int s = f.sourceTop();
-                    for (int y = bottom; y < s; y++) w.set(x, y, z, FILL);
-                    w.set(x, s, z, REED_BED);
-                    for (int y = s + 1; y <= f.fallTop(); y++) w.set(x, y, z, REED);
                     continue;
                 }
                 if (f != null) {
                     for (int y = bottom; y <= f.sourceTop(); y++) w.set(x, y, z, WATER);
-                    if (f.lip()) w.set(x, f.sourceTop() + 1, z, LIP);
-                    if (f.rock()) {
-                        for (int y = f.sourceTop() + 1; y <= f.fallTop(); y++) w.set(x, y, z, rock(ground, y == f.fallTop()));
-                        continue;
-                    }
                     for (int y = f.sourceTop() + 1; y < f.fallTop(); y++) w.set(x, y, z, FALLING);
                     if (f.falls()) w.set(x, f.fallTop(), z, FLOWING);
                     continue;

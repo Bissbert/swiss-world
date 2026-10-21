@@ -81,26 +81,13 @@ final class Voxels {
         originalTop[c] = g.top(x, z);
         for (int y = y0; y <= ground; y++) put(x, y, z, B.SOLID, 0);
         WaterPlan.Fill f = WaterPlan.fill(g, x, z);
-        if (f != null && f.reed()) {
-            int s = f.sourceTop();
-            for (int y = ground + 1; y < s; y++) put(x, y, z, B.SOLID, 0);
-            put(x, s, z, B.CANE, 0);
+        if (f != null && f.pour()) {
+            for (int y = f.floor(); y < f.fallTop(); y++) put(x, y, z, B.FLOW, 8);
             put(x, f.fallTop(), z, B.FLOW, 1);
-        } else if (f != null && f.cane()) {
-            for (int y = ground + 1; y <= f.sourceTop(); y++) put(x, y, z, B.SOLID, 0);
-            for (int y = f.sourceTop() + 1; y <= f.fallTop(); y++) put(x, y, z, B.CANE, 0);
         } else if (f != null) {
             for (int y = ground + 1; y <= f.sourceTop(); y++) put(x, y, z, B.SOURCE, 0);
-            if (f.lip()) put(x, f.sourceTop() + 1, z, B.FLOW, 2);
-            if (f.rock()) {
-                for (int y = f.sourceTop() + 1; y <= f.fallTop(); y++) {
-                    put(x, y, z, B.SOLID, 0);
-                    if (in(x, y, z)) rock[idx(x, y, z)] = true;
-                }
-            } else {
-                for (int y = f.sourceTop() + 1; y < f.fallTop(); y++) put(x, y, z, B.FLOW, 8);
-                if (f.falls()) put(x, f.fallTop(), z, B.FLOW, 1);
-            }
+            for (int y = f.sourceTop() + 1; y < f.fallTop(); y++) put(x, y, z, B.FLOW, 8);
+            if (f.falls()) put(x, f.fallTop(), z, B.FLOW, 1);
         } else {
             for (int y = ground + 1; y <= g.top(x, z); y++) put(x, y, z, B.SOLID, 0);
         }

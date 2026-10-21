@@ -106,6 +106,12 @@ public record CellView(SwissCoords coords, GenContext.CellLookup cells) {
         return k >= 2 && k <= 7 && (c.overlayFlags(dx, dz) & 3) == 0;
     }
 
+    /** True if the cell data has water on column (x, z) (lake, river, stream, pond). */
+    public boolean wet(int x, int z) {
+        SwdCell c = cell(x, z);
+        return c != null && c.waterKind(SwissCoords.dx(coords.east(x)), SwissCoords.dz(coords.north(z))) != 0;
+    }
+
     /** Block x of a cell-relative column dx. */
     public int blockX(SwdCell cell, int dx) {
         return (int) ((long) cell.eKm() * 1000 - coords.e0()) + dx;

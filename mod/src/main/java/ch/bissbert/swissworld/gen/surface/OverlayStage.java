@@ -56,7 +56,10 @@ public final class OverlayStage implements GenStage {
             for (int lz = 0; lz < 16; lz++) {
                 int x = x0 + lx, z = z0 + lz;
                 BlockState top = chunk.getBlockState(pos.set(x, g.present(x, z) ? g.top(x, z) : 0, z));
-                boolean done = t.build(x, z, (y, part) -> set(w, x, y, z, block(t, x, z, part, y, top)));
+                // no half slab on a door step: it would sit at the feet of whoever walks out
+                boolean step = site != null && site.covers(x, z) && site.doorstep(x, z);
+                boolean done = t.build(x, z, (y, part) -> set(w, x, y, z,
+                        step && part == TransportPlan.Part.SLAB ? AIR : block(t, x, z, part, y, top)));
                 if (!done) column(w, t, x, z, pos);
             }
         }

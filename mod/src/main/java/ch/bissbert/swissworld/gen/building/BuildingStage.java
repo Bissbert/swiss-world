@@ -28,7 +28,19 @@ public final class BuildingStage implements GenStage {
     public void apply(GenContext ctx) {
         CellView view = CellView.of(ctx);
         Put put = new Put(ctx.chunk, SiteWriter.of(ctx, SiteWriter.Stage.BUILDING));
-        for (BuildingPlan p : Buildings.near(view, put.minX(), put.minZ())) shell(p, put, view);
+        // the way out of a door reaches past Buildings.MARGIN: its steps and the eave lane after it, up to STEPS_REACH
+        for (BuildingPlan p : Buildings.near(view, put.minX(), put.minZ(), STEPS_REACH)) {
+            if (near(p, put, Buildings.MARGIN)) shell(p, put, view);
+            else if (p.door() != null) steps(p, Palette.of(p.style(), p.gid()), put, view);
+        }
+    }
+
+    /** Columns beyond the bbox the way out of a door touches: the path, the eave lane after it, the cut beside it. */
+    static final int STEPS_REACH = BuildingStage.MAX_RUN + 1 + 12 + 2;
+
+    private static boolean near(BuildingPlan p, Put put, int m) {
+        Columns c = p.cols();
+        return c.maxX >= put.minX() - m && c.minX <= put.minX() + 15 + m && c.maxZ >= put.minZ() - m && c.minZ <= put.minZ() + 15 + m;
     }
 
     static void shell(BuildingPlan p, Put put, CellView view) {
@@ -208,14 +220,17 @@ public final class BuildingStage implements GenStage {
         return Put.with(pal.roofStairs().defaultBlockState(), StairBlock.FACING, Put.mc(up));
     }
 
-    private static final int MAX_RUN = 24;
+    /** Longest way out of a door (cells). */
+    public static final int MAX_RUN = 24;
 
     /**
      * The walking levels (block y of the surface) of the path leading out of the door, cell by cell, ending on the
      * natural terrain; each cell differs from the last by at most one block. Null if it runs into the own building,
-     * leaves the loaded cells at once, or does not reach the terrain within {@link #MAX_RUN} cells.
+     * leaves the loaded cells at once, runs into water or into a way more than one block above or below it, or does not
+     * reach the terrain within {@link #MAX_RUN} cells. A way level with the path ends it (the path may be empty: the
+     * door opens onto the way).
      */
-    static int[] trace(Columns c, BuildingPlan.Door d, int y0, CellView view) {
+    public static int[] trace(Columns c, BuildingPlan.Door d, int y0, CellView view) {
         int[] ys = new int[MAX_RUN];
         int prev = y0;
         for (int i = 0; i < MAX_RUN; i++) {
@@ -224,6 +239,10 @@ public final class BuildingStage implements GenStage {
             double h = view.terrain(x, z);
             if (Double.isNaN(h)) return i == 0 ? null : Arrays.copyOf(ys, i);
             int g = (int) Math.floor(SwissCoords.toY(h));
+            // a way or water is not ours to cut or fill: the path ends on a way level with it, never runs into water
+            if (view.wet(x, z)) return null;
+            // (no step up right outside the door: the lintel leaves no room to jump)
+            if (view.way(x, z)) return (i == 0 ? g <= prev && g >= prev - 1 : Math.abs(g - prev) <= 1) ? Arrays.copyOf(ys, i) : null;
             int y = i == 0 ? y0 : Math.max(prev - 1, Math.min(prev + 1, g));
             ys[i] = y;
             if (y == g && calm(c, d, i + 1, g, view)) return Arrays.copyOf(ys, i + 1);
@@ -250,7 +269,11 @@ public final class BuildingStage implements GenStage {
      * Where the way out is cut into higher ground it is three wide with a retaining wall on both sides (a sunken
      * entrance), never a one block wide pit.
      */
-    static void steps(BuildingPlan p, Palette pal, Put put, CellView view) {
+    /** The way out of a door: the walking level of each path cell, and whether it is cut three wide into higher ground. */
+    public record Way(int[] ys, boolean cut) {}
+
+    /** The path {@link #steps} builds in front of the door of {@code p} (which must have one). */
+    public static Way way(BuildingPlan p, CellView view) {
         BuildingPlan.Door d = p.door();
         int y0 = p.floorY(0) + d.up();
         int[] ys = trace(p.cols(), d, y0, view);
@@ -260,11 +283,51 @@ public final class BuildingStage implements GenStage {
             double h = view.terrain(d.x() + d.out().dx * (i + 1), d.z() + d.out().dz * (i + 1));
             cut = !Double.isNaN(h) && (int) Math.floor(SwissCoords.toY(h)) > ys[i];
         }
+        return new Way(ys, cut);
+    }
+
+    /** Sees a column of a door's landing: its walking level y (block y of the surface). */
+    public interface LandingCell {
+        void at(int x, int z, int y);
+    }
+
+    /**
+     * Every column the way out of {@code p}'s door builds on (the landing, its steps, a cut three wide), with its
+     * walking level: what the site plan claims as LANDING. Then, with y = {@link Integer#MIN_VALUE}, the way column the
+     * path ends on, if it ends on one (the door step: no half slab there).
+     */
+    public static void landing(BuildingPlan p, CellView view, LandingCell out) {
+        BuildingPlan.Door d = p.door();
+        Way way = way(p, view);
+        int[] ys = way.ys();
+        Dir side = d.out().cw();
+        for (int w = way.cut() ? -1 : 0; w <= (way.cut() ? 1 : 0); w++) {
+            for (int i = 0; i < ys.length; i++) {
+                int x = d.x() + d.out().dx * (i + 1) + side.dx * w, z = d.z() + d.out().dz * (i + 1) + side.dz * w;
+                if (onPath(p, view, x, z, w)) out.at(x, z, ys[i]);
+            }
+        }
+        int ex = d.x() + d.out().dx * (ys.length + 1), ez = d.z() + d.out().dz * (ys.length + 1);
+        if (view.way(ex, ez)) out.at(ex, ez, Integer.MIN_VALUE);
+    }
+
+    /** The path builds on column (x, z), {@code w} cells beside its middle line. */
+    private static boolean onPath(BuildingPlan p, CellView view, int x, int z, int w) {
+        if (Double.isNaN(view.terrain(x, z)) || view.foreign(x, z, p.gid())) return false;
+        return w == 0 || p.cols().state(x, z) != Columns.BODY && !view.way(x, z) && !view.wet(x, z);
+    }
+
+    static void steps(BuildingPlan p, Palette pal, Put put, CellView view) {
+        BuildingPlan.Door d = p.door();
+        int y0 = p.floorY(0) + d.up();
+        Way way = way(p, view);
+        int[] ys = way.ys();
+        boolean cut = way.cut();
         Dir side = d.out().cw();
         for (int w = cut ? -1 : 0; w <= (cut ? 1 : 0); w++) {
             for (int i = 0; i < ys.length; i++) {
                 int x = d.x() + d.out().dx * (i + 1) + side.dx * w, z = d.z() + d.out().dz * (i + 1) + side.dz * w;
-                if (w != 0 && (p.cols().state(x, z) == Columns.BODY || view.foreign(x, z, p.gid()))) continue;
+                if (!onPath(p, view, x, z, w)) continue;
                 stepCell(p, pal, put, view, x, z, ys[i], i == 0 ? y0 : ys[i - 1], i, d.out());
             }
         }
@@ -273,7 +336,7 @@ public final class BuildingStage implements GenStage {
                 for (int i = 0; i < ys.length; i++) {
                     int x = d.x() + d.out().dx * (i + 1) + side.dx * w, z = d.z() + d.out().dz * (i + 1) + side.dz * w;
                     double h = view.terrain(x, z);
-                    if (Double.isNaN(h) || p.cols().state(x, z) == Columns.BODY || view.foreign(x, z, p.gid())) continue;
+                    if (Double.isNaN(h) || p.cols().state(x, z) == Columns.BODY || view.foreign(x, z, p.gid()) || view.way(x, z) || view.wet(x, z)) continue;
                     int ground = (int) Math.floor(SwissCoords.toY(h));
                     // the face of the cut: the retaining wall, under the grass on top
                     for (int a = ys[i] + 1; a < ground; a++) put.set(x, a, z, pal.foundation().defaultBlockState());
@@ -322,7 +385,8 @@ public final class BuildingStage implements GenStage {
         int n = 0;
         while (n < 8) {
             int x = d.x() + d.out().dx * (n + 1), z = d.z() + d.out().dz * (n + 1);
-            if (p.cols().state(x, z) == Columns.BODY || view.foreign(x, z, p.gid()) || Double.isNaN(view.terrain(x, z))) break;
+            if (p.cols().state(x, z) == Columns.BODY || view.foreign(x, z, p.gid()) || Double.isNaN(view.terrain(x, z))
+                    || view.way(x, z) || view.wet(x, z)) break;
             n++;
         }
         int[] ys = new int[Math.max(n, 1)];

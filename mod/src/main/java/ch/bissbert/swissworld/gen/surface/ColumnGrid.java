@@ -42,7 +42,7 @@ public final class ColumnGrid {
     /** A home view: only this cell's data, see {@link #home}. Null for the chunk grid. */
     private final SwdCell homeCell;
     /** Columns sampled so far in a lazy view; null when all are sampled up front. */
-    private final boolean[] sampled;
+    private final java.util.concurrent.atomic.AtomicIntegerArray sampled;
     private final Map<Long, ColumnGrid> homes = new HashMap<>();
     private final boolean[] present, spans;
     private final int[] ground, source, kind, surf, ocls, oflg, oelv;
@@ -71,11 +71,48 @@ public final class ColumnGrid {
      */
     public ColumnGrid(SwissCoords coords, Cells cells, int minX, int minZ, int width, int margin) {
         this(coords, cells, minX - margin, minZ - margin, width, margin, null);
-        for (int i = 0; i < size; i++) {
-            for (int j = 0; j < size; j++) {
-                sample(cells, this.minX + i, this.minZ + j, j * size + i);
+        // row by row, the cell looked up once per km it crosses (a lookup is a hash map get)
+        SwdCell last = null;
+        long lastKey = Long.MIN_VALUE;
+        for (int j = 0; j < size; j++) {
+            int z = this.minZ + j;
+            long nKm = SwissCoords.cellKm(coords.north(z));
+            for (int i = 0; i < size; i++) {
+                int x = this.minX + i;
+                long key = ((long) SwissCoords.cellKm(coords.east(x)) << 32) ^ (nKm & 0xffffffffL);
+                if (key != lastKey) {
+                    last = cells.at(x, z);
+                    lastKey = key;
+                }
+                sample(last, x, z, j * size + i);
             }
         }
+        overlaySums = new int[(size + 1) * (size + 1)];
+        for (int j = 0; j < size; j++) {
+            int run = 0;
+            for (int i = 0; i < size; i++) {
+                if (ocls[j * size + i] != 0) run++;
+                overlaySums[(j + 1) * (size + 1) + i + 1] = overlaySums[j * (size + 1) + i + 1] + run;
+            }
+        }
+    }
+
+    /** Prefix sums of overlay != 0 over the sampled square ((size + 1)², row major), or null in a lazy {@link #home} view. */
+    private int[] overlaySums;
+
+    /**
+     * Some column of the box [x0, x1] x [z0, z1] (clipped to the sampled square) has overlay. Always true in a
+     * {@link #home} view, which samples on demand. Every way, bore, dam and bridge needs overlay, so a box without any
+     * has none of them.
+     */
+    public boolean anyOverlay(int x0, int z0, int x1, int z1) {
+        int[] s = overlaySums;
+        if (s == null) return true;
+        int i0 = Math.max(0, x0 - minX), j0 = Math.max(0, z0 - minZ);
+        int i1 = Math.min(size - 1, x1 - minX), j1 = Math.min(size - 1, z1 - minZ);
+        if (i0 > i1 || j0 > j1) return false;
+        int w = size + 1;
+        return s[(j1 + 1) * w + i1 + 1] - s[j0 * w + i1 + 1] - s[(j1 + 1) * w + i0] + s[j0 * w + i0] != 0;
     }
 
     private ColumnGrid(SwissCoords coords, Cells cells, int minX, int minZ, int width, int margin, SwdCell homeCell) {
@@ -88,7 +125,7 @@ public final class ColumnGrid {
         this.size = width + 2 * margin;
         this.homeCell = homeCell;
         int n = size * size;
-        sampled = homeCell == null ? null : new boolean[n];
+        sampled = homeCell == null ? null : new java.util.concurrent.atomic.AtomicIntegerArray(n);
         present = new boolean[n];
         spans = new boolean[n];
         ground = new int[n];
@@ -157,9 +194,8 @@ public final class ColumnGrid {
         return minZ + margin;
     }
 
-    private void sample(Cells cells, int x, int z, int k) {
+    private void sample(SwdCell cell, int x, int z, int k) {
         long e = coords.east(x), nn = coords.north(z);
-        SwdCell cell = cells.at(x, z);
         boolean away = false;
         if (homeCell != null) {
             long e0 = homeCell.eKm() * 1000L, n0 = homeCell.nKm() * 1000L;
@@ -210,11 +246,12 @@ public final class ColumnGrid {
             throw new IndexOutOfBoundsException("column " + x + "," + z + " outside the sampled margin");
         }
         int k = j * size + i;
-        if (sampled != null) {
+        if (sampled != null && sampled.get(k) == 0) {
+            // the flag is set (a volatile write) after the column's data, so a reader that sees it sees the data
             synchronized (sampled) {
-                if (!sampled[k]) {
-                    sample(cells, x, z, k);
-                    sampled[k] = true;
+                if (sampled.get(k) == 0) {
+                    sample(cells.at(x, z), x, z, k);
+                    sampled.set(k, 1);
                 }
             }
         }
