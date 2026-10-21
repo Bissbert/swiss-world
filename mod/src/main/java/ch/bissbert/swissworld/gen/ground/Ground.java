@@ -69,4 +69,9 @@ public interface Ground {
     default int habitat(int x, int z) {
         return -1;
     }
+
+    /** Raw GMAT byte (orthophoto ground material, swd-format §6c: class bits 0-3, tone bits 4-7), 0 = unknown. */
+    default int gmat(int x, int z) {
+        return 0;
+    }
 }

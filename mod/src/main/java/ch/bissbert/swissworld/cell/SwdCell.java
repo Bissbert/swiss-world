@@ -27,7 +27,8 @@ public record SwdCell(
         byte[] regn,
         byte[] lith,
         byte[] topo,
-        byte[] habt) {
+        byte[] habt,
+        byte[] gmat) {
 
     public static final int SIZE = 1000;
     public static final int TERR_N = 501;
@@ -36,6 +37,14 @@ public record SwdCell(
     public SwdCell(int eKm, int nKm, short[] terr, byte[] surf, short[] wlvl, byte[] wknd, byte[] ocls, short[] oelv,
                    byte[] oflg, byte[] insd, List<Building> buildings, Map<Integer, Span[]> spans) {
         this(eKm, nKm, terr, surf, wlvl, wknd, ocls, oelv, oflg, insd, buildings, spans, null, null);
+    }
+
+    /** Without the orthophoto ground material (cells from before GMAT, tests). */
+    public SwdCell(int eKm, int nKm, short[] terr, byte[] surf, short[] wlvl, byte[] wknd, byte[] ocls, short[] oelv,
+                   byte[] oflg, byte[] insd, List<Building> buildings, Map<Integer, Span[]> spans, byte[] cnpy,
+                   List<Tree> trees, byte[] regn, byte[] lith, byte[] topo, byte[] habt) {
+        this(eKm, nKm, terr, surf, wlvl, wknd, ocls, oelv, oflg, insd, buildings, spans, cnpy, trees, regn, lith, topo, habt,
+                null);
     }
 
     /** Without the zone inputs (cells from before REGN/LITH/TOPO/HABT, tests). */
@@ -50,6 +59,15 @@ public record SwdCell(
     public static final int REGION_JURA = 1, REGION_MITTELLAND = 2, REGION_ALPS_NORTH = 3, REGION_ALPS_WEST = 4,
             REGION_ALPS_EAST = 5, REGION_ALPS_SOUTH = 6;
     public static final int REGN_FILLED = 0x40;
+
+    // ---- GMAT (§6c): class bits 0-3, tone bits 4-7 (0 darkest .. 15 lightest)
+    public static final int GMAT_UNKNOWN = 0, GMAT_CANOPY = 1, GMAT_GRASS = 2, GMAT_DRY_GRASS = 3, GMAT_SOIL = 4,
+            GMAT_LIGHT_ROCK = 5, GMAT_DARK_ROCK = 6, GMAT_SCREE = 7, GMAT_SNOW = 8, GMAT_WATER = 9, GMAT_SEALED = 10;
+
+    /** Raw GMAT byte (0 = unknown without GMAT). */
+    public int gmat(int dx, int dz) {
+        return u8(gmat, dx, dz);
+    }
 
     // ---- LITH (§6b): class bits 0-2, 0x08 glacier (rock = nearest), 0x10 lake, detail bits 5-7
     public static final int LITH_UNKNOWN = 0, LITH_LIMESTONE = 1, LITH_CRYSTALLINE = 2, LITH_SCHIST = 3,

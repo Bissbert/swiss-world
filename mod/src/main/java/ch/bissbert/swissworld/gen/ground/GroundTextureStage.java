@@ -13,11 +13,13 @@ import net.minecraft.world.level.block.state.BlockState;
  * Dresses natural ground by zone ({@link GroundTexture}): runs after Loot, before Vegetation. Owner: mod-texture.
  * Touches only columns without water, building or surface overlay ({@link ZoneMap#natural}), and there only a top block
  * that an earlier stage left as plain ground (grass, dirt, coarse dirt, stone, gravel, mud), plus up to
- * {@link GroundTexture#UNDER} plain blocks below it. Decks, buildings, water, bridges and tunnels are never touched.
+ * {@link GroundTexture#UNDER} plain blocks below it (under a soil top, earth down the whole exposed riser). Decks, buildings, water, bridges and tunnels are never touched.
  */
 public final class GroundTextureStage implements GenStage {
     /** How far above and below the TERR top the real top may lie (banks, earthwork cuts and fills). */
     static final int SCAN = 16;
+    /** Deepest earth a soil column's riser gets (blocks below the top). */
+    static final int RISER = 16;
 
     @Override
     public void apply(GenContext ctx) {
@@ -62,9 +64,16 @@ public final class GroundTextureStage implements GenStage {
                 }
                 if (top == null) continue;
                 b.set(x, y, z, top.defaultBlockState());
-                for (int d = 1; d <= GroundTexture.UNDER; d++) {
+                // a soil top keeps earth down its whole riser: as deep as the column stands above its lowest neighbour
+                int depth = GroundTexture.UNDER;
+                if (GroundTexture.soil(top)) {
+                    int ground = ColumnGrid.y(zm.metres(x, z));
+                    depth = Math.max(depth, Math.min(RISER, zm.drop(x, z) + Math.max(0, y - ground) + 1));
+                }
+                for (int d = 1; d <= depth; d++) {
                     if (!plain(b.get(x, y - d, z).getBlock())) break;
-                    b.set(x, y - d, z, GroundTexture.under(top, d));
+                    b.set(x, y - d, z, d <= GroundTexture.UNDER ? GroundTexture.under(top, d)
+                            : GroundTexture.riser(zm.east(x), zm.north(z), y - d));
                 }
             }
         }
