@@ -146,7 +146,7 @@ Regenerate with `uv run --group dev python -I -m swissdata.tlm_preview 2646 1178
 - **Numbers (2026-10-21, 10 cores):**
   - Side files: rivers 28 s (346,932 parts, 10,997 legacy), trunk 1 s (3,786 parts), 315 MB RSS, once per extract. 29 legacy parts have a national inflow that would lower their cap without the legacy rule; none of their end levels changes.
   - Full pipeline (alti … overlay), first cell 2646_1178: 12.1 s → 7.9 s, peak RSS 863 → 677 MB (v2 code built the whole-extract network in each process: 1.2 s, +210 MB at v2 size).
-  - Private store clone: `--only-missing-tlm` selects 121 of 1,353 cells (55 with the dev guard on), rebuilt in 608 s with 2 workers. In game, 2685_1158 has andesite (minor road) blocks at 4 of 4 probed road columns and 0 of 8 off-road probes.
-  - Order fix: rebuilding the 1,287 in-box cells now gives 638 a different SURF (median 5,230 px) and 14 different OELV; stored cells stay as they are until rebuilt (`--bbox`/`--all`), which is optional.
+  - Private store clone: `--only-missing-tlm` selects 121 of 1,353 cells (55 with the dev guard on), rebuilt in 608 s with 2 workers. In game, 2685_1158 has andesite (minor road) blocks at 4 of 4 probed road columns; 2 off-road columns (8 y-levels) have none.
+  - Order fix: rebuilding the 1,287 in-box cells changes 638 of them: SURF in 624 (median 5,230 px), OELV in 14, OCLS/OFLG in 6; stored cells stay as they are until rebuilt (`--bbox`/`--all`), which is optional.
 - **Still test-box only:** GWR is `gwr.CANTONS = ("be",)` (buildings outside BE have no GWR attributes), bathymetry is `bathy.ITEMS` (3 lakes; others get the synthetic bed), and the dev guard (`stac.DEV_RANGES`) still refuses alti outside the dev area unless `SWISSDATA_DEV_BBOX=0`.
 
