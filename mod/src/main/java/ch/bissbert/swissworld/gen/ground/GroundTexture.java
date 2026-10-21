@@ -126,7 +126,7 @@ public final class GroundTexture {
     static double tone(long e, long n) {
         double raw = 0.6 * Noise.value(e, n, 56, SALT_TONE) + 0.3 * Noise.value(e, n, 17, SALT_TONE + 1)
                 + 0.1 * Noise.value(e, n, 5, SALT_TONE + 2);
-        return Landform.clamp(0.5 + (raw - 0.5) * 2.4, 0, 0.999);
+        return Landform.clamp(0.5 + (raw - 0.5) * 1.8, 0, 0.999);
     }
 
     /** Boundary noise 0..1 for the rock and scree edges: 12 m lobes with a 5 m fray. */
@@ -143,7 +143,7 @@ public final class GroundTexture {
     /** The zone's own scree share (loose ground) given whether a real cliff stands above. */
     static double screePrior(Zone z, boolean cliff, double convex) {
         return switch (z) {
-            case SCREE_CONE -> cliff ? 0.9 : 0.55;
+            case SCREE_CONE -> cliff ? 0.9 : 0.3;
             case DEBRIS_CHANNEL -> 0.75;
             case BOULDER_FIELD -> 0.8;
             case FOREFIELD -> 0.8;
@@ -168,7 +168,10 @@ public final class GroundTexture {
             case ROCK -> switch (zone) {
                 case KARST -> Math.max(Landform.cliffRock(slope, conv), Landform.clamp(0.75 + 0.5 * conv, 0, 1));
                 case SCHIST_SLOPE -> Landform.cliffRock(slope - 6, conv);
-                default -> Math.max(Landform.cliffRock(slope, conv), 0.62);
+                // a mapped cliff is mostly bare, but where the smoothed ground is gentle (a bench, a mislabelled step)
+                // it keeps turf; convex knobs stay bare lower down
+                default -> Math.max(Landform.cliffRock(slope, conv),
+                        0.62 * Landform.smooth((slope - 26 + 10 * Math.max(0, conv)) / 10));
             };
             case LOOSE -> zone == Zone.BOULDER_FIELD ? 0.25 + 0.3 * Math.max(0, conv) : Landform.cliffRock(slope - 12, conv);
             case SNOW -> zone == Zone.FIRN ? Landform.cliffRock(slope, conv) : Landform.softRock(slope, conv, false, belt);

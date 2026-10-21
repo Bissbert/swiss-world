@@ -109,6 +109,12 @@ class ZoneMapTest {
                             assertEquals(own.id(x, z), s.id(x, z), "zone at " + x + "," + z);
                             assertEquals(own.snow(x, z), s.snow(x, z), "snow at " + x + "," + z);
                             assertEquals(own.slope(x, z), s.slope(x, z), 1e-9);
+                            assertEquals(own.smoothSlope(x, z), s.smoothSlope(x, z), 1e-9);
+                            assertEquals(own.convexity(x, z), s.convexity(x, z), 1e-9);
+                            assertEquals(own.tpi(x, z), s.tpi(x, z), 1e-9);
+                            assertEquals(own.cliffDist(x, z), s.cliffDist(x, z), "cliff distance at " + x + "," + z);
+                            assertEquals(own.drop(x, z), s.drop(x, z), "drop at " + x + "," + z);
+                            assertEquals(GroundTexture.top(own, x, z), GroundTexture.top(s, x, z), "texture at " + x + "," + z);
                         }
                     }
                 }

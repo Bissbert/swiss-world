@@ -114,18 +114,18 @@ dry grass, bare soil, rock, scree:
    - convex = clamp((convexity + 0.12·tpi) / 1.2, −1, 1).
    - Soft zones: rockiness = smoothstep((slope − from) / 20), from = 32 (37 in forest), −3 alpine/nival, −9·convex on
      ribs, +6·|convex| in hollows, never below 26 → **no rock below 26°**, meadows stay grass to ~38–40°.
-   - Cliff zones: from = 30 − 10·convex⁺ + 8·convex⁻ (≥ 16), width 18, at least 0.62 (benches and gullies of a face
-     can keep turf or scree). KARST: max(that, 0.75 + 0.5·convex). SCHIST_SLOPE: 6° later.
+   - Cliff zones: from = 30 − 10·convex⁺ + 8·convex⁻ (≥ 16), width 18, at least 0.62·smoothstep((slope − 26 +
+     10·convex⁺) / 10) — a mapped cliff on gentle smoothed ground (bench, mislabelled step) keeps turf. KARST: max(that, 0.75 + 0.5·convex). SCHIST_SLOPE: 6° later.
    - Scree: cone below a real cliff (1 − dist/20, weaker on the flat), steep gullies (convex < −0.3 and > 24°; 0.85 at
      subalpine and above, 0.45 below), thin alpine/nival soil (0.35 / 0.6 from 22°), zone priors (SCREE_CONE 0.9 under
-     a real cliff else 0.55, BOULDER_FIELD 0.8, FOREFIELD 0.8, DEBRIS_CHANNEL 0.75, MORAINE 0.45 + 0.25·convex, FIRN
+     a real cliff else 0.3, BOULDER_FIELD 0.8, FOREFIELD 0.8, DEBRIS_CHANNEL 0.75, MORAINE 0.45 + 0.25·convex, FIRN
      0.6, SCHIST_SLOPE 0.35). Forest × 0.4.
    - Rock zones whose class is soil get turf by belt (alpine turf at alpine/nival, else alpine pasture).
 3. Tended zones (garden, orchard, vineyard, arable, sports) turn rock/scree into an embankment: coarse dirt 50,
    cobble 25, gravel 25.
 
 **Families** (ordered dark → light; `tone` picks along the list: 0.6·value(56 m) + 0.3·value(17 m) + 0.1·value(5 m),
-stretched ×2.4, plus ±0.15 patch grain, so a face shades between neighbouring greys in large smooth patches):
+stretched ×1.8, plus ±0.15 patch grain, so a face shades between neighbouring greys in large smooth patches):
 
 | Lithology | Rock | Scree |
 |---|---|---|
@@ -292,10 +292,13 @@ carried rock and gravel as 8–24 % speckle, and the crystalline palette had 15 
 ### mod-texture2 (landform texture)
 
 - ms/chunk, zones + texture/snow, 256×256 m, best of 5 warm rounds (`TexturePerfTest`, `SWISSWORLD_PERF=1`),
-  before → after: Interlaken 0.73 → 0.55, Innertkirchen 0.89 → 0.77, Faulhorn 0.76 → 0.65, Grimsel 0.53 → 0.57.
-  Run-to-run noise is about ±0.15; the landform fields cost < 0.1 ms/chunk.
+  before → after (different sessions, run-to-run noise about ±0.15): Interlaken 0.73 → 0.42, Innertkirchen
+  0.89 → 0.77, Faulhorn 0.76 → 0.62, Grimsel 0.53 → 0.78. Well inside the +1 ms budget.
 - `TexturePreviewTest` (`SWISSWORLD_PREVIEWS=<dir> SWISSWORLD_PREVIEW_TAG=before|after`): rock tops % of ground /
-  of soft ground, before → after: screenshot spot 64.6/51.6 → 61.7/41.4 (granite 9.1 → 0), Harder Kulm 14.5/11.2 →
-  8.2/4.7, Innertkirchen flank 7.1/4.1 → 5.7/2.5, Faulhorn 48.2/25.6 → 37.1/10.4, Grimsel 54.1/22.1 → 44.0/10.2,
-  Oberaar 19.6 → 19.9. Lone rock tops in soil below 25°: ≤ 18 per 50,000 columns. Stone in soil step faces: 0.
+  of soft ground, before → after: screenshot spot 64.6/51.6 → 56.8/40.0 (granite 9.1 → 0), Harder Kulm 14.5/11.2 →
+  8.1/4.6, Innertkirchen flank 7.1/4.1 → 5.6/2.4, Faulhorn 48.2/25.6 → 32.1/10.6, Grimsel 54.1/22.1 → 30.4/9.7,
+  Oberaar 19.6 → 18.2. Lone rock tops in soil below 25°: ≤ 27 per 65,000 columns.
+- At the screenshot spot the mapped cliff zones really are steep: of 45,900 cliff columns 92 % sit at 40–70° smoothed
+  slope, so the remaining grey there is legitimate face; 71 % of SCREE_CONE columns had no real cliff above (prior
+  now 0.3). Stone in soil step faces: 0.
 - Previews: `.data-cache/previews/texture2/<area>-{before,after}-{top,oblique}.png`.
