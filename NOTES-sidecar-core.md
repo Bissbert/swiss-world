@@ -386,6 +386,5 @@ Profile of cold cell builds (private store, raw cache cloned; harness `sidecar/b
 - `fetch.py` has one keep-alive client, at most 4 requests in flight process-wide (`MAX_CONCURRENT`), and
   `prefetch(cfg, urls)` downloads missing tiles/sheets in parallel; alti, GMAT and buildings call it first.
 - `BuildQueue`: with >= 2 workers prefetch builds hold at most workers - 1, so "now" starts at once.
-- Two build threads in one process do not add throughput (GIL; measured 5.3 s/cell with 2 workers vs 4.4 s
-  sequentially). Real parallelism needs one process per worker (see rebuild.py's pool).
+- Two build threads in one process give no clear extra throughput (GIL; 5 cells in 26.5 s with 2 workers, similar to the sequential sum). Real parallelism needs one process per worker (rebuild.py's pool); the 4-request cap is per process, so rebuild.py splits it across workers (`fetch.set_process_limit`).
 - Check any change with `bench/run_scenario.sh` + `bench/check_identity.py` (cell files must stay identical).

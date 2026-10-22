@@ -49,7 +49,16 @@ STATS = UpstreamStats()
 MAX_CONCURRENT = 4  # swisstopo politeness: never more than this many requests in flight, whatever the callers do
 _http_slots = threading.BoundedSemaphore(MAX_CONCURRENT)
 _client: httpx.Client | None = None
+_limit = MAX_CONCURRENT
 _client_lock = threading.Lock()
+
+
+def set_process_limit(n: int) -> None:
+    """Caps this process's in-flight requests at `n` (1..MAX_CONCURRENT). Pool workers call it first thing, so that
+    all processes together stay within MAX_CONCURRENT. Must run before the first request."""
+    global _http_slots, _limit
+    _limit = max(1, min(n, MAX_CONCURRENT))
+    _http_slots = threading.BoundedSemaphore(_limit)
 
 
 def _http() -> httpx.Client:
@@ -59,8 +68,8 @@ def _http() -> httpx.Client:
         if _client is None:
             _client = httpx.Client(headers={"User-Agent": USER_AGENT}, timeout=httpx.Timeout(120, connect=30),
                                    follow_redirects=True,
-                                   limits=httpx.Limits(max_connections=MAX_CONCURRENT,
-                                                       max_keepalive_connections=MAX_CONCURRENT))
+                                   limits=httpx.Limits(max_connections=_limit,
+                                                       max_keepalive_connections=_limit))
         return _client
 
 
