@@ -29,7 +29,7 @@ import numpy as np
 
 from . import gwr, swd, voxel
 from .config import Config
-from .fetch import USER_AGENT, fetch
+from .fetch import USER_AGENT, fetch, prefetch
 
 COLLECTION = "ch.swisstopo.swissbuildings3d_3_0"
 STAC_ITEMS = f"https://data.geo.admin.ch/api/stac/v1/collections/{COLLECTION}/items"
@@ -351,6 +351,7 @@ class BuildingsBuilder:
             items = list(pinned["buildings"])
         else:
             items = find_sheets(e_km, n_km)
+        prefetch(cfg, [ASSET_URL.format(item=i) for i in items if not _cache_path(cfg, i).exists()])
         sheets = [load_sheet(cfg, item) for item in items]
         table, gwr_id = gwr.load_pinned(cfg, (pinned or {}).get("gwr"))
         blds, spans = cell_buildings(e_km, n_km, sheets, table)
