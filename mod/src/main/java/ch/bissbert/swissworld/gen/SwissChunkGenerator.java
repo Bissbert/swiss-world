@@ -124,12 +124,14 @@ public final class SwissChunkGenerator extends ChunkGenerator {
      */
     public void fill(ChunkAccess chunk, SwissCoords coords, SitePlan site, RandomState randomState) {
         long t0 = System.nanoTime();
+        long c0 = GenStats.cpu();
         GenContext ctx = new GenContext(chunk, coords, site::cell, site);
         if (getBiomeSource() instanceof SwissBiomeSource biomes) {
             chunk.fillBiomesFromNoise(biomes.resolver(ctx), randomState.sampler());
         }
         long t = System.nanoTime();
         GenStats.record(GenStats.BIOMES, t - t0);
+        GenStats.record(GenStats.CPU_BIOMES, GenStats.cpu() - c0);
         long traced = 0;
         for (int i = 0; i < PIPELINE.size(); i++) {
             GenStage stage = PIPELINE.get(i);
@@ -146,6 +148,7 @@ public final class SwissChunkGenerator extends ChunkGenerator {
             t = now;
         }
         long total = System.nanoTime() - t0 - traced;
+        GenStats.record(GenStats.CPU_CHUNK, GenStats.cpu() - c0);
         SwissRuntime.recordChunk(total);
         GenStats.chunk(total);
     }
@@ -226,5 +229,15 @@ public final class SwissChunkGenerator extends ChunkGenerator {
         SwissCoords c = SwissRuntime.coords();
         info.add("Swiss: E " + c.east(pos.getX()) + " N " + c.north(pos.getZ()) + " h " + Math.round(SwissCoords.toMetres(pos.getY())) + " m");
         info.add("Swiss " + GenStats.compact());
+    }
+
+    /** FEATURES step (ores, snow top layer): not part of {@link #fill}, so timed here ({@code features}, {@code cpu-features}). */
+    @Override
+    public void applyBiomeDecoration(net.minecraft.world.level.WorldGenLevel level, ChunkAccess chunk,
+                                     net.minecraft.world.level.StructureManager sm) {
+        long t0 = System.nanoTime(), c0 = GenStats.cpu();
+        super.applyBiomeDecoration(level, chunk, sm);
+        GenStats.record(GenStats.FEATURES, System.nanoTime() - t0);
+        GenStats.record(GenStats.CPU_FEATURES, GenStats.cpu() - c0);
     }
 }
