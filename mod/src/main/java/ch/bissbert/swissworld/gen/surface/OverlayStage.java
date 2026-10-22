@@ -101,7 +101,8 @@ public final class OverlayStage implements GenStage {
         int top = g.top(x, z), deck = g.deck(x, z);
 
         if (g.flag(x, z, ColumnGrid.DAM_BODY)) {
-            for (int y = g.ground(x, z) + 1; y < deck; y++) set(w, x, y, z, DAM_BODY);
+            // from the ground block itself: the shore's grass and sand would show as a ragged rim at the dam's foot
+            for (int y = g.ground(x, z); y < deck; y++) set(w, x, y, z, DAM_BODY);
         } else if (bridge) {
             set(w, x, deck - 1, z, BEAM);
             if (OverlayPlan.pier(g, x, z)) {
@@ -118,6 +119,24 @@ public final class OverlayStage implements GenStage {
         if (cls == 0) return;
         set(w, x, deck, z, surface(g, x, z, cls, deck));
         if (t.railing(x, z)) set(w, x, deck + 1, z, railing(t, x, z));
+        else if (parapet(g, x, z)) set(w, x, deck + 1, z, parapetBlock(g, x, z));
+    }
+
+    /** A dam crest column with open air beside it (no other way continues there): a parapet runs along the crest. */
+    private static boolean parapet(ColumnGrid g, int x, int z) {
+        if (g.overlay(x, z) != OverlayPlan.DAM_CREST || !g.flag(x, z, ColumnGrid.DAM_BODY)) return false;
+        return g.overlay(x + 1, z) == 0 || g.overlay(x - 1, z) == 0 || g.overlay(x, z + 1) == 0 || g.overlay(x, z - 1) == 0;
+    }
+
+    private static BlockState parapetBlock(ColumnGrid g, int x, int z) {
+        boolean n = parapet(g, x, z - 1), s = parapet(g, x, z + 1), e = parapet(g, x + 1, z), w = parapet(g, x - 1, z);
+        boolean straight = n && s && !e && !w || e && w && !n && !s;
+        return Blocks.STONE_BRICK_WALL.defaultBlockState()
+                .setValue(WallBlock.UP, !straight)
+                .setValue(WallBlock.NORTH_WALL, n ? WallSide.LOW : WallSide.NONE)
+                .setValue(WallBlock.SOUTH_WALL, s ? WallSide.LOW : WallSide.NONE)
+                .setValue(WallBlock.EAST_WALL, e ? WallSide.LOW : WallSide.NONE)
+                .setValue(WallBlock.WEST_WALL, w ? WallSide.LOW : WallSide.NONE);
     }
 
     /** A bore's floor under a way it took over: ballast in a rail tunnel, the road's surface in a road tunnel. */
