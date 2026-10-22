@@ -372,3 +372,20 @@ Tests: crowns at −6.25…+6.25 m from an E-W and an N-S seam with radii 2.5/4/
   3 trees in TTOP; expected.json has `cnpy` per probe column and a `trees` list. `./gradlew test --offline`:
   45 tests, 0 failures (1 skipped), so the Java readers ignore the new tags as specified.
 - New dependency: `scipy>=1.13` (ndimage, cKDTree).
+
+## Build speed (sidecar-speed branch)
+
+Profile of cold cell builds (private store, raw cache cloned; harness `sidecar/bench/`):
+- CPU, not the network, dominates a cold cell: 36-56 CPU-s for the first cell of a process (Interlaken), 4-10
+  CPU-s afterwards. Network was 5-17 s of thread time per cell at ~31 HTTP requests (not 97).
+- Fixed per process: `zones.shared_vectors` 10-17 s (shapefile parse + two nearest-fill grids). Now cached in
+  `$SWISSDATA_SCRATCH/zones/vectors.v1.npz` (keyed on pins, size and mtime; bump `_VECTORS_CACHE_VERSION` when
+  `load_vectors` or `Vectors` change). A restart or a rebuild worker pays ~2 s instead.
+- Per building sheet, once (scratch cache `buildings/*.v3.npz`): ~6 s CPU per sheet in fiona feature iteration
+  (1.3 M polygon objects) and voxelising. pyogrio cannot read the TIN geometries (type 1016), so no drop-in speedup.
+- `fetch.py` has one keep-alive client, at most 4 requests in flight process-wide (`MAX_CONCURRENT`), and
+  `prefetch(cfg, urls)` downloads missing tiles/sheets in parallel; alti, GMAT and buildings call it first.
+- `BuildQueue`: with >= 2 workers prefetch builds hold at most workers - 1, so "now" starts at once.
+- Two build threads in one process do not add throughput (GIL; measured 5.3 s/cell with 2 workers vs 4.4 s
+  sequentially). Real parallelism needs one process per worker (see rebuild.py's pool).
+- Check any change with `bench/run_scenario.sh` + `bench/check_identity.py` (cell files must stay identical).
