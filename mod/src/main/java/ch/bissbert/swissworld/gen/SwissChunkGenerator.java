@@ -122,12 +122,29 @@ public final class SwissChunkGenerator extends ChunkGenerator {
      * Biomes and the whole {@link #PIPELINE} for one chunk of the tile {@code site} plans; every cell any stage reads
      * is loaded with it. Any thread.
      */
+    /**
+     * The same as {@code chunk.fillBiomesFromNoise}, for biomes that do not depend on y: the lowest section is filled
+     * through the resolver and every other one gets a copy of its container (instead of 64 palette writes each).
+     * {@link DecoCheck} compares the result with the plain fill.
+     */
+    static void fillBiomes(ChunkAccess chunk, net.minecraft.world.level.biome.BiomeResolver resolver,
+                           net.minecraft.world.level.biome.Climate.Sampler sampler) {
+        net.minecraft.world.level.chunk.LevelChunkSection[] sections = chunk.getSections();
+        net.minecraft.world.level.ChunkPos pos = chunk.getPos();
+        int qx = net.minecraft.core.QuartPos.fromBlock(pos.getMinBlockX()), qz = net.minecraft.core.QuartPos.fromBlock(pos.getMinBlockZ());
+        sections[0].fillBiomesFromNoise(resolver, sampler, qx, net.minecraft.core.QuartPos.fromSection(chunk.getMinSection()), qz);
+        net.minecraft.world.level.chunk.PalettedContainerRO<net.minecraft.core.Holder<net.minecraft.world.level.biome.Biome>> first = sections[0].getBiomes();
+        for (int i = 1; i < sections.length; i++) {
+            sections[i].biomes = ((net.minecraft.world.level.chunk.PalettedContainer<net.minecraft.core.Holder<net.minecraft.world.level.biome.Biome>>) first).copy();
+        }
+    }
+
     public void fill(ChunkAccess chunk, SwissCoords coords, SitePlan site, RandomState randomState) {
         long t0 = System.nanoTime();
         long c0 = GenStats.cpu();
         GenContext ctx = new GenContext(chunk, coords, site::cell, site);
         if (getBiomeSource() instanceof SwissBiomeSource biomes) {
-            chunk.fillBiomesFromNoise(biomes.resolver(ctx), randomState.sampler());
+            fillBiomes(chunk, biomes.resolver(ctx), randomState.sampler());
         }
         long t = System.nanoTime();
         GenStats.record(GenStats.BIOMES, t - t0);

@@ -92,6 +92,7 @@ public final class DecoCheck {
         long t0 = System.nanoTime();
         try {
             ChunkAccess[][] sets = new ChunkAccess[3][];
+            int badBiomes = 0;
             int side = 2 * reach + 1;
             for (int s = 0; s < 3; s++) sets[s] = new ChunkAccess[side * side];
             for (int dz = -reach; dz <= reach; dz++) {
@@ -102,6 +103,21 @@ public final class DecoCheck {
                     if (site == null) {
                         src.sendFailure(Component.literal("DECOCHECK FAIL: no plan for chunk " + pos));
                         return 0;
+                    }
+                    {
+                        // the biome fill (one section + copies) against the plain per-section fill
+                        ProtoChunk plain = new ProtoChunk(pos, UpgradeData.EMPTY, level, level.registryAccess().registryOrThrow(Registries.BIOME), null);
+                        GenContext ctx = new GenContext(plain, coords, site::cell, site);
+                        plain.fillBiomesFromNoise(((SwissBiomeSource) gen.getBiomeSource()).resolver(ctx), level.getChunkSource().randomState().sampler());
+                        ProtoChunk fast = new ProtoChunk(pos, UpgradeData.EMPTY, level, level.registryAccess().registryOrThrow(Registries.BIOME), null);
+                        SwissChunkGenerator.fillBiomes(fast, ((SwissBiomeSource) gen.getBiomeSource()).resolver(new GenContext(fast, coords, site::cell, site)),
+                                level.getChunkSource().randomState().sampler());
+                        for (int si = 0; si < plain.getSections().length; si++) {
+                            for (int q = 0; q < 64; q++) {
+                                if (plain.getSections()[si].getNoiseBiome(q & 3, (q >> 4) & 3, (q >> 2) & 3)
+                                        != fast.getSections()[si].getNoiseBiome(q & 3, (q >> 4) & 3, (q >> 2) & 3)) badBiomes++;
+                            }
+                        }
                     }
                     for (int s = 0; s < 3; s++) {
                         ProtoChunk proto = new ProtoChunk(pos, UpgradeData.EMPTY, level, level.registryAccess().registryOrThrow(Registries.BIOME), null);
@@ -165,9 +181,9 @@ public final class DecoCheck {
                 }
             }
             String where = String.format(Locale.ROOT, "chunk %d,%d r=%d (%d decorated)", cx, cz, radius, decorated);
-            String line = String.format(Locale.ROOT, "%s: %d blocks differ, %d biome sets differ, decoration changed %d blocks (gen %.1fs, decorate x2 %.1fs, compare %.1fs)",
-                    where, diffs, badSets, changed, (gen0 - t0) / 1e9, (deco1 - gen0) / 1e9, (System.nanoTime() - deco1) / 1e9);
-            boolean ok = diffs == 0 && badSets == 0 && changed > 0;
+            String line = String.format(Locale.ROOT, "%s: %d blocks differ, %d biome sets differ, %d biome cells differ, decoration changed %d blocks (gen %.1fs, decorate x2 %.1fs, compare %.1fs)",
+                    where, diffs, badSets, badBiomes, changed, (gen0 - t0) / 1e9, (deco1 - gen0) / 1e9, (System.nanoTime() - deco1) / 1e9);
+            boolean ok = diffs == 0 && badSets == 0 && badBiomes == 0 && changed > 0;
             if (ok) {
                 src.sendSuccess(() -> Component.literal("DECOCHECK OK " + line), false);
             } else {
