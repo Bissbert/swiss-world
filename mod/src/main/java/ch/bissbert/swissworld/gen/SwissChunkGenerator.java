@@ -231,13 +231,26 @@ public final class SwissChunkGenerator extends ChunkGenerator {
         info.add("Swiss " + GenStats.compact());
     }
 
-    /** FEATURES step (ores, snow top layer): not part of {@link #fill}, so timed here ({@code features}, {@code cpu-features}). */
+    /** Run vanilla's own FEATURES step ({@code -Dswissworld.vanillaFeatures=true}), for A/B checks against {@link FastDecoration}. */
+    private static final boolean VANILLA_FEATURES = Boolean.getBoolean("swissworld.vanillaFeatures");
+
+    /**
+     * FEATURES step (ores, snow top layer): not part of {@link #fill}, so timed here ({@code features},
+     * {@code cpu-features}). Vanilla's code with a cheaper biome set, see {@link FastDecoration}.
+     */
     @Override
     public void applyBiomeDecoration(net.minecraft.world.level.WorldGenLevel level, ChunkAccess chunk,
                                      net.minecraft.world.level.StructureManager sm) {
         long t0 = System.nanoTime(), c0 = GenStats.cpu();
-        super.applyBiomeDecoration(level, chunk, sm);
+        if (VANILLA_FEATURES) super.applyBiomeDecoration(level, chunk, sm);
+        else FastDecoration.apply(this, level, chunk, sm);
         GenStats.record(GenStats.FEATURES, System.nanoTime() - t0);
         GenStats.record(GenStats.CPU_FEATURES, GenStats.cpu() - c0);
+    }
+
+    /** Vanilla's FEATURES step, whatever {@code -Dswissworld.vanillaFeatures} says (for {@code DecoCheck}). */
+    public void applyBiomeDecorationVanilla(net.minecraft.world.level.WorldGenLevel level, ChunkAccess chunk,
+                                            net.minecraft.world.level.StructureManager sm) {
+        super.applyBiomeDecoration(level, chunk, sm);
     }
 }
