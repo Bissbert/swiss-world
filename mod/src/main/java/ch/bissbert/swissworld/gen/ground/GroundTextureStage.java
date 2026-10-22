@@ -59,6 +59,8 @@ public final class GroundTextureStage implements GenStage {
                             && site.distanceTo(Claim.BUILDING, x, z) <= STATION;
                     top = yard ? GroundTexture.palette(Zone.INDUSTRIAL).pick(Noise.patch(zm.east(x), zm.north(z), GroundTexture.SALT_PATCH))
                             : GroundTexture.top(zm, x, z);
+                    // the trodden verge of a path is no strip along the steps of a cut or a bank beside a way
+                    if (c == Claim.EARTHWORK && top == Blocks.DIRT_PATH) top = Blocks.GRASS_BLOCK;
                 } else {
                     top = GroundTexture.top(zm, x, z);
                 }
