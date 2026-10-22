@@ -275,3 +275,24 @@ None. The real cells copied from the shared store (layers TERR/SURF/WLVL/WKND/OC
 - Sky/fog colours at real altitudes: the black horizon is fixed server-side (see above); still needs a visual client check.
 - The pack fast path is done (see above); the all-air-section idea was dropped.
 - Ores: ore veins (`ore_veins` noise) are not reproduced.
+
+## Chunk generation speed (branch gen-speed)
+
+- Measured with `tools/genbench.py` (headless server, bot flies `/swiss` arrival, three `goto` places twice, then a 3000-block flight at 30 m/s; view 12, 4 background threads, private store clone, sidecar port dead so only the store is used). Times are thread CPU (`cpu-*` in `/swiss admin stats`); wall times were inflated by other agents (load 10-170). Means over 10 527 chunks per run.
+
+  | Run | cpu-chunk (fill) | cpu-biomes | cpu-features | fill + features |
+  |---|---|---|---|---|
+  | base1 (e9ef7ba, instrumentation only) | 4.44 | 2.95 | 2.73 | 7.2 |
+  | base2 (same) | 3.87 | 2.53 | 2.29 | 6.2 |
+  | memo + fast features (after1) | 2.79 | 1.41 | 0.71 | 3.5 |
+  | memo + fast features (after2) | 2.85 | 1.41 | 0.68 | 3.5 |
+  | + biome container copy (final1) | 1.81 | 0.49 | 0.62 | 2.4 |
+  | + biome container copy (final2) | 2.06 | 0.56 | 0.73 | 2.8 |
+
+  (ms per chunk; cpu-chunk includes cpu-biomes, cpu-features is on top.) The memo alone is not measured separately (report: biomes 2.87 to 1.62 ms). Arrival times (command to 100 % of the 441-chunk circle) improved from 23-46 s (cold) / 10-29 s to 11-47 s / 6-9 s, but they are dominated by load and sidecar-less cell decode, so treat them as noise-level evidence; the CPU figures are the result.
+- `SwissBiomeSource.resolver` memoises 16 values per chunk (biomes are y-independent).
+- `FastDecoration` is vanilla's `applyBiomeDecoration` with one change: the biome set of the 3x3 chunks is collected from the lowest section only (254 sections x 64 entries before), valid because biomes do not depend on y. The structures-by-step map is cached per registry. It needs the access transformer on `featuresPerStep` and `generationSettingsGetter`. `-Dswissworld.vanillaFeatures=true` switches back to vanilla.
+- Block identity: `/swiss admin decocheck <lat> <lon> [chunks]` (and `tools/decocheck.sh`, which runs it for Interlaken, Grindelwald, Faulhorn and Grimsel and exits 1 on any difference) generates a 9x9 area three times in detached proto chunks, decorates one copy with vanilla and one with the fast path through real `WorldGenRegion`s in the same order, and compares every block state; it also checks the biome sets and the biome containers of the plain and the copied fill, and fails if decoration changed nothing. Result: 0 differences in all four areas (about 30 000 blocks changed by decoration each). Why a command: decoration order across neighbouring chunks is not deterministic between server runs (ore blobs overlap), so two separate worlds cannot be compared; one process with a fixed order can.
+- Biome container: `fillBiomes` fills section 0 and copies its `PalettedContainer` into the others (access transformer on `LevelChunkSection.biomes`); identical by the same command.
+- Distant Horizons (`compat/DistantHorizonsPause`): while `SwissCommands.PENDING` is not empty, `DhApi.Delayed.configs.worldGenerator().enableDistantWorldGeneration()` gets the API override false; when it empties (done, `/swiss back`, timeout, logout, dimension change, server stop) the previous API value is restored or the override cleared. The API override does not write `DistantHorizons.toml`. It is reflection, not compileOnly: the DH API jar is not in any repository we build from, and reflection keeps the build and a DH-less run independent of it. Not run against a real DH (needs a client; the user's client was off limits), so the first playtest with DH should check the log line "Distant Horizons distant generation paused" and that LODs resume after arrival.
+- Not done: parallel SitePlan and the baked ground layer (out of scope).
