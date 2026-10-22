@@ -227,12 +227,30 @@ public final class ColumnGrid {
         kind[k] = cell.waterKind(dx, dz);
         ocls[k] = cell.overlay(dx, dz);
         oflg[k] = cell.overlayFlags(dx, dz);
+        if (ocls[k] == PARKING && roofed(cell, dx, dz)) {
+            // a car park polygon under a building is its deck or hall, not paving cut into the hillside the hall stands on
+            ocls[k] = 0;
+            oflg[k] = 0;
+        }
         double o = cell.overlayElevation(dx, dz);
         if (!Double.isNaN(o)) {
             oelv[k] = y(o);
             overlayMetres[k] = o;
         }
         spans[k] = cell.spansAt(dx, dz) != null;
+    }
+
+    private static final int PARKING = 14;
+
+    /** A building other than an open one (OBJEKTART 11 open building, 12 canopy: they stand over their paving) has a span here. */
+    private static boolean roofed(SwdCell cell, int dx, int dz) {
+        SwdCell.Span[] sp = cell.spansAt(dx, dz);
+        if (sp == null || cell.buildings() == null) return false;
+        for (SwdCell.Span s : sp) {
+            int kind = cell.buildings().get(s.buildingIdx()).objektart();
+            if (kind != 11 && kind != 12) return true;
+        }
+        return false;
     }
 
     /** The block occupied by height h: a column is solid (or wet) up to this y inclusive. */

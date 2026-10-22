@@ -42,7 +42,8 @@ Milestone 1: WaterStage, OverlayStage, VegetationStage in `mod/src/main/java/ch/
   | 13 | grass |
 
 - Kerbs: a smooth stone slab on road classes 1–4 where bit3 is set.
-- Dams: bit4 fills the body with light grey concrete from the bed up to the deck.
+- Dams: bit4 fills the body with light grey concrete from the ground block (not above it: the shore's grass/sand rim showed at the foot) up to the deck. A stone-brick wall parapet runs along every crest column that has open air (overlay 0) beside it. The TLM footprint is the whole dam, so the crest is as wide as the polygon (Seeuferegg ~40 m); no sloped downstream face yet.
+- Car park polygons (OCLS 14) under a building are dropped in `ColumnGrid.sample` (`roofed`): they are the building's deck/hall, and paving them cut slab rings into the hillside under the Grimsel Hospiz garage and floated its roof. Mod-side only, no cell rebuild.
 - **Bridges (bit0):**
   - A stone brick beam under the deck.
   - Railings: a stone brick wall on a bridge column that has a neighbour with no overlay, but only where the deck goes on behind it (2 columns, or 1 on the east/south side) and alongside it. So decks 3+ wide get railings on both sides, 2-wide decks on the east/south side only, 1-wide decks and the stepped edges of diagonal decks none: in the real cells, narrow and diagonal footbridges were otherwise walled shut. The wall sides are set explicitly, so they look right without block updates. The bridge ends stay open.
