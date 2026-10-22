@@ -297,6 +297,7 @@ public final class SwissCommands {
      * started from. Progress shows on the action bar.
      */
     public static void tick(MinecraftServer server) {
+        ch.bissbert.swissworld.compat.DistantHorizonsPause.set(!PENDING.isEmpty());
         if (PENDING.isEmpty()) return;
         ServerLevel swiss = server.getLevel(SwissRegistries.SWITZERLAND);
         int now = server.getTickCount();
@@ -434,6 +435,7 @@ public final class SwissCommands {
     /** Server stopping: drop pending entries (their tickets go with the level). */
     public static void clear() {
         PENDING.clear();
+        ch.bissbert.swissworld.compat.DistantHorizonsPause.set(false);
     }
 
     private static int back(ServerPlayer p) {
