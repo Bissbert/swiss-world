@@ -93,7 +93,9 @@ class TransportPlanTest {
                 if (v.part(x, b, z) != TransportPlan.Part.TOP) continue;
                 for (int y = a + 1; y < b; y++) {
                     steps++;
-                    if (v.part(x, y, z) != TransportPlan.Part.SUBSOIL) walls.add(x + "," + y + "," + z + " face " + v.part(x, y, z));
+                    // the cut's first column beside the road is a stone-brick retaining wall (underpass look-fix)
+                    TransportPlan.Part pt = v.part(x, y, z);
+                    if (pt != TransportPlan.Part.SUBSOIL && !(x == 6 && pt == TransportPlan.Part.LINING)) walls.add(x + "," + y + "," + z + " face " + v.part(x, y, z));
                 }
             }
         }

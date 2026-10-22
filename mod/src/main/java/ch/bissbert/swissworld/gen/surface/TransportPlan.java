@@ -41,6 +41,12 @@ public final class TransportPlan {
     static final int EARTHWORK_REACH = 12, EARTHWORK_STEEP = 3;
     /** Soil under a cut's top: as deep as the steepest step of a cut, so its faces show no bare stone. */
     static final int CUT_SOIL = EARTHWORK_STEEP;
+    /**
+     * A cut at least {@link #RETAIN_CUT} deep beside a way is held by a stone-brick retaining wall {@link #RETAIN_WALL}
+     * high at the way's edge; the slope above it starts from the wall's top, not from the road (a long bare staircase of
+     * soil with the verge's trodden strip along each step read as a castle ditch; playtest 15.00.54, Interlaken).
+     */
+    static final int RETAIN_WALL = 3, RETAIN_CUT = RETAIN_WALL + 1;
     /** How far a curve looks along its track for the level it keeps. */
     static final int CHAIN_WALK = 3;
     static final int NONE = ColumnGrid.NONE;
@@ -52,6 +58,8 @@ public final class TransportPlan {
     /** Memos: {@link #wayKind}, {@link #open} (0 unknown, 1 no, 2 yes), {@link #earthwork} (UNSET until asked). */
     private final byte[] kinds, opens;
     private final int[] earthworks;
+    /** Deck of the way a retaining wall beside it holds back (see {@link #wallBase}), per column; NONE where there is none. */
+    private final int[] walls;
     /** {@link #earthwork}'s reach fields per {@link #EW_BLOCK} square block of the grid, computed on first use. */
     private final java.util.concurrent.atomic.AtomicReferenceArray<int[][]> ewBlocks;
     private final int ewBlocksPerRow;
@@ -78,6 +86,8 @@ public final class TransportPlan {
         kinds = new byte[n];
         opens = new byte[n];
         earthworks = filled(n);
+        walls = new int[n];
+        Arrays.fill(walls, NONE);
         int side = g.width() + 2 * g.margin();
         ewBlocksPerRow = (side + EW_BLOCK - 1) / EW_BLOCK;
         ewBlocks = new java.util.concurrent.atomic.AtomicReferenceArray<>(ewBlocksPerRow * ewBlocksPerRow);
@@ -1196,6 +1206,12 @@ public final class TransportPlan {
         }
         if (near > EARTHWORK_REACH) return NONE;
         int top = g.top(x, z);
+        // the deck of the way that sets this cut (exact for one way; the lowest cut of several otherwise)
+        int deck = hi - (near - 1);
+        if (hi != EW_HIGH && top - deck >= RETAIN_CUT) {
+            hi += RETAIN_WALL;
+            if (near == 1) walls[g.index(x, z)] = deck;
+        }
         int t = Math.max(Math.min(top, Math.max(lo, hi)), Math.min(lo, hi));
         // beyond the 1:1 slope the cut or fill eases back into the terrain, meeting it at the terrain's own slope, so
         // no wall stands where it ends
@@ -1207,6 +1223,12 @@ public final class TransportPlan {
         int ns = neighbourWet(x, z);
         if (ns != NONE) t = Math.max(t, ns);
         return t == top ? NONE : t;
+    }
+
+    /** Deck of the way whose cut this column holds back as a retaining wall, or NONE: bricks from there up to {@link #earthwork}. */
+    public int wallBase(int x, int z) {
+        earthwork(x, z);
+        return walls[g.index(x, z)];
     }
 
     /** Side of an {@link #earthwork} block: its fields are computed over the block plus {@link #EARTHWORK_REACH}. */
@@ -1701,7 +1723,12 @@ public final class TransportPlan {
                 int top = g.top(x, z);
                 if (to < top) {
                     for (int y = to + 1; y <= top; y++) out.set(y, Part.AIR);
-                    for (int y = to - CUT_SOIL; y < to; y++) out.set(y, Part.SUBSOIL);
+                    int wall = wallBase(x, z);
+                    if (wall != NONE && wall < to) {
+                        for (int y = wall + 1; y < to; y++) out.set(y, Part.LINING);
+                    } else {
+                        for (int y = to - CUT_SOIL; y < to; y++) out.set(y, Part.SUBSOIL);
+                    }
                 } else {
                     for (int y = top; y < to; y++) out.set(y, Part.SOIL);
                 }

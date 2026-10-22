@@ -170,3 +170,14 @@ Cells copied read-only from the shared store with their manifest entries (2632_1
 - No floating tree fragments inside any area (those at the dump edge have their trunk outside the cut).
 - Spruce forest from above: about a third of the columns are open to the sky; podzol, ferns and moss under the crowns.
 - After the first renders the birch crowns were too thin (bare trunks with tufts), so they got larger leaf clusters and more attractors; park leaves 1,677 → 2,245.
+
+## Underpass look-fix (branch look-underpass, playtest 15.00.54 Interlaken)
+- Rail-bed/rack-bed bridge columns get no stone-brick-wall railing (read as castle crenellations); piers are skipped
+  within `OverlayPlan.WAY_CLEARANCE` (3) of any non-bridge overlay column (a pier row stood across a road passing under).
+- Cuts deeper than `TransportPlan.RETAIN_CUT` (4) beside a way start with a `RETAIN_WALL` (3) high stone-brick wall at
+  the shoulder (`wallBase`), the 1:1 slope continues from its top: no long soil staircase.
+- `GroundTextureStage`: EARTHWORK columns never get DIRT_PATH from the PATH_EDGE palette (these were the yellow strips on
+  cut step tops); grass instead.
+- Not fixed: the SWD format cannot encode a road under a rail bridge (sidecar burns the rail bridge over the road).
+  Needs a contract change (e.g. road class under a bridge+rail flag); the exact screenshot spot was not pinned.
+- No sidecar or SWD change: no cell rebuild needed. Generated terrain changes only (block output of the mod).
