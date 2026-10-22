@@ -42,6 +42,15 @@ public final class Landform {
     }
 
     /**
+     * Rock share of ground the photo calls soil: nothing up to 46 degrees (44 alpine), all rock by 56. Grass holds on
+     * steep meadow, but a 2 m pixel of green on a near-vertical face is a tuft, not turf.
+     */
+    public static double faceRock(double slope, Belt belt) {
+        double from = belt == Belt.ALPINE || belt == Belt.NIVAL ? 44 : 46;
+        return smooth((slope - from) / 12);
+    }
+
+    /**
      * Rockiness of cliff zones: rock from ~30 degrees, but benches and gullies of a face keep turf or scree; ribs are
      * bare earlier.
      */

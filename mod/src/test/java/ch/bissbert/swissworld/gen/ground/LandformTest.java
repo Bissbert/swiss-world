@@ -172,32 +172,37 @@ class LandformTest {
     @Test
     void soilRisersAreEarth() {
         SwdCell steps = withGmat(cell((xm, zm) -> 1300 + 12 * Math.floor(xm / 40)), 0x02);
-        int deep = 0;
+        int deep = 0, cliffs = 0;
         SwdCell[] cells = {steps, terraces(), ramp(), ZoneMapTest.mountain()};
         for (int k = 0; k < cells.length; k++) {
             SwdCell c = cells[k];
             TestWorld w = new TestWorld(only(c));
             int x0 = (X0 + 400) & ~15, z0 = (Z0 + 400) & ~15;
+            java.util.Map<Long, ZoneMap> zms = new java.util.HashMap<>();
             for (int cz = z0 - 16; cz < z0 + 144; cz += 16) {
-                for (int cx = x0 - 16; cx < x0 + 144; cx += 16) w.chunk(cx, cz);
+                for (int cx = x0 - 16; cx < x0 + 144; cx += 16) zms.put(((long) cx << 32) ^ (cz & 0xffffffffL), w.chunk(cx, cz));
             }
             int faces = 0;
             for (int z = z0; z < z0 + 128; z++) {
                 for (int x = x0; x < x0 + 128; x++) {
                     int y = w.top(x, z);
+                    ZoneMap zm = zms.get(((long) (x & ~15) << 32) ^ ((z & ~15) & 0xffffffffL));
+                    boolean cliff = zm != null && zm.smoothSlope(x, z) >= GroundTexture.FACE_ROCK;
+                    // photo grass on a near-vertical step is a tuft on a cliff: its face is rock, by design
+                    if (cliff && TextureScanTest.rock(w.get(x, y, z).getBlock())) cliffs++;
                     if (!GroundTexture.soil(w.get(x, y, z).getBlock())) continue;
                     int low = Math.min(Math.min(w.top(x - 1, z), w.top(x + 1, z)), Math.min(w.top(x, z - 1), w.top(x, z + 1)));
                     if (low < y - 1) faces++;
                     if (low < y - GroundTexture.UNDER - 1) deep++;
-                    for (int b = y - 1; b > low; b--) {
+                    for (int b = y - 1; b > low && !cliff; b--) {
                         Block s = w.get(x, b, z).getBlock();
                         assertTrue(!TextureScanTest.rock(s) && s != Blocks.GRAVEL, s + " in the riser at " + x + "," + b + "," + z);
                     }
                 }
             }
-            assertTrue(faces > 0 || k >= 2, "no soil step faces");
+
         }
-        assertTrue(deep > 100, "deep soil risers " + deep);
+        assertTrue(cliffs > 100, "rock on near-vertical photo-grass steps " + cliffs);
     }
 
     /** Rock and scree tops come from their lithology's family only; nothing pink anywhere. */

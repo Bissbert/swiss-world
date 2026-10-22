@@ -41,6 +41,21 @@ public final class Noise {
         return ab + (cd - ab) * sn;
     }
 
+    /**
+     * Isotropic 3D value noise in [0, 1) with lattice spacing {@code scale} metres (blocks) on all three axes, for
+     * vertical faces: patches as tall as they are wide, not bands along the contour lines.
+     */
+    public static double value3(long e, long n, long y, int scale, int salt) {
+        long ie = Math.floorDiv(e, scale), in = Math.floorDiv(n, scale), iy = Math.floorDiv(y, scale);
+        double fy = (double) (y - iy * scale) / scale, sy = fy * fy * (3 - 2 * fy);
+        double lo = valueAt(e, n, scale, salt + (int) (iy * 7919)), hi = valueAt(e, n, scale, salt + (int) ((iy + 1) * 7919));
+        return lo + (hi - lo) * sy;
+    }
+
+    private static double valueAt(long e, long n, int scale, int salt) {
+        return value(e, n, scale, salt);
+    }
+
     private static double rawPatch(long e, long n, int salt) {
         return 0.75 * value(e, n, 7, salt) + 0.25 * value(e, n, 2, salt + 7919);
     }

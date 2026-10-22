@@ -188,6 +188,22 @@ slope with per-column patch noise (25 % of ground there turned rock column by co
 fringe keyed on `cliffAbove` from the same rough 2 m slope (19 % gravel/cobble far from any real cliff), soft palettes
 carried rock and gravel as 8–24 % speckle, and the crystalline palette had 15 % granite (the pink blotches).
 
+### Look-ground pass (Grimsel, 1950 m)
+
+- Contour stripes: `riser()` used 2D noise on `e + n` keyed by y (patches stretched along the contours) and the first
+  `UNDER` blocks were always dirt. Now `Noise.value3` (isotropic 3D noise), and `GroundTexture.face()` gives exposed
+  faces of turf columns (`d < drop`) moss/dirt blobs. The real source of most stripes is the vanilla grass_block side
+  (brown) on every step: on turf steps (`drop >= 1`, open/loose/rock zones, not tended or wet) 70% of the tops are
+  moss_block (green on all sides), in 4 m patches. Lowland slopes show more moss now (Interlaken about 26% moss tops).
+- Steep photo-soil: `Landform.faceRock(slope, belt)` turns GMAT soil/dry-grass/bare columns to the lithology's rock from
+  46 degrees (44 alpine), all rock by 56-58. Exposed faces of soil columns with smoothed slope >= `FACE_ROCK` (45) are
+  rock (ledges stay turf). GMAT DRY_GRASS above montane is ALPINE_PASTURE, not DRY_GRASSLAND.
+- Bare earth: alpine palette coarse dirt 7 -> 3 (pasture), 8 -> 3 (turf), avalanche track 28 -> 18. Tended zones (garden,
+  orchard...) use the rock family where the photo says rock/scree (EMBANKMENT only for landform-only rock). The
+  PATH_EDGE fringe is skipped over photo rock/scree.
+- Open: gmat.py reads shadowed dark vegetation as dark rock at g1 (sidecar, not touched; needs cell rebuild if fixed).
+- No sidecar change: only newly generated chunks change, no cell rebuild or version bump.
+
 ## Snow (`Snow`, `ZoneMap`, `SnowStage`)
 
 - **Local line**: `regional − 200·northness·min(1, slope/20°) − min(160, 30·hollow) + jitter`.

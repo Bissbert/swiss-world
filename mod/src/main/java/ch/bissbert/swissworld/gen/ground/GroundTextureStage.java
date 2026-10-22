@@ -65,14 +65,16 @@ public final class GroundTextureStage implements GenStage {
                 if (top == null) continue;
                 b.set(x, y, z, top.defaultBlockState());
                 // a soil top keeps earth down its whole riser: as deep as the column stands above its lowest neighbour
-                int depth = GroundTexture.UNDER;
+                int depth = GroundTexture.UNDER, exposed = 0;
                 if (GroundTexture.soil(top)) {
                     int ground = ColumnGrid.y(zm.metres(x, z));
-                    depth = Math.max(depth, Math.min(RISER, zm.drop(x, z) + Math.max(0, y - ground) + 1));
+                    exposed = zm.drop(x, z) + Math.max(0, y - ground);
+                    depth = Math.max(depth, Math.min(RISER, exposed + 1));
                 }
                 for (int d = 1; d <= depth; d++) {
                     if (!plain(b.get(x, y - d, z).getBlock())) break;
-                    b.set(x, y - d, z, d <= GroundTexture.UNDER ? GroundTexture.under(top, d)
+                    BlockState face = GroundTexture.face(zm, x, z, top, d, y - d, d < exposed);
+                    b.set(x, y - d, z, face != null ? face : d <= GroundTexture.UNDER ? GroundTexture.under(top, d)
                             : GroundTexture.riser(zm.east(x), zm.north(z), y - d));
                 }
             }

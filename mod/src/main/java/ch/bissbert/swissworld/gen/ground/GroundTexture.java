@@ -57,8 +57,8 @@ public final class GroundTexture {
         // soil only: rock and scree come from the landform, never as speckles in a meadow
         put(Zone.HAY_MEADOW, g, 97, cd, 3);
         put(Zone.PASTURE, g, 95, cd, 5);
-        put(Zone.ALPINE_PASTURE, g, 93, cd, 7);
-        put(Zone.ALPINE_TURF, moss, 8, g, 84, cd, 8);
+        put(Zone.ALPINE_PASTURE, g, 97, cd, 3);
+        put(Zone.ALPINE_TURF, moss, 10, g, 87, cd, 3);
         put(Zone.DRY_GRASSLAND, g, 82, cd, 18);
         put(Zone.WET_MEADOW, g, 66, moss, 14, mud, 20);
         put(Zone.RAISED_BOG, g, 22, moss, 48, mud, 30);
@@ -80,7 +80,7 @@ public final class GroundTexture {
         put(Zone.KRUMMHOLZ, g, 50, moss, 25, pod, 25);
         put(Zone.FOREST_EDGE, g, 80, root, 10, cd, 10);
         put(Zone.CLEARING, g, 70, root, 10, cd, 20);
-        put(Zone.AVALANCHE_TRACK, g, 72, cd, 28);
+        put(Zone.AVALANCHE_TRACK, g, 82, cd, 18);
         put(Zone.REED_SHORE, g, 40, mud, 40, Blocks.CLAY, 20);
         put(Zone.SNOW_PATCH, g, 90, cd, 10);
         // shores of streams and lakes in loose ground: their own beds
@@ -196,6 +196,10 @@ public final class GroundTexture {
         };
     }
 
+    private static Belt belt(int id) {
+        return ZoneId.belt((short) id);
+    }
+
     /** Soil of a zone without its own soil palette (rock and loose ground): turf by belt. */
     private static Palette soil(Zone zone, Belt belt) {
         Palette p = ZONE.get(zone);
@@ -207,6 +211,15 @@ public final class GroundTexture {
      * The new top block of a natural column, or null to leave it.
      */
     public static Block top(ZoneMap zm, int x, int z) {
+        Block t = rawTop(zm, x, z);
+        // a grass block shows its brown dirt side on every step of a slope (the contour stripes): on turf steps a share of
+        // the tops is moss, which is green on all sides
+        if (t == Blocks.GRASS_BLOCK && zm.drop(x, z) >= 1 && turfFace(zm.zone(x, z), t)
+                && Noise.value(zm.east(x), zm.north(z), 4, SALT_PATCH + 11) < 0.7) return Blocks.MOSS_BLOCK;
+        return t;
+    }
+
+    private static Block rawTop(ZoneMap zm, int x, int z) {
         Zone zone = zm.zone(x, z);
         Zone.Group group = zone.group;
         if (group == Zone.Group.NONE || group == Zone.Group.WATER || group == Zone.Group.URBAN && zone != Zone.INDUSTRIAL
@@ -219,7 +232,9 @@ public final class GroundTexture {
             int rail = zm.railDist(x, z);
             if (rail <= 2 && v2 < (rail == 1 ? 0.6 : 0.25)) return BALLAST.pick(v);
             int path = zm.pathDist(x, z);
-            if (path <= 2 && v2 < (path == 1 ? 0.45 : 0.15)) return PATH_EDGE.pick(v);
+            // the verge of a road over rock and scree is that rock and scree (photo), not earth
+            int ph = zm.gmat(x, z) & 15;
+            if (path <= 2 && v2 < (path == 1 ? 0.45 : 0.15) && ph != 5 && ph != 6 && ph != 7) return PATH_EDGE.pick(v);
             int wd = zm.waterDist(x, z);
             if (wd <= 2 && zone != Zone.REED_SHORE && v2 < (wd == 1 ? 0.7 : 0.35)) {
                 Palette p = switch (zm.waterKind(x, z)) {
@@ -236,25 +251,36 @@ public final class GroundTexture {
         int gm = zm.gmat(x, z), cls = gm & 15;
         double tone = tone(e, n);
         Material m = null;
+        boolean photo = false;
         if (group == Zone.Group.OPEN || group == Zone.Group.ROCK || group == Zone.Group.LOOSE) {
             m = gmat(cls);
             if (m != null) {
+                photo = true;
                 double t = (gm >>> 4) / 15.0;
                 tone = cls == 5 ? 0.55 + 0.44 * t : cls == 6 ? 0.45 * t : t;
+                // a 2 m pixel of green on a near-vertical face is a tuft on a ledge, not a meadow: the face is rock
+                if ((m == Material.SOIL || m == Material.DRY_GRASS || m == Material.BARE_SOIL)
+                        && Landform.over(Landform.faceRock(zm.smoothSlope(x, z), belt(id)), edge(e, n, SALT_EDGE))) {
+                    m = Material.ROCK;
+                    tone = tone(e, n);
+                }
             }
         }
         if (m == null) m = landform(zm, x, z, zone, e, n);
         // a little grain within the tone: neighbouring shades of the family, in patches of a few metres
         double grain = Landform.clamp(tone + 0.3 * (Noise.patch(e, n, SALT_ROCK) - 0.5), 0, 0.999);
+        // tended ground has embankments where only the landform says rock; where the photo shows grey it is grey
+        boolean wall = tended(zone) && !photo;
         switch (m) {
             case ROCK:
-                return (tended(zone) ? EMBANKMENT : ROCK.get(lith)).pick(tended(zone) ? v : grain);
+                return (wall ? EMBANKMENT : ROCK.get(lith)).pick(wall ? v : grain);
             case SCREE:
-                return (tended(zone) ? EMBANKMENT : SCREE.get(lith)).pick(tended(zone) ? v : grain);
+                return (wall ? EMBANKMENT : SCREE.get(lith)).pick(wall ? v : grain);
             case BARE_SOIL:
                 return BARE.pick(grain);
             case DRY_GRASS:
-                return ZONE.get(Zone.DRY_GRASSLAND).pick(v);
+                // yellow-brown turf in the high belts is alpine pasture, not a dry south-slope grassland
+                return ZONE.get(belt(id) == Belt.COLLINE || belt(id) == Belt.MONTANE ? Zone.DRY_GRASSLAND : Zone.ALPINE_PASTURE).pick(v);
             default:
                 break;
         }
@@ -266,10 +292,45 @@ public final class GroundTexture {
         return soil(zone, ZoneId.belt((short) id)).pick(v);
     }
 
-    /** Earth for the riser of a soil column below its {@link #UNDER} layer: dirt with bands of coarse and rooted dirt. */
+    /** Smoothed slope from which a soil column's side face is rock, not earth (a turf ledge on a cliff). */
+    public static final double FACE_ROCK = 45;
+
+    /**
+     * Earth for the riser of a soil column below its {@link #UNDER} layer: dirt with patches of coarse and rooted dirt
+     * (3D noise, so the patches are blobs on the face, never bands along the contour lines).
+     */
     public static BlockState riser(long e, long n, int y) {
-        double b = Noise.value(e + n, y * 4L, 6, SALT_MOD + 3);
+        double b = Noise.value3(e, n, y, 5, SALT_MOD + 3);
         return (b < 0.3 ? Blocks.COARSE_DIRT : b > 0.75 ? Blocks.ROOTED_DIRT : Blocks.DIRT).defaultBlockState();
+    }
+
+    /** Soil tops whose exposed side faces are turf-coloured moss with a little earth, not a brown wall. */
+    static boolean turfFace(Zone zone, Block top) {
+        return (top == Blocks.GRASS_BLOCK || top == Blocks.MOSS_BLOCK) && (zone.group == Zone.Group.OPEN || zone.group == Zone.Group.LOOSE || zone.group == Zone.Group.ROCK) && !tended(zone)
+                && zone != Zone.WET_MEADOW && zone != Zone.RAISED_BOG && zone != Zone.FLOODPLAIN && zone != Zone.REED_SHORE;
+    }
+
+    /**
+     * The block of a soil column's side face {@code d} blocks under its top ({@code y} is its height), or null for the
+     * default earth. Only for blocks that show ({@code exposed}): on steep ground (smoothed slope over {@link #FACE_ROCK})
+     * the face below the first soil block is the lithology's rock, so a turf ledge on a cliff is a ledge, not a brown
+     * wall; on turf (grass, moss) the face is mostly moss in 4 m blobs with earth in between (moss does not decay under
+     * the top block as a grass block would).
+     */
+    public static BlockState face(ZoneMap zm, int x, int z, Block top, int d, int y, boolean exposed) {
+        if (!exposed || !soil(top) || top == Blocks.MUD || top == Blocks.CLAY) return null;
+        long e = zm.east(x), n = zm.north(z);
+        if (zm.smoothSlope(x, z) >= FACE_ROCK && d >= 2) {
+            Lith lith = ZoneId.lith((short) zm.id(x, z));
+            double t = Landform.clamp(tone(e, n) + 0.3 * (Noise.value3(e, n, y, 4, SALT_ROCK) - 0.5), 0, 0.999);
+            return ROCK.get(lith).pick(t).defaultBlockState();
+        }
+        if (turfFace(zm.zone(x, z), top)) {
+            double v = Noise.value3(e, n, y, 4, SALT_PATCH + 7);
+            return (v < 0.5 ? Blocks.MOSS_BLOCK : v < 0.8 ? Blocks.DIRT : v < 0.92 ? Blocks.COARSE_DIRT : Blocks.ROOTED_DIRT)
+                    .defaultBlockState();
+        }
+        return null;
     }
 
     /** The block under a top block, {@code depth} 1..{@link #UNDER} below it. */
