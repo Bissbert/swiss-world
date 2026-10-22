@@ -3,6 +3,8 @@
     uv run python -m swissdata.server            # 127.0.0.1:8080; SWISSDATA_HOST / SWISSDATA_PORT override
 
 One PriorityQueue feeds `max_downloads` worker threads ("now" before "prefetch", FIFO within a priority).
+With two or more workers, prefetch builds may hold at most all but one of them, so a "now" request that arrives
+while prefetch is busy starts at once instead of waiting for a whole cell build (a build cannot be pre-empted).
 Requesting a queued cell again with a better priority pushes a second heap entry; the stale one is skipped.
 A failed cell stays in `error` until its retryAfterS has passed, then the next request re-queues it.
 """
@@ -56,6 +58,7 @@ class BuildQueue:
         self._cv = threading.Condition()
         self._threads: list[threading.Thread] = []
         self._stop = False
+        self._prefetching = 0  # cells being built that were taken at prefetch priority
         self._progress: dict[tuple[int, int], progress.CellProgress] = {}
 
     # --- API side -----------------------------------------------------------------------------
@@ -156,19 +159,26 @@ class BuildQueue:
             self._stop = True
             self._cv.notify_all()
 
-    def _next(self) -> tuple[int, int] | None:
+    def _next(self) -> tuple[tuple[int, int], int] | None:
+        """-> (cell, priority it was taken at). A prefetch entry waits while prefetch already holds every worker
+        but one (the free worker is kept for "now" requests)."""
+        spare = max(self.cfg.max_downloads - 1, 1)
         with self._cv:
             while not self._stop:
-                while self._heap:
+                while self._heap and not self._live(*self._heap[0]):
+                    heapq.heappop(self._heap)  # stale entry of an upgraded or finished cell
+                if self._heap and (self._heap[0][0] == 0 or self._prefetching < spare):
                     p, q, cell = heapq.heappop(self._heap)
-                    if self._live(p, q, cell):
-                        self._states[cell].state = "building"
-                        return cell
+                    self._states[cell].state = "building"
+                    if p > 0:
+                        self._prefetching += 1
+                    return cell, p
                 self._cv.wait()
             return None
 
     def _work(self) -> None:
-        while (cell := self._next()) is not None:
+        while (job := self._next()) is not None:
+            cell, taken_at = job
             t0 = time.monotonic()
             prog = progress.CellProgress(cell)
             with self._cv:
@@ -186,6 +196,8 @@ class BuildQueue:
                     s.state, s.error, s.retry_at = "error", f"{type(ex).__name__}: {ex}", time.time() + RETRY_AFTER_S
             with self._cv:
                 self._progress.pop(cell, None)
+                if taken_at > 0:
+                    self._prefetching -= 1
                 self._cv.notify_all()
 
     def build_cell(self, e_km: int, n_km: int) -> None:
