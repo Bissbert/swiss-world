@@ -192,3 +192,22 @@ def test_status_lists_builds_with_stage_and_download(setup, monkeypatch):
     mid = seen["mid"][0]
     assert mid["stage"] == "downloading" and mid["step"] == 2
     assert mid["download"] == {"file": "swissbuildings3d.zip", "bytes": 1 << 20, "totalBytes": 4 << 20}
+
+
+def test_now_not_blocked_by_prefetch_with_two_workers(tmp_path):
+    cfg = Config(raw=tmp_path / "raw", store=tmp_path / "store", scratch=tmp_path / "scratch",
+                 max_downloads=2, dev_bbox=False)
+    terr = GatedTerrain()
+    app = server.create_app(cfg, builders=[terr, build.DefaultSurface()], grid=grid_inside(), gazetteer=NoGazetteer(cfg))
+    with TestClient(app) as client:
+        states(client, [[E, N], [E + 1, N], [E + 2, N]], priority="prefetch")
+        assert terr.started.wait(5)
+        assert client.get("/status").json()["queue"] == {"now": 0, "prefetch": 2, "building": 1}  # one worker kept free
+        states(client, [[E + 5, N]], priority="now")
+        for _ in range(100):
+            if len(terr.order) == 2:
+                break
+            threading.Event().wait(0.05)
+        assert terr.order == [(E, N), (E + 5, N)]  # the "now" cell started while prefetch still holds its worker
+        terr.gate.set()
+        assert client.get("/wait", params={"cell": f"{E + 2},{N}", "timeoutMs": 5000}).json()["state"] == "ready"

@@ -44,7 +44,9 @@ fetched; read_alti deletes whatever it downloaded, so raw does not grow (up to 9
 
 from __future__ import annotations
 
+import hashlib
 import logging
+import os
 import threading
 import zipfile
 from dataclasses import dataclass
@@ -211,6 +213,15 @@ class Vectors:
         keep_rock[list(LITHOHAUPT)] = True
         self.rock_fill = nearest_fill(lithology, keep_rock)
 
+    @classmethod
+    def restore(cls, sets: dict, region_fill: np.ndarray, rock_fill: np.ndarray) -> "Vectors":
+        """From the cached polygon sets and fill grids (no rasterising, no distance transform)."""
+        self = object.__new__(cls)
+        self._sets = {k: sets[k] for k in _KINDS}
+        self._trees = {k: shapely.STRtree([g for g, _ in v]) for k, v in self._sets.items()}
+        self.region_fill, self.rock_fill = region_fill, rock_fill
+        return self
+
     def shapes(self, kind: str, e_km: int, n_km: int) -> list[tuple[object, int]]:
         hits = self._trees[kind].query(tlm.cell_box(e_km, n_km))
         items = self._sets[kind]
@@ -299,15 +310,71 @@ def load_vectors(cfg: Config) -> Vectors:
     )
 
 
+_VECTORS_CACHE_VERSION = 1
+_KINDS = ("regions", "lithology", "bogs", "fens", "auen")
+
+
+def _vectors_cache(cfg: Config) -> Path:
+    return cfg.scratch / "zones" / f"vectors.v{_VECTORS_CACHE_VERSION}.npz"
+
+
+def _vectors_signature(cfg: Config) -> str:
+    """Identity of the inputs: code version, source pins and the size/mtime of every downloaded zip."""
+    h = hashlib.sha256(f"v{_VECTORS_CACHE_VERSION}".encode())
+    for s in SOURCES:
+        st = fetch(cfg, s.href).stat()
+        h.update(f"|{s.pin}|{s.href}|{st.st_size}|{st.st_mtime_ns}".encode())
+    return h.hexdigest()
+
+
+def _write_vectors_cache(path: Path, sig: str, vec: "Vectors") -> None:
+    """Geometries as WKB (exact doubles, so a restored set rasterises and queries identically)."""
+    arrays = {"sig": np.array(sig), "region_fill": vec.region_fill, "rock_fill": vec.rock_fill}
+    for k in _KINDS:
+        items = vec._sets[k]
+        blobs = shapely.to_wkb(np.array([g for g, _ in items], dtype=object)) if items else []
+        arrays[f"{k}_wkb"] = np.frombuffer(b"".join(blobs), dtype="u1")
+        arrays[f"{k}_off"] = np.cumsum([0] + [len(b) for b in blobs]).astype("i8")
+        arrays[f"{k}_val"] = np.array([v for _, v in items], dtype="i8")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f"{path.name}.{os.getpid()}-{threading.get_ident()}.tmp.npz")  # processes may race
+    np.savez(tmp, **arrays)
+    os.replace(tmp, path)
+
+
+def _read_vectors_cache(path: Path, sig: str) -> "Vectors | None":
+    try:
+        with np.load(path) as z:
+            if str(z["sig"]) != sig:
+                return None
+            sets = {}
+            for k in _KINDS:
+                buf, off, val = z[f"{k}_wkb"].tobytes(), z[f"{k}_off"], z[f"{k}_val"]
+                geoms = shapely.from_wkb([buf[off[i]:off[i + 1]] for i in range(len(val))])
+                sets[k] = list(zip(geoms, (int(v) for v in val)))
+            return Vectors.restore(sets, z["region_fill"], z["rock_fill"])
+    except (OSError, KeyError, ValueError, shapely.errors.ShapelyError):
+        return None  # missing or damaged cache: rebuild from the sources
+
+
 _lock = threading.Lock()
 _vectors: dict[Path, Vectors] = {}
 
 
 def shared_vectors(cfg: Config) -> Vectors:
-    """Loaded once per process (~6 s: the GK500 layer and the two 100 m fill grids)."""
+    """Loaded once per process. Parsing the shapefiles and the two nearest-fill grids cost ~15 s of CPU, so the
+    result is cached under $SWISSDATA_SCRATCH/zones, keyed on the pins and the sources' size and mtime."""
     with _lock:
         if cfg.raw not in _vectors:
-            _vectors[cfg.raw] = load_vectors(cfg)
+            sig = _vectors_signature(cfg)
+            vec = _read_vectors_cache(_vectors_cache(cfg), sig)
+            if vec is None:
+                vec = load_vectors(cfg)
+                try:
+                    _write_vectors_cache(_vectors_cache(cfg), sig, vec)
+                except OSError as ex:
+                    log.warning("zones vector cache not written: %s", ex)
+            _vectors[cfg.raw] = vec
         return _vectors[cfg.raw]
 
 

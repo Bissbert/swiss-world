@@ -42,7 +42,7 @@ import rasterio
 from . import stac, swd, zones
 from .alti import NEIGHBOURS, TILE_PX, tile_key
 from .config import Config
-from .fetch import cache_path, fetch
+from .fetch import cache_path, fetch, prefetch
 from .manifest import Pins
 
 log = logging.getLogger(__name__)
@@ -474,6 +474,8 @@ class GmatBuilder:
         alti = zones.ZonesBuilder().tile_items(e_km, n_km, {**(pinned or {}), **partial.sources}) or {}
         read_rgb = self._ortho_for or (lambda it: read_ortho_item(cfg, it))
         read_dem = self._alti_for or (lambda it: zones.read_alti(cfg, it))
+        if self._ortho_for is None:
+            prefetch(cfg, [ortho_href(it) for it in items.values() if it])
         rgb = {d: (read_rgb(it) if it else None) for d, it in items.items()}
         dem = {d: (read_dem(it) if it else None) for d, it in alti.items()}
         params = {d: tile_params(px, dem.get(d)) for d, px in rgb.items() if px is not None}

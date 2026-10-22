@@ -27,7 +27,7 @@ import sys
 import time
 from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
 
-from . import build, stac, swd, tlm
+from . import build, fetch, stac, swd, tlm
 from .config import Config
 from .manifest import cell_key
 from .store import Store
@@ -57,9 +57,10 @@ def select(manifest: dict, bbox: tuple[int, int, int, int] | None, dev_bbox: boo
     return sorted(out, key=lambda c: (not (e0 <= c[0] <= e1 and n0 <= c[1] <= n1), c))
 
 
-def _init(cfg: Config) -> None:
+def _init(cfg: Config, workers: int = 1) -> None:
     global _cfg
     _cfg = cfg
+    fetch.set_process_limit(fetch.MAX_CONCURRENT // max(workers, 1))  # all workers together stay <= 4 requests
     logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(processName)s %(name)s: %(message)s")
 
 
@@ -117,7 +118,7 @@ def rebuild(cfg: Config, cells: list[tuple[int, int]], workers: int = 4, builder
             log.error("%s failed: %s", cell_key(*first), ex)
             failed.append(cell_key(*first))
         finished += 1
-        with ProcessPoolExecutor(workers, initializer=_init, initargs=(cfg,)) as ex:
+        with ProcessPoolExecutor(workers, initializer=_init, initargs=(cfg, workers)) as ex:
             todo, running = iter(rest), {}
 
             def submit() -> None:

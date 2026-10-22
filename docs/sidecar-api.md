@@ -23,7 +23,7 @@ Ask for cells to be built. The call is idempotent and returns immediately.
 {"cells": [[2631,1170],[2632,1170]], "priority": "now"}
 ```
 
-- `priority`: `"now"` (a chunk is waiting) or `"prefetch"`.
+- `priority`: `"now"` (a chunk is waiting) or `"prefetch"`. With two or more workers, prefetch builds never occupy the last free worker, so a `"now"` cell starts immediately (a running build is not pre-empted).
 
 Response:
 
