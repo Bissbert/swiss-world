@@ -1,0 +1,383 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Swiss World</title>
+<meta name="description" content="A NeoForge mod that generates Switzerland at 1:1 from swisstopo open data: one block per metre, built as you walk into it.">
+<meta name="theme-color" content="#1b1a45">
+<meta property="og:title" content="Swiss World">
+<meta property="og:description" content="Switzerland in Minecraft, one block per metre, from swisstopo open data.">
+<meta property="og:image" content="img/grimsel-glow.webp">
+<link rel="preload" href="fonts/archivo-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%231b1a45'/%3E%3Cpath d='M3 25 L12 11 L17 18 L21 13 L29 25 Z' fill='%23ffc76a'/%3E%3C/svg%3E">
+<style>
+@font-face {
+  font-family: "Archivo";
+  src: url("fonts/archivo-latin.woff2") format("woff2");
+  font-weight: 100 900; font-stretch: 62% 125%; font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Archivo";
+  src: url("fonts/archivo-latin-ext.woff2") format("woff2");
+  font-weight: 100 900; font-stretch: 62% 125%; font-display: swap;
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+:root {
+  --night: #1b1a45;      /* zenith after sunset */
+  --dusk: #2b2157;
+  --plum: #4b2d63;
+  --rose: #e7835a;       /* alpenglow on rock */
+  --gold: #ffc76a;       /* the last light */
+  --gold-deep: #f2a640;
+  --snow: #fbf3e6;
+  --snow-dim: #d9cbe0;   /* tinted from the plum, never grey */
+  --ink-on-gold: #2a1838;
+  --rule: rgba(255, 199, 106, 0.28);
+  --gutter: clamp(16px, 4vw, 56px);
+  --measure: 66ch;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+body {
+  margin: 0;
+  background: var(--night);
+  color: var(--snow);
+  font: 400 1.0625rem/1.6 "Archivo", system-ui, sans-serif;
+  font-stretch: 100%;
+  font-variant-numeric: tabular-nums;
+}
+::selection { background: var(--gold); color: var(--ink-on-gold); }
+html { scrollbar-color: var(--plum) var(--night); }
+a { color: var(--gold); text-underline-offset: 0.22em; text-decoration-thickness: 1px; }
+a:hover { color: var(--snow); }
+:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; border-radius: 3px; }
+img { display: block; max-width: 100%; height: auto; }
+code, pre { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 0.92em; }
+
+.wrap { max-width: 1240px; margin: 0 auto; padding: 0 var(--gutter); }
+
+/* ---------- top bar ---------- */
+.bar {
+  position: absolute; inset: 0 0 auto 0; z-index: 3;
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+  padding: 18px var(--gutter);
+}
+.mark { display: flex; align-items: center; gap: 0.6rem; color: var(--snow); text-decoration: none;
+  font-weight: 800; font-stretch: 125%; letter-spacing: 0.01em; font-size: 1rem; }
+.mark svg { width: 26px; height: 26px; }
+.bar nav { display: flex; gap: clamp(0.9rem, 2.4vw, 2rem); font-size: 0.95rem; }
+.bar nav a { color: var(--snow); text-decoration: none; }
+.bar nav a:hover { color: var(--gold); }
+@media (max-width: 560px) { .bar nav a:not(:last-child) { display: none; } }
+
+/* ---------- hero: the sun going down over the Grimsel route ---------- */
+.hero { position: relative; min-height: min(92svh, 980px); display: grid; align-items: end; overflow: hidden; isolation: isolate; }
+.hero picture, .hero picture img { position: absolute; inset: 0; width: 100%; height: 100%; }
+.hero picture img { object-fit: cover; object-position: 30% 50%; z-index: -2;
+  animation: settle 2.4s cubic-bezier(.16, 1, .3, 1) both; }
+@keyframes settle { from { transform: scale(1.06); filter: saturate(1.25) brightness(1.08); } to { transform: none; filter: none; } }
+.hero::after { /* fade the valley floor into the page's night */
+  content: ""; position: absolute; inset: auto 0 0 0; height: 46%; z-index: -1;
+  background: linear-gradient(to bottom, rgba(27, 26, 69, 0) 0%, rgba(27, 26, 69, 0.72) 55%, var(--night) 100%);
+}
+@media (max-width: 700px) {
+  .hero picture img { object-position: 74% 50%; }
+  .hero::after { height: 78%; background: linear-gradient(to bottom, rgba(27, 26, 69, 0) 0%, rgba(27, 26, 69, 0.78) 38%, var(--night) 100%); }
+}
+.hero .wrap { width: 100%; padding-top: 120px; padding-bottom: clamp(36px, 7vh, 72px); }
+.hero h1 {
+  margin: 0; max-width: 13ch;
+  font-weight: 850; font-stretch: 125%;
+  font-size: clamp(2.6rem, 7.4vw, 6rem); line-height: 0.95; letter-spacing: -0.025em;
+  text-wrap: balance;
+  text-shadow: 0 2px 24px rgba(10, 8, 30, 0.4);
+}
+.hero h1 em { font-style: normal; color: var(--gold); }
+.lede { max-width: 46ch; margin: 1.3rem 0 0; font-size: clamp(1.06rem, 1.5vw, 1.25rem); color: var(--snow); text-wrap: pretty;
+  text-shadow: 0 1px 12px rgba(10, 8, 30, 0.55); }
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.9rem 1.2rem; margin-top: 2rem; }
+.btn {
+  display: inline-flex; align-items: center; gap: 0.6rem;
+  padding: 0.85rem 1.35rem; border-radius: 999px;
+  background: var(--gold); color: var(--ink-on-gold);
+  font-weight: 700; font-stretch: 112%; text-decoration: none;
+  box-shadow: 0 10px 24px -12px rgba(10, 8, 30, 0.7);
+  transition: background .2s, transform .2s cubic-bezier(.16, 1, .3, 1), box-shadow .2s;
+}
+.btn:hover { background: var(--snow); color: var(--ink-on-gold); transform: translateY(-2px); box-shadow: 0 14px 28px -14px rgba(10, 8, 30, 0.75); }
+.btn svg { width: 20px; height: 20px; }
+.cmd { display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.7rem 1rem; border-radius: 999px;
+  background: rgba(27, 26, 69, 0.55); border: 1px solid var(--rule); color: var(--snow); backdrop-filter: blur(6px); }
+.cmd span { color: var(--snow-dim); }
+.caption { margin-top: 2.2rem; font-size: 0.82rem; color: var(--snow-dim); }
+
+/* ---------- altitude: the one rule that makes it 1:1 ---------- */
+.altitude { padding: clamp(72px, 12vw, 150px) 0 clamp(56px, 9vw, 110px);
+  background: linear-gradient(to bottom, var(--night), var(--dusk) 60%, var(--plum)); }
+.split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: clamp(32px, 6vw, 96px); align-items: center; }
+@media (max-width: 860px) { .split { grid-template-columns: 1fr; } }
+h2 { margin: 0 0 1rem; font-weight: 800; font-stretch: 125%; font-size: clamp(1.9rem, 4.2vw, 3.3rem); line-height: 1.02; letter-spacing: -0.02em; text-wrap: balance; }
+h2 em { font-style: normal; color: var(--gold); }
+p { margin: 0 0 1rem; max-width: var(--measure); text-wrap: pretty; }
+.dim { color: var(--snow-dim); }
+
+.gauge { position: relative; padding: 28px 0 8px; }
+.readout { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.4rem 1.6rem; margin-bottom: 1.4rem; }
+.readout .place { width: 100%; font-weight: 700; font-stretch: 112%; font-size: 1.15rem; min-height: 1.6em; }
+.readout b { display: block; font-weight: 800; font-stretch: 125%; font-size: clamp(2.4rem, 5vw, 3.6rem); line-height: 1; letter-spacing: -0.02em; }
+.readout small { color: var(--snow-dim); font-size: 0.85rem; }
+.readout .y b { color: var(--gold); }
+.readout .arrow { align-self: center; color: var(--rose); font-size: 1.6rem; }
+
+.profile { position: relative; height: clamp(170px, 26vw, 250px); border-bottom: 1px solid var(--rule); }
+.profile svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.profile .line { stroke: var(--rule); stroke-width: 1; stroke-dasharray: 3 5; }
+.peak { cursor: pointer; }
+.peak circle { fill: var(--night); stroke: var(--gold); stroke-width: 2; transition: r .25s cubic-bezier(.16,1,.3,1), fill .25s; }
+.peak.on circle, .peak:hover circle { fill: var(--gold); }
+.peak text { fill: var(--snow-dim); font: 600 12px "Archivo", sans-serif; font-stretch: 100%; }
+.peak.on text { fill: var(--snow); }
+input[type=range] { width: 100%; margin: 18px 0 0; accent-color: var(--gold); height: 28px; }
+.scale { display: flex; justify-content: space-between; font-size: 0.78rem; color: var(--snow-dim); }
+
+/* ---------- the views ---------- */
+.views { background: var(--plum); padding: 0 0 clamp(64px, 10vw, 128px); }
+.wide { position: relative; margin: 0; }
+.wide img { width: 100%; height: clamp(320px, 56vw, 760px); object-fit: cover; }
+.wide figcaption, .pair figcaption { font-size: 0.82rem; color: var(--snow-dim); padding: 0.7rem var(--gutter) 0; }
+.pair { display: grid; grid-template-columns: 1.35fr 1fr; gap: clamp(24px, 5vw, 72px); align-items: center; margin-top: clamp(48px, 8vw, 96px); }
+.pair figure { margin: 0; }
+.pair img { border-radius: 14px; box-shadow: 0 30px 60px -30px rgba(10, 8, 30, 0.8); }
+.pair figcaption { padding-left: 0; }
+@media (max-width: 860px) { .pair { grid-template-columns: 1fr; } }
+
+/* ---------- how it works: a line with stations ---------- */
+.how { background: linear-gradient(to bottom, var(--plum), #5e2f5f 55%, #73365c); padding: clamp(72px, 11vw, 140px) 0; }
+.line-map { list-style: none; margin: clamp(36px, 5vw, 64px) 0 0; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); position: relative; }
+.line-map::before { content: ""; position: absolute; left: 0; right: 0; top: 11px; height: 4px; border-radius: 2px; background: var(--gold); }
+.line-map li { position: relative; padding: 42px 1.4rem 0 0; }
+.line-map li::before { content: ""; position: absolute; top: 0; left: 0; width: 26px; height: 26px; border-radius: 50%; background: var(--night); border: 4px solid var(--gold); }
+.line-map h3 { margin: 0 0 0.4rem; font-weight: 800; font-stretch: 118%; font-size: 1.2rem; }
+.line-map p { font-size: 0.96rem; color: var(--snow); }
+.line-map code { color: var(--gold); }
+@media (max-width: 860px) {
+  .line-map { grid-template-columns: 1fr; }
+  .line-map::before { left: 11px; right: auto; top: 0; bottom: 0; width: 4px; height: auto; }
+  .line-map li { padding: 0 0 2rem 3.2rem; }
+}
+
+.sources { margin-top: clamp(48px, 7vw, 88px); border-top: 1px solid rgba(251, 243, 230, 0.35); }
+.sources div { display: grid; grid-template-columns: minmax(0, 15rem) minmax(0, 1fr); gap: 0.3rem 2rem; padding: 0.85rem 0; border-bottom: 1px solid rgba(251, 243, 230, 0.2); }
+.sources dt { font-weight: 700; font-stretch: 112%; }
+.sources dd { margin: 0; color: var(--snow); }
+@media (max-width: 600px) { .sources div { grid-template-columns: 1fr; } }
+
+/* ---------- start: the gold field ---------- */
+.start { background: var(--rose); background: linear-gradient(to bottom, #73365c, var(--rose) 14%, var(--gold-deep) 60%, var(--gold)); color: var(--ink-on-gold); padding: clamp(72px, 11vw, 140px) 0; }
+.start h2 em { color: var(--night); }
+.start a { color: var(--ink-on-gold); text-decoration-thickness: 2px; }
+.start a:hover { color: var(--night); }
+.start .btn { background: var(--night); color: var(--snow); box-shadow: 0 14px 30px -14px rgba(10, 8, 30, 0.55); }
+.start .btn:hover { background: var(--ink-on-gold); color: var(--gold); }
+pre {
+  margin: 1.4rem 0 1.6rem; padding: 1.2rem 1.4rem; overflow-x: auto; border-radius: 14px;
+  background: var(--night); color: var(--snow); line-height: 1.7;
+  box-shadow: 0 24px 50px -28px rgba(10, 8, 30, 0.6);
+}
+pre .c { color: var(--snow-dim); }
+pre .k { color: var(--gold); }
+.status { margin-top: 2.4rem; }
+.status li { margin-bottom: 0.4rem; }
+.status ul { padding-left: 1.2rem; margin: 0.5rem 0 0; max-width: var(--measure); }
+
+/* ---------- footer ---------- */
+footer { background: var(--night); color: var(--snow-dim); font-size: 0.86rem; padding: 48px 0 56px; }
+footer .wrap { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1.5rem 3rem; }
+footer p { margin: 0 0 0.6rem; }
+footer strong { color: var(--snow); font-weight: 700; }
+.legal { font-weight: 600; color: var(--snow); }
+@media (max-width: 760px) { footer .wrap { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+
+<header class="bar">
+  <a class="mark" href="#top" aria-label="Swiss World, top of page">
+    <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M2 26 L12 10 L17 17 L21 12 L30 26 Z" fill="#ffc76a"/><path d="M12 10 L14.4 13.8 L12.6 15 L11 13.2 Z" fill="#fbf3e6"/></svg>
+    Swiss World
+  </a>
+  <nav aria-label="Sections">
+    <a href="#altitude">Scale</a>
+    <a href="#how">How it works</a>
+    <a href="#start">Get started</a>
+    <a href="https://github.com/Bissbert/swiss-world">GitHub</a>
+  </nav>
+</header>
+
+<main id="top">
+  <section class="hero" aria-labelledby="hero-title">
+    <picture>
+      <img src="img/grimsel-glow.webp" width="2400" height="914" alt="In-game view of an alpine valley with a reservoir, a dam, a winding pass road and a sharp peak against a gold and violet sunset sky, all built from Minecraft blocks." fetchpriority="high">
+    </picture>
+    <div class="wrap">
+      <h1 id="hero-title">Switzerland, <em>one block</em> per metre.</h1>
+      <p class="lede">Swiss World is a NeoForge mod that builds the country at 1:1 from swisstopo open data. Terrain, lakes, glaciers, roads, railways and buildings generate as you walk into them.</p>
+      <div class="actions">
+        <a class="btn" href="https://github.com/Bissbert/swiss-world">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+          View the source
+        </a>
+        <code class="cmd"><span>in game:</span> /swiss</code>
+      </div>
+      <p class="caption">In-game screenshot on the Interlaken – Grimsel test route. Sky re-graded for this page.</p>
+    </div>
+  </section>
+
+  <section class="altitude" id="altitude" aria-labelledby="alt-title">
+    <div class="wrap split">
+      <div>
+        <h2 id="alt-title">Every metre is <em>a block</em>.</h2>
+        <p>One block is one metre, horizontally and vertically. The dimension runs from y −2032 to 2031, so a valley floor at 568&nbsp;m sits at y&nbsp;−1432 and the Grimsel Pass at y&nbsp;164.</p>
+        <p class="dim">Above 3000&nbsp;m the scale compresses to 0.6 so the highest summits still fit under the build limit. Buildings keep their true height.</p>
+      </div>
+      <div class="gauge">
+        <div class="readout" aria-live="polite">
+          <div class="place" id="place">Grimsel Pass</div>
+          <div><b id="h">2164</b><small>metres above sea level</small></div>
+          <div class="arrow" aria-hidden="true">→</div>
+          <div class="y"><b id="y">164</b><small>block height (y)</small></div>
+        </div>
+        <div class="profile">
+          <svg id="profile" viewBox="0 0 600 220" preserveAspectRatio="none" aria-hidden="true"></svg>
+        </div>
+        <label for="alt" class="dim" style="display:block;margin-top:14px;font-size:.88rem">Drag to any elevation, or pick a place on the profile</label>
+        <input id="alt" type="range" min="193" max="4634" step="1" value="2164">
+        <div class="scale"><span>193 m · Lago Maggiore</span><span>4634 m · Dufourspitze</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="views" aria-label="Screenshots">
+    <figure class="wide">
+      <img src="img/alps.webp" width="1800" height="879" loading="lazy" alt="Wide view over a high alpine plateau with small lakes, a meandering stream and snow-dusted slopes under a sunset sky, rendered in Minecraft blocks.">
+      <figcaption>High Alps from above. Lakes, streams and snow patches all come from the data. Sky re-graded.</figcaption>
+    </figure>
+    <div class="wrap pair">
+      <figure>
+        <img src="img/dusk.webp" width="1600" height="859" loading="lazy" alt="Dusk in a village: a stone-lined stream runs between houses and gardens toward a glowing orange horizon.">
+        <figcaption>Village street and stream at dusk. Untouched in-game screenshot.</figcaption>
+      </figure>
+      <div>
+        <h2>Lazy, like a real <em>hike</em>.</h2>
+        <p>Nothing is pre-generated. Step through <code>/swiss</code> and chunks form around you from 1&nbsp;km² data cells fetched on demand. Once generated, they save like any vanilla chunk, so players can build, mine and live there.</p>
+        <p class="dim">Vanilla blocks only, so any client can join. <code>/swiss goto</code> takes you to coordinates or places, and <code>/swiss back</code> returns you to where you were.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="how" id="how" aria-labelledby="how-title">
+    <div class="wrap">
+      <h2 id="how-title">From survey data <em>to chunks</em>.</h2>
+      <p>Two parts work together: a Python sidecar that turns the national geodata into compact cells, and a NeoForge chunk generator that reads them.</p>
+      <ol class="line-map">
+        <li><h3>swisstopo</h3><p>Open data from the federal STAC download API: elevation models, the topographic landscape model, orthophotos and 3D buildings.</p></li>
+        <li><h3>swissdata sidecar</h3><p>Python service that downloads tiles for the cells it is asked for and merges them into layers: terrain, surface, water, roads, rail and buildings.</p></li>
+        <li><h3><code>.swd</code> cell</h3><p>One compact file per square kilometre, cached on a volume shared with the server. Evictable once its chunks exist.</p></li>
+        <li><h3>Chunk generator</h3><p>The mod turns cells into blocks: ground material, rock faces, rivers and lakes, roads with bridges and tunnels, rail lines, and furnished buildings.</p></li>
+      </ol>
+      <dl class="sources">
+        <div><dt>swissALTI3D</dt><dd>Terrain elevation</dd></div>
+        <div><dt>swissSURFACE3D</dt><dd>Surface heights for forest canopy</dd></div>
+        <div><dt>SWISSIMAGE</dt><dd>Orthophotos used to colour the ground</dd></div>
+        <div><dt>swissTLM3D</dt><dd>Roads, railways, rivers, lakes, land cover</dd></div>
+        <div><dt>swissBUILDINGS3D · GWR</dt><dd>Building footprints and heights; building register (BFS) for use and floors</dd></div>
+        <div><dt>swissBATHY3D · swissNAMES3D</dt><dd>Lake beds; place names for <code>/swiss goto</code></dd></div>
+      </dl>
+    </div>
+  </section>
+
+  <section class="start" id="start" aria-labelledby="start-title">
+    <div class="wrap">
+      <h2 id="start-title">Walk in <em>yourself</em>.</h2>
+      <p>You need Java 21 and <a href="https://docs.astral.sh/uv/">uv</a>. Start the terrain service, then a dev client. Out of the box the service only builds the Interlaken – Grimsel test area; the README explains how to open up the rest.</p>
+<pre><code><span class="c"># 1 · the terrain service</span>
+<span class="k">git clone</span> https://github.com/Bissbert/swiss-world && cd swiss-world/sidecar
+<span class="k">uv sync</span>
+<span class="k">uv run python -m swissdata.server</span>   <span class="c"># cells land in ../store</span>
+
+<span class="c"># 2 · the mod, in another terminal</span>
+cd swiss-world/mod
+<span class="k">./gradlew runClient</span></code></pre>
+      <a class="btn" href="https://github.com/Bissbert/swiss-world#quick-start">Full setup in the README</a>
+      <div class="status">
+        <h3 style="margin:0;font-stretch:118%">Where it stands</h3>
+        <ul>
+          <li>Work in progress. Tuned along the Interlaken – Brienz – Meiringen – Grimsel Pass test route.</li>
+          <li>Minecraft 1.21.1, NeoForge 21.1. Server-side generation; the client needs nothing extra.</li>
+          <li>Ideas and fixes are welcome: <a href="https://github.com/Bissbert/swiss-world/issues">open an issue</a>.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div>
+      <p><strong>Swiss World</strong> · MIT licensed · <a href="https://github.com/Bissbert/swiss-world">github.com/Bissbert/swiss-world</a></p>
+      <p>Geodata © <a href="https://www.swisstopo.admin.ch/">swisstopo</a>. Building register data © Federal Statistical Office (BFS). Downloaded at runtime under the federal open-data terms; no raw data is redistributed in this project.</p>
+    </div>
+    <div>
+      <p class="legal">Not an official Minecraft product. Not approved by or associated with Mojang or Microsoft.</p>
+      <p>Typeface: Archivo (SIL Open Font License).</p>
+    </div>
+  </div>
+</footer>
+
+<script>
+(() => {
+  // y = h − 2000 up to 3000 m, then 1000 + (h − 3000) · 0.6 (SwissCoords)
+  const toY = h => Math.floor(h <= 3000 ? h - 2000 : 1000 + (h - 3000) * 0.6);
+  const places = [
+    ["Lago Maggiore", 193], ["Lake Brienz", 564], ["Interlaken", 568], ["Meiringen", 595],
+    ["Guttannen", 1057], ["Grimsel Pass", 2164], ["Jungfrau", 4158], ["Dufourspitze", 4634]
+  ];
+  const svg = document.getElementById("profile"), range = document.getElementById("alt");
+  const hEl = document.getElementById("h"), yEl = document.getElementById("y"), placeEl = document.getElementById("place");
+  const W = 600, H = 220, MIN = 193, MAX = 4634;
+  const px = h => 12 + (h - MIN) / (MAX - MIN) * (W - 24);
+  const py = h => H - 14 - (toY(h) + 2032) / 4063 * (H - 40);
+  const ns = "http://www.w3.org/2000/svg";
+  const mk = (n, a) => { const e = document.createElementNS(ns, n); for (const k in a) e.setAttribute(k, a[k]); return e; };
+  // the mapping itself, drawn as a line: kink at 3000 m
+  const pts = [MIN, 3000, MAX].map(h => `${px(h)},${py(h)}`).join(" ");
+  svg.appendChild(mk("polyline", { points: pts, fill: "none", stroke: "#ffc76a", "stroke-width": 3, "vector-effect": "non-scaling-stroke", "stroke-linejoin": "round" }));
+  svg.appendChild(mk("line", { class: "line", x1: px(3000), x2: px(3000), y1: 0, y2: H, "vector-effect": "non-scaling-stroke" }));
+  const marks = places.map(([name, h], i) => {
+    const g = mk("g", { class: "peak", tabindex: -1 });
+    g.appendChild(mk("circle", { cx: px(h), cy: py(h), r: 6, "vector-effect": "non-scaling-stroke" }));
+    g.addEventListener("click", () => set(h));
+    svg.appendChild(g);
+    return { name, h, g };
+  });
+  function set(h, fromRange) {
+    h = Math.round(h);
+    if (!fromRange) range.value = h;
+    hEl.textContent = h;
+    yEl.textContent = String(toY(h)).replace("-", "−");
+    let best = null;
+    for (const m of marks) { const near = Math.abs(m.h - h) <= 15; m.g.classList.toggle("on", near); if (near) best = m; }
+    placeEl.textContent = best ? best.name : " ";
+  }
+  range.addEventListener("input", () => set(+range.value, true));
+  set(2164);
+})();
+</script>
+</body>
+</html>

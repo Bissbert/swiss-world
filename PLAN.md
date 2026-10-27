@@ -1,4 +1,4 @@
-# Swiss World: a 1:1 Switzerland dimension 
+# Swiss World: a 1:1 Switzerland dimension
 
 Status: **PLAN v3, awaiting approval.** No code and no scaffold yet. The server, the pack and the running game have not been touched.
 
@@ -426,7 +426,7 @@ It is purely cosmetic and **not required to join**. Players without it just see 
 
 ## 11. Milestones
 
-All development runs against a **local dev server and client** with the same NeoForge and a copy of the pack. Nothing touches the server until M4, and only with your approval.
+All development runs against a **local dev server and client** with the same NeoForge and a copy of the pack. Nothing touches the production server until M4, and only with your approval.
 
 **Test area:** Interlaken → Brienz → Meiringen → Innertkirchen → Guttannen → Grimsel Pass (measured place coordinates, LV95):
 
@@ -560,7 +560,7 @@ Landmarks (`.nbt`), Macaw's block add-on, richer interiors, Copernicus buffer if
 | Generator update changes output → seam at the exploration frontier | `generatorVersion`, golden-hash CI test, deliberate bumps |
 | World save grows large with heavy exploration | Not in the 20 GB budget by your decision; reported in `/swiss admin status`; can be trimmed with standard tools (e.g. deleting rarely visited regions) |
 | Lootr doesn't convert containers placed by a custom generator | Place Lootr blocks directly (palette fallback to vanilla); verified in M3 |
-| Loot balance clashes with server economy | Data-driven tables, KubeJS override, density config |
+| Loot balance clashes with the server economy | Data-driven tables, KubeJS override, density config |
 | Tall dimension cost (lighting, client memory, BlueMap render) | Measure in M1/M4; BlueMap height limits |
 | Sky/fog wrong at very negative y | Optional client companion (§10a); or shift the mapping up |
 | swissBUILDINGS3D is beta (the schema may change) | Semantics from GWR; pinned versions |
@@ -624,7 +624,7 @@ Each workstream is one Claude agent in its own git worktree and branch. They all
 
 - Change contract files (`docs/*.md`, `swd.py`, `SwdReader`, fixture) only in agreement with the coordinator. Format changes are one commit across both sides.
 - Commit only to your own branch. No push.
-- Never the production server. The pack is read-only.
+- Never touch the production server. The modpack is read-only.
 - Downloads go to the shared `.data-cache/raw/`.
   - Only `sidecar-tlm` downloads the whole-country TLM.
   - Nobody downloads `swissbuildings3d_3_0_20xx` country items (14 GB).

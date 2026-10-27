@@ -25,3 +25,9 @@ __pycache__/
 .venv/
 .pytest_cache/
 mod/run-client-sidecar.log
+
+# local runs and design tooling
+mod/logs/
+store-next/
+.impeccable/
+PRODUCT.md

@@ -3,8 +3,9 @@
 ## Shared paths: always absolute, shared by all worktrees
 
 ```sh
-export SWISSDATA_RAW=<repo>/.data-cache/raw
-export SWISSDATA_STORE=<repo>/store
+REPO=/path/to/swiss-world                          # your main checkout
+export SWISSDATA_RAW=$REPO/.data-cache/raw
+export SWISSDATA_STORE=$REPO/store
 export SWISSWORLD_STORE=$SWISSDATA_STORE          # read by mod runServer (system property swissworld.store)
 ```
 

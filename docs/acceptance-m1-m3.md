@@ -193,7 +193,7 @@ Shader packs: Complementary Reimagined, MakeUp Ultra Fast and Spooklementary.
    Write down whether §10a (custom sky offset) is needed.
 
 ### R2: Pack client without `swissworld` joins (M1 1.3)
-1. Make a Prism instance from `the modpack .mrpack` without adding the swissworld jar.
+1. Make a Prism instance from the server's modpack (`.mrpack`) without adding the swissworld jar.
 2. Join the server, which has swissworld, and get sent into the dimension: `/execute in swissworld:switzerland run tp <name> 0 -1430 0`.
 3. PASS if:
    - you are not kicked for missing registry entries;
