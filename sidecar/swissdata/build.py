@@ -15,6 +15,7 @@ from . import progress, swd
 from .buildings import BuildingsBuilder
 from .canopy import CanopyBuilder
 from .config import Config
+from .gmat import GmatBuilder
 from .landcover import LandcoverBuilder
 from .overlay import OverlayBuilder
 from .water import WaterBuilder
@@ -55,10 +56,11 @@ from .alti import AltiTerrain  # noqa: E402
 from .coverage import BorderMask  # noqa: E402
 
 # Order matters: terrain (core) -> tlm (land cover, water, overlays, bathymetry into TERR) -> zones (reads WKND)
-# -> buildings -> canopy (masks the columns of all of these) -> defaults.
+# -> buildings -> canopy (masks the columns of all of these) -> gmat (reads all of them as priors) -> defaults.
 # Each workstream inserts its builder here; keep DefaultSurface last.
 BUILDERS: list[LayerBuilder] = [AltiTerrain(), BorderMask(), WaterBuilder(), LandcoverBuilder(), ZonesBuilder(),
-                                OverlayBuilder(), BuildingsBuilder(), CanopyBuilder(), DefaultSurface()]
+                                OverlayBuilder(), BuildingsBuilder(), CanopyBuilder(), GmatBuilder(),
+                                DefaultSurface()]
 
 
 def assemble(e_km: int, n_km: int, cfg: Config, pinned: dict[str, object] | None = None,

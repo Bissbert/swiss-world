@@ -18,7 +18,8 @@ import org.slf4j.LoggerFactory;
  * log every {@code swissworld.stats.every} chunks (default 1000, 0 = never). Owner: mod-siteplan.
  */
 public final class GenStats {
-    public static final String CHUNK = "chunk", BIOMES = "biomes", PLAN = "plan", PLAN_WAIT = "plan-wait";
+    public static final String CHUNK = "chunk", BIOMES = "biomes", PLAN = "plan", PLAN_WAIT = "plan-wait",
+            FEATURES = "features", CPU_CHUNK = "cpu-chunk", CPU_BIOMES = "cpu-biomes", CPU_FEATURES = "cpu-features";
     private static final Logger LOG = LoggerFactory.getLogger("swissworld/genstats");
     private static final int BUCKETS = 120;
     private static final long EVERY = Long.getLong("swissworld.stats.every", 1000);
@@ -28,6 +29,13 @@ public final class GenStats {
     private static final AtomicLong CHUNKS = new AtomicLong();
 
     private GenStats() {}
+
+    private static final java.lang.management.ThreadMXBean TMX = java.lang.management.ManagementFactory.getThreadMXBean();
+
+    /** CPU time of the calling thread, ns (the cpu-* timers: wall time is useless on a loaded machine). */
+    public static long cpu() {
+        return TMX.getCurrentThreadCpuTime();
+    }
 
     /** One timer: count, sum and a log histogram of nanoseconds. */
     public static final class Timer {

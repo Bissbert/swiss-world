@@ -13,11 +13,13 @@ import net.minecraft.world.level.block.state.BlockState;
  * Dresses natural ground by zone ({@link GroundTexture}): runs after Loot, before Vegetation. Owner: mod-texture.
  * Touches only columns without water, building or surface overlay ({@link ZoneMap#natural}), and there only a top block
  * that an earlier stage left as plain ground (grass, dirt, coarse dirt, stone, gravel, mud), plus up to
- * {@link GroundTexture#UNDER} plain blocks below it. Decks, buildings, water, bridges and tunnels are never touched.
+ * {@link GroundTexture#UNDER} plain blocks below it (under a soil top, earth down the whole exposed riser). Decks, buildings, water, bridges and tunnels are never touched.
  */
 public final class GroundTextureStage implements GenStage {
     /** How far above and below the TERR top the real top may lie (banks, earthwork cuts and fills). */
     static final int SCAN = 16;
+    /** Deepest earth a soil column's riser gets (blocks below the top). */
+    static final int RISER = 16;
 
     @Override
     public void apply(GenContext ctx) {
@@ -57,14 +59,25 @@ public final class GroundTextureStage implements GenStage {
                             && site.distanceTo(Claim.BUILDING, x, z) <= STATION;
                     top = yard ? GroundTexture.palette(Zone.INDUSTRIAL).pick(Noise.patch(zm.east(x), zm.north(z), GroundTexture.SALT_PATCH))
                             : GroundTexture.top(zm, x, z);
+                    // the trodden verge of a path is no strip along the steps of a cut or a bank beside a way
+                    if (c == Claim.EARTHWORK && top == Blocks.DIRT_PATH) top = Blocks.GRASS_BLOCK;
                 } else {
                     top = GroundTexture.top(zm, x, z);
                 }
                 if (top == null) continue;
                 b.set(x, y, z, top.defaultBlockState());
-                for (int d = 1; d <= GroundTexture.UNDER; d++) {
+                // a soil top keeps earth down its whole riser: as deep as the column stands above its lowest neighbour
+                int depth = GroundTexture.UNDER, exposed = 0;
+                if (GroundTexture.soil(top)) {
+                    int ground = ColumnGrid.y(zm.metres(x, z));
+                    exposed = zm.drop(x, z) + Math.max(0, y - ground);
+                    depth = Math.max(depth, Math.min(RISER, exposed + 1));
+                }
+                for (int d = 1; d <= depth; d++) {
                     if (!plain(b.get(x, y - d, z).getBlock())) break;
-                    b.set(x, y - d, z, GroundTexture.under(top, d));
+                    BlockState face = GroundTexture.face(zm, x, z, top, d, y - d, d < exposed);
+                    b.set(x, y - d, z, face != null ? face : d <= GroundTexture.UNDER ? GroundTexture.under(top, d)
+                            : GroundTexture.riser(zm.east(x), zm.north(z), y - d));
                 }
             }
         }

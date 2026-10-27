@@ -15,7 +15,7 @@ Terrain → Water → Overlay → Building → Furnish → Loot → **GroundText
   (`ZoneMapTest.chunkBordersAgree`).
 - Per column, `ZoneMap` exposes: the packed id, metres, slope (the zones use the slope over 8 m), northness, hollow,
   downhill direction, snow depth in eighths, water distance and kind, path distance, rail distance, `natural`,
-  `cliffAbove`.
+  `cliffAbove`, and for the texture `smoothSlope`, `convexity`, `tpi`, `cliffDist`, `drop`, `gmat`.
 - `GroundTextureStage` only re-textures *natural* columns: no OCLS/OFLG overlay, no building, no water, and a top block
   that is TerrainStage ground or earthwork soil (grass, dirt, coarse dirt, gravel, stone, mud, podzol, sand).
   It never touches decks, bridges, tunnels, buildings or water. The 3 blocks under the top follow it
@@ -96,18 +96,57 @@ Enum ordinals are the ids. They are append-only.
 Not derived yet: INDUSTRIAL (rail yards: they come from overlays, which are never re-textured) and SPORTS
 (OCLS 13 is a PATH claim). Both have palettes, ready for HAB/siteplan data.
 
-## Palettes (`GroundTexture`, top block, weights in %; R = the lithology's rock palette)
+## Ground texture (`GroundTexture`, `Landform`)
 
-Blocks are chosen with `Noise.patch`, CDF-equalised value noise keyed by E/N. It makes patches of a few metres, never
-a per-block dither. Neighbouring list entries are neighbouring noise values, so materials grade into each other.
+Order per column: fringes (rail ballast, path edge, shore) → **material class** → block. The class is one of soil,
+dry grass, bare soil, rock, scree:
+
+1. **GMAT** (orthophoto, optional `u8` layer, see `docs/swd-format.md`) decides for OPEN, ROCK and LOOSE zones:
+   2 green grass → soil, 3 dry grass → DRY_GRASSLAND palette, 4 bare soil → coarse dirt / dirt / rooted dirt by tone,
+   5 light rock / 6 dark rock → rock family at tone 0.55–1 / 0–0.45, 7 scree → scree family. Tone = high nibble / 15.
+   Classes 0, 1, 8, 9, 10 and forest, snow zones fall through to the landform.
+2. **Landform** (no randomness; boundary noise only frays edges, `Landform.over`, ±0.2 on a 0..1 field, 12 m lobes
+   with 5 m fray):
+   - Fields per column in `ZoneMap` (all inside REACH 8 except the cliff probe, which reads terrain by world position):
+     `smoothSlope` (3×3 m blur, central difference over 6 m), `convexity` (smoothed height minus a 6 m ring mean),
+     `tpi` (the 50 m TPI the zones use, with TOPO), `cliffDist` (metres up the fall line, 2 m steps up to 16 m, to a
+     step > 52° rising ≥ 3 m above the column; 127 = none), `drop` (blocks above the lowest 4-neighbour), `gmat`.
+   - convex = clamp((convexity + 0.12·tpi) / 1.2, −1, 1).
+   - Soft zones: rockiness = smoothstep((slope − from) / 20), from = 32 (37 in forest), −3 alpine/nival, −9·convex on
+     ribs, +6·|convex| in hollows, never below 26 → **no rock below 26°**, meadows stay grass to ~38–40°.
+   - Cliff zones: from = 30 − 10·convex⁺ + 8·convex⁻ (≥ 16), width 18, at least 0.62·smoothstep((slope − 26 +
+     10·convex⁺) / 10) — a mapped cliff on gentle smoothed ground (bench, mislabelled step) keeps turf. KARST: max(that, 0.75 + 0.5·convex). SCHIST_SLOPE: 6° later.
+   - Scree: cone below a real cliff (1 − dist/20, weaker on the flat), steep gullies (convex < −0.3 and > 24°; 0.85 at
+     subalpine and above, 0.45 below), thin alpine/nival soil (0.35 / 0.6 from 22°), zone priors (SCREE_CONE 0.9 under
+     a real cliff else 0.3, BOULDER_FIELD 0.8, FOREFIELD 0.8, DEBRIS_CHANNEL 0.75, MORAINE 0.45 + 0.25·convex, FIRN
+     0.6, SCHIST_SLOPE 0.35). Forest × 0.4.
+   - Rock zones whose class is soil get turf by belt (alpine turf at alpine/nival, else alpine pasture).
+3. Tended zones (garden, orchard, vineyard, arable, sports) turn rock/scree into an embankment: coarse dirt 50,
+   cobble 25, gravel 25.
+
+**Families** (ordered dark → light; `tone` picks along the list: 0.6·value(56 m) + 0.3·value(17 m) + 0.1·value(5 m),
+stretched ×1.8, plus ±0.15 patch grain, so a face shades between neighbouring greys in large smooth patches):
+
+| Lithology | Rock | Scree |
+|---|---|---|
+| limestone | stone 15, andesite 30, smooth stone 22, diorite 28, calcite 5 | cobble 25, gravel 50, diorite 25 |
+| crystalline | tuff 15, stone 45, andesite 40 | cobble 35, gravel 40, andesite 25 |
+| schist/flysch | cobbled deepslate 20, deepslate 30, tuff 35, stone 15 | cobbled deepslate 30, tuff 30, gravel 40 |
+| molasse | stone 30, dripstone 25, andesite 33, sandstone 12 | coarse dirt 25, cobble 30, gravel 45 |
+| quaternary | coarse dirt 30, cobble 35, gravel 35 | coarse dirt 35, cobble 15, gravel 50 |
+| unknown | tuff 20, stone 50, andesite 30 | cobble 40, gravel 60 |
+
+No granite anywhere (it read pink). `SnowStage` treats every rock-family block as rock.
+
+**Soil palettes** (`Noise.patch`, patches of a few metres; no rock or gravel in any soil palette any more):
 
 | Zone | Top |
 |---|---|
 | HAY_MEADOW | grass 97, coarse dirt 3 |
-| PASTURE | grass 90, coarse dirt 7, gravel 3 |
-| ALPINE_PASTURE | grass 78, coarse dirt 8, gravel 6, R 8 |
-| ALPINE_TURF | moss 8, grass 44, coarse dirt 8, gravel 16, R 24 |
-| DRY_GRASSLAND | grass 72, coarse dirt 18, R 10 |
+| PASTURE | grass 95, coarse dirt 5 |
+| ALPINE_PASTURE | grass 93, coarse dirt 7 |
+| ALPINE_TURF | moss 8, grass 84, coarse dirt 8 |
+| DRY_GRASSLAND | grass 82, coarse dirt 18 |
 | WET_MEADOW | grass 66, moss 14, mud 20 |
 | RAISED_BOG | grass 22, moss 48, mud 30 |
 | FLOODPLAIN | grass 72, mud 8, coarse dirt 10, gravel 10 |
@@ -121,62 +160,49 @@ a per-block dither. Neighbouring list entries are neighbouring noise values, so 
 | MIXED_BROADLEAF | grass 50, rooted dirt 15, podzol 15, moss 10, coarse dirt 10 |
 | SPRUCE | grass 20, moss 20, podzol 45, coarse dirt 15 |
 | FIR_SPRUCE | grass 25, moss 25, podzol 40, coarse dirt 10 |
-| LARCH_PINE | grass 40, moss 15, podzol 25, coarse dirt 10, R 10 |
-| DRY_PINE | grass 35, podzol 15, coarse dirt 35, R 15 |
+| LARCH_PINE | grass 45, moss 15, podzol 28, coarse dirt 12 |
+| DRY_PINE | grass 40, podzol 18, coarse dirt 42 |
 | RIPARIAN | grass 40, rooted dirt 10, moss 20, mud 20, clay 10 |
 | CHESTNUT | grass 50, rooted dirt 25, coarse dirt 25 |
-| KRUMMHOLZ | grass 40, moss 20, podzol 20, R 20 |
+| KRUMMHOLZ | grass 50, moss 25, podzol 25 |
 | FOREST_EDGE | grass 80, rooted dirt 10, coarse dirt 10 |
 | CLEARING | grass 70, rooted dirt 10, coarse dirt 20 |
-| AVALANCHE_TRACK | grass 55, coarse dirt 15, gravel 15, R 15 |
-| LIMESTONE / CRYSTALLINE_CLIFF | R 100 |
-| SCHIST_SLOPE | R 85, gravel 15 |
-| KARST | grass 12, R 88 |
-| BOULDER_FIELD | moss 5, gravel 20, cobblestone 15, R 60 |
-| SCREE_CONE | gravel 60, cobblestone 15, R 25 |
-| MORAINE | grass 10, coarse dirt 25, gravel 45, R 20 |
-| FOREFIELD | coarse dirt 15, gravel 50, cobblestone 10, R 25 |
-| DEBRIS_CHANNEL | coarse dirt 30, gravel 50, R 20 |
-| RIVERBED_GRAVEL | sand 10, gravel 75, R 15 |
+| AVALANCHE_TRACK | grass 72, coarse dirt 28 |
 | REED_SHORE | grass 40, mud 40, clay 20 |
-| ALPINE_LAKE_SHORE | grass 20, gravel 50, R 30 |
-| SNOW_PATCH (ground under the snow) | as ALPINE_PASTURE |
-| FIRN (ground under the snow) | gravel 40, R 60 |
-| URBAN_SEALED, WATER, glacier zones | not re-textured (SnowStage builds the glacier body) |
+| SNOW_PATCH (under the snow) | grass 90, coarse dirt 10 |
+| RIVERBED_GRAVEL | sand 10, gravel 75, cobble 15 (own bed, no landform) |
+| ALPINE_LAKE_SHORE | grass 20, gravel 55, cobble 25 (own bed, no landform) |
+| URBAN_SEALED, WATER, glacier zones | not re-textured |
 
-**Lithology rock palettes (R):**
+**Fringes on soft zones** (unchanged): rail ballast (1 column 60 %, 2 columns 25 %; gravel 65, andesite 15, coarse
+dirt 20); path edge (45 % / 15 %; dirt path 35, coarse dirt 65); shore (70 % / 35 %; lake < 1,500 m sand 35, gravel 40,
+clay 10, mud 15; lake ≥ 1,500 m gravel 70, cobble 30; river sand 20, gravel 50, coarse dirt 15, mud 15; stream mud 35,
+gravel 35, coarse dirt 30).
 
-| Lithology | Blocks |
-|---|---|
-| unknown | stone 50, andesite 25, cobblestone 13, tuff 12 |
-| limestone | calcite 40, diorite 30, smooth stone 15, stone 15 |
-| crystalline | stone 45, andesite 30, granite 15, cobblestone 10 |
-| schist/flysch | tuff 40, cobbled deepslate 25, deepslate 15, stone 20 |
-| molasse | sandstone 20, granite 30, stone 25, cobblestone 25 |
-| quaternary | gravel 50, coarse dirt 30, cobblestone 20 |
+**Risers:** under a soil top `GroundTextureStage` puts earth down to `drop + 1` blocks (plus any rise of the real top
+over TERR, max 16): the 3 under-blocks as before, then dirt with bands of coarse and rooted dirt (`GroundTexture.riser`).
+Only plain blocks (TerrainStage stone/dirt) are replaced. Rock and scree columns keep rock below.
 
-**Local modifiers on soft (open/forest) zones**, checked before the zone palette:
+**Why the old look was wrong** (screenshot 16.57.31, E 2648.3 N 1160.8, crystalline): the steep rule used the raw 2 m
+slope with per-column patch noise (25 % of ground there turned rock column by column on every terrace step), the scree
+fringe keyed on `cliffAbove` from the same rough 2 m slope (19 % gravel/cobble far from any real cliff), soft palettes
+carried rock and gravel as 8–24 % speckle, and the crystalline palette had 15 % granite (the pink blotches).
 
-- Rail ballast spill:
-  - 1 column from rail/rack bed: 60 % of columns;
-  - 2 columns: 25 %;
-  - blocks gravel 65, andesite 15, coarse dirt 20.
-- Path fringe:
-  - 1 column from a track or footpath: 45 %;
-  - 2 columns: 15 %;
-  - blocks dirt path 35, coarse dirt 65.
-- Shore fringe:
-  - 1 column from water: 70 %;
-  - 2 columns: 35 %;
-  - lake/reservoir/pond below 1,500 m: sand 35, gravel 40, clay 10, mud 15;
-  - lake/reservoir/pond at 1,500 m or more: gravel 70, cobble 30;
-  - river: sand 20, gravel 50, coarse dirt 15, mud 15;
-  - stream: mud 35, gravel 35, coarse dirt 30.
-- Steep ground sheds its soil:
-  - open land turns to rock from 33°, all rock by 45°;
-  - forest starts at 38° and is all rock by 50°;
-  - in gardens, orchards, vineyards and fields the "rock" is an embankment: coarse dirt 40, cobble 30, stone 15, gravel 15.
-- Under a cliff (< 40°): scree, gravel 70, cobble 30.
+### Look-ground pass (Grimsel, 1950 m)
+
+- Contour stripes: `riser()` used 2D noise on `e + n` keyed by y (patches stretched along the contours) and the first
+  `UNDER` blocks were always dirt. Now `Noise.value3` (isotropic 3D noise), and `GroundTexture.face()` gives exposed
+  faces of turf columns (`d < drop`) moss/dirt blobs. The real source of most stripes is the vanilla grass_block side
+  (brown) on every step: on turf steps (`drop >= 1`, open/loose/rock zones, not tended or wet) 70% of the tops are
+  moss_block (green on all sides), in 4 m patches. Lowland slopes show more moss now (Interlaken about 26% moss tops).
+- Steep photo-soil: `Landform.faceRock(slope, belt)` turns GMAT soil/dry-grass/bare columns to the lithology's rock from
+  46 degrees (44 alpine), all rock by 56-58. Exposed faces of soil columns with smoothed slope >= `FACE_ROCK` (45) are
+  rock (ledges stay turf). GMAT DRY_GRASS above montane is ALPINE_PASTURE, not DRY_GRASSLAND.
+- Bare earth: alpine palette coarse dirt 7 -> 3 (pasture), 8 -> 3 (turf), avalanche track 28 -> 18. Tended zones (garden,
+  orchard...) use the rock family where the photo says rock/scree (EMBANKMENT only for landform-only rock). The
+  PATH_EDGE fringe is skipped over photo rock/scree.
+- Open: gmat.py reads shadowed dark vegetation as dark rock at g1 (sidecar, not touched; needs cell rebuild if fixed).
+- No sidecar change: only newly generated chunks change, no cell rebuild or version bump.
 
 ## Snow (`Snow`, `ZoneMap`, `SnowStage`)
 
@@ -278,3 +304,17 @@ a per-block dither. Neighbouring list entries are neighbouring noise values, so 
   - With the layers (second run): Oberaar 64/64 snow tops, biome snowfield 64; glacier ice (24196, 15047) 64 `snow_block`
     tops over `blue_ice` 4 blocks down (47; 17 rock), biome snowfield 64; Grimsel fen grass 40, moss 11, mud 9;
     Aare water 25, grass, gravel 5. No exceptions in `latest.log`.
+
+### mod-texture2 (landform texture)
+
+- ms/chunk, zones + texture/snow, 256×256 m, best of 5 warm rounds (`TexturePerfTest`, `SWISSWORLD_PERF=1`),
+  before → after (different sessions, run-to-run noise about ±0.15): Interlaken 0.73 → 0.42, Innertkirchen
+  0.89 → 0.77, Faulhorn 0.76 → 0.62, Grimsel 0.53 → 0.78. Well inside the +1 ms budget.
+- `TexturePreviewTest` (`SWISSWORLD_PREVIEWS=<dir> SWISSWORLD_PREVIEW_TAG=before|after`): rock tops % of ground /
+  of soft ground, before → after: screenshot spot 64.6/51.6 → 56.8/40.0 (granite 9.1 → 0), Harder Kulm 14.5/11.2 →
+  8.1/4.6, Innertkirchen flank 7.1/4.1 → 5.6/2.4, Faulhorn 48.2/25.6 → 32.1/10.6, Grimsel 54.1/22.1 → 30.4/9.7,
+  Oberaar 19.6 → 18.2. Lone rock tops in soil below 25°: ≤ 27 per 65,000 columns.
+- At the screenshot spot the mapped cliff zones really are steep: of 45,900 cliff columns 92 % sit at 40–70° smoothed
+  slope, so the remaining grey there is legitimate face; 71 % of SCREE_CONE columns had no real cliff above (prior
+  now 0.3). Stone in soil step faces: 0.
+- Previews: `.data-cache/previews/texture2/<area>-{before,after}-{top,oblique}.png`.

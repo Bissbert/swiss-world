@@ -123,6 +123,12 @@ public final class CellGround implements Ground {
     }
 
     @Override
+    public int gmat(int x, int z) {
+        SwdCell c = cell(x, z);
+        return c == null ? 0 : c.gmat(dx(x), dz(z));
+    }
+
+    @Override
     public int topo(int x, int z) {
         SwdCell c = cell(x, z);
         return c == null || !c.hasTopo() ? -1 : c.topo(dx(x), dz(z));

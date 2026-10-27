@@ -30,7 +30,7 @@ import rasterio
 
 from . import stac, swd
 from .config import Config
-from .fetch import fetch
+from .fetch import fetch, prefetch
 from .manifest import Pins
 
 log = logging.getLogger(__name__)
@@ -98,6 +98,7 @@ class TileSource:
 
     def __init__(self, cfg: Config, path_for: Callable[[str], Path] | None = None):
         self.cfg = cfg
+        self.downloads = path_for is None
         self._path_for = path_for or (lambda item: fetch(cfg, stac.alti_href(item)))
         self._edges_dir = Path(cfg.scratch) / "alti-edges"
 
@@ -113,6 +114,9 @@ class TileSource:
             with np.load(f) as z:
                 return {k: z[k] for k in "nswe"}
         return self._save_edges(item, read_tile(self._path_for(item)))
+
+    def has_edges(self, item: str) -> bool:
+        return (self._edges_dir / f"{item}.npz").exists()
 
     def release(self, item: str) -> None:
         """Deletes the raw COG of a built tile unless keepRaw (its edges stay cached for neighbours)."""
@@ -191,6 +195,9 @@ class AltiTerrain:
         if own is None:
             raise LookupError(f"no swissALTI3D tile {tile_key(e_km, n_km)}")
 
+        if tiles.downloads:  # not an injected test source
+            prefetch(cfg, [stac.alti_href(own)] + [stac.alti_href(i) for i in neighbour_items.values()
+                                                     if i and not tiles.has_edges(i)])
         own_px = tiles.tile(own)
         edges = {d: (tiles.edges(item) if item else None) for d, item in neighbour_items.items()}
         terr = swd.encode_height(nodes_from_padded(padded_pixels(own_px, edges)))

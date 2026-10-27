@@ -122,14 +122,33 @@ public final class SwissChunkGenerator extends ChunkGenerator {
      * Biomes and the whole {@link #PIPELINE} for one chunk of the tile {@code site} plans; every cell any stage reads
      * is loaded with it. Any thread.
      */
+    /**
+     * The same as {@code chunk.fillBiomesFromNoise}, for biomes that do not depend on y: the lowest section is filled
+     * through the resolver and every other one gets a copy of its container (instead of 64 palette writes each).
+     * {@link DecoCheck} compares the result with the plain fill.
+     */
+    static void fillBiomes(ChunkAccess chunk, net.minecraft.world.level.biome.BiomeResolver resolver,
+                           net.minecraft.world.level.biome.Climate.Sampler sampler) {
+        net.minecraft.world.level.chunk.LevelChunkSection[] sections = chunk.getSections();
+        net.minecraft.world.level.ChunkPos pos = chunk.getPos();
+        int qx = net.minecraft.core.QuartPos.fromBlock(pos.getMinBlockX()), qz = net.minecraft.core.QuartPos.fromBlock(pos.getMinBlockZ());
+        sections[0].fillBiomesFromNoise(resolver, sampler, qx, net.minecraft.core.QuartPos.fromSection(chunk.getMinSection()), qz);
+        net.minecraft.world.level.chunk.PalettedContainerRO<net.minecraft.core.Holder<net.minecraft.world.level.biome.Biome>> first = sections[0].getBiomes();
+        for (int i = 1; i < sections.length; i++) {
+            sections[i].biomes = ((net.minecraft.world.level.chunk.PalettedContainer<net.minecraft.core.Holder<net.minecraft.world.level.biome.Biome>>) first).copy();
+        }
+    }
+
     public void fill(ChunkAccess chunk, SwissCoords coords, SitePlan site, RandomState randomState) {
         long t0 = System.nanoTime();
+        long c0 = GenStats.cpu();
         GenContext ctx = new GenContext(chunk, coords, site::cell, site);
         if (getBiomeSource() instanceof SwissBiomeSource biomes) {
-            chunk.fillBiomesFromNoise(biomes.resolver(ctx), randomState.sampler());
+            fillBiomes(chunk, biomes.resolver(ctx), randomState.sampler());
         }
         long t = System.nanoTime();
         GenStats.record(GenStats.BIOMES, t - t0);
+        GenStats.record(GenStats.CPU_BIOMES, GenStats.cpu() - c0);
         long traced = 0;
         for (int i = 0; i < PIPELINE.size(); i++) {
             GenStage stage = PIPELINE.get(i);
@@ -146,6 +165,7 @@ public final class SwissChunkGenerator extends ChunkGenerator {
             t = now;
         }
         long total = System.nanoTime() - t0 - traced;
+        GenStats.record(GenStats.CPU_CHUNK, GenStats.cpu() - c0);
         SwissRuntime.recordChunk(total);
         GenStats.chunk(total);
     }
@@ -226,5 +246,28 @@ public final class SwissChunkGenerator extends ChunkGenerator {
         SwissCoords c = SwissRuntime.coords();
         info.add("Swiss: E " + c.east(pos.getX()) + " N " + c.north(pos.getZ()) + " h " + Math.round(SwissCoords.toMetres(pos.getY())) + " m");
         info.add("Swiss " + GenStats.compact());
+    }
+
+    /** Run vanilla's own FEATURES step ({@code -Dswissworld.vanillaFeatures=true}), for A/B checks against {@link FastDecoration}. */
+    private static final boolean VANILLA_FEATURES = Boolean.getBoolean("swissworld.vanillaFeatures");
+
+    /**
+     * FEATURES step (ores, snow top layer): not part of {@link #fill}, so timed here ({@code features},
+     * {@code cpu-features}). Vanilla's code with a cheaper biome set, see {@link FastDecoration}.
+     */
+    @Override
+    public void applyBiomeDecoration(net.minecraft.world.level.WorldGenLevel level, ChunkAccess chunk,
+                                     net.minecraft.world.level.StructureManager sm) {
+        long t0 = System.nanoTime(), c0 = GenStats.cpu();
+        if (VANILLA_FEATURES) super.applyBiomeDecoration(level, chunk, sm);
+        else FastDecoration.apply(this, level, chunk, sm);
+        GenStats.record(GenStats.FEATURES, System.nanoTime() - t0);
+        GenStats.record(GenStats.CPU_FEATURES, GenStats.cpu() - c0);
+    }
+
+    /** Vanilla's FEATURES step, whatever {@code -Dswissworld.vanillaFeatures} says (for {@code DecoCheck}). */
+    public void applyBiomeDecorationVanilla(net.minecraft.world.level.WorldGenLevel level, ChunkAccess chunk,
+                                            net.minecraft.world.level.StructureManager sm) {
+        super.applyBiomeDecoration(level, chunk, sm);
     }
 }

@@ -230,6 +230,7 @@ class Bot:
                 self.actionbar = text
             elif pid in (0x2B, 0x47):  # login / respawn: CommonPlayerSpawnInfo
                 self.chunks.clear()
+                self.respawn_t = time.time()
                 if pid == 0x2B:
                     b.take(5)
                     for _ in range(b.varint()):

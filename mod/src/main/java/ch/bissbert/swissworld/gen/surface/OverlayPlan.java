@@ -9,6 +9,8 @@ public final class OverlayPlan {
     private static final int RUN_PROBE = 4;
     /** Columns kept free of piers on each side of a rail under a road bridge. */
     static final int TRACK_CLEARANCE = 2;
+    /** No pier within this many columns of a way on the ground beside the bridge: that way passes under the deck. */
+    static final int WAY_CLEARANCE = 3;
 
     private OverlayPlan() {}
 
@@ -74,6 +76,8 @@ public final class OverlayPlan {
      */
     public static boolean railing(ColumnGrid g, int x, int z) {
         if (!bridge(g, x, z)) return false;
+        // a rail bridge has no parapet: the wall posts of its short spans read as battlements (playtest 15.00.54)
+        if (g.overlay(x, z) == RAIL_BED || g.overlay(x, z) == RACK_BED) return false;
         return side(g, x, z, 1, 0) || side(g, x, z, -1, 0) || side(g, x, z, 0, 1) || side(g, x, z, 0, -1);
     }
 
@@ -94,13 +98,19 @@ public final class OverlayPlan {
     /**
      * A bridge column on a pier line: every {@link #PIER_SPACING} m along the bridge, across its full width. The
      * bridge runs along whichever axis has more bridge columns nearby. No pier within {@link #TRACK_CLEARANCE} of a
-     * rail under the bridge.
+     * rail under the bridge, nor within {@link #WAY_CLEARANCE} of a way that is no bridge (the sidecar burns a bridge
+     * over the way under it, so the pier row would stand across that road as a wall with a gap in it).
      */
     public static boolean pier(ColumnGrid g, int x, int z) {
         if (!bridge(g, x, z)) return false;
         for (int i = -TRACK_CLEARANCE; i <= TRACK_CLEARANCE; i++) {
             for (int j = -TRACK_CLEARANCE; j <= TRACK_CLEARANCE; j++) {
                 if (railUnderBridge(g, x + i, z + j)) return false;
+            }
+        }
+        for (int i = -WAY_CLEARANCE; i <= WAY_CLEARANCE; i++) {
+            for (int j = -WAY_CLEARANCE; j <= WAY_CLEARANCE; j++) {
+                if (g.present(x + i, z + j) && g.overlay(x + i, z + j) != 0 && !g.flag(x + i, z + j, ColumnGrid.BRIDGE)) return false;
             }
         }
         int alongX = 0, alongZ = 0;

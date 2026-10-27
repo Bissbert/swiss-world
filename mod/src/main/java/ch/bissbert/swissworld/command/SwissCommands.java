@@ -134,6 +134,15 @@ public final class SwissCommands {
                         .then(Commands.literal("status").executes(c -> status(c.getSource())))
                         .then(Commands.literal("stats").executes(c -> SiteCommands.stats(c.getSource()))
                                 .then(Commands.literal("reset").executes(c -> SiteCommands.resetStats(c.getSource()))))
+                        .then(Commands.literal("decocheck")
+                                .then(Commands.argument("a", DoubleArgumentType.doubleArg())
+                                        .then(Commands.argument("b", DoubleArgumentType.doubleArg())
+                                                .executes(c -> ch.bissbert.swissworld.gen.DecoCheck.run(c.getSource(),
+                                                        DoubleArgumentType.getDouble(c, "a"), DoubleArgumentType.getDouble(c, "b"), 2))
+                                                .then(Commands.argument("chunks", IntegerArgumentType.integer(1, 6))
+                                                        .executes(c -> ch.bissbert.swissworld.gen.DecoCheck.run(c.getSource(),
+                                                                DoubleArgumentType.getDouble(c, "a"), DoubleArgumentType.getDouble(c, "b"),
+                                                                IntegerArgumentType.getInteger(c, "chunks")))))))
                         .then(Commands.literal("who").then(Commands.argument("pos", BlockPosArgument.blockPos())
                                 .executes(c -> SiteCommands.who(c.getSource(), BlockPosArgument.getBlockPos(c, "pos")))))
                         .then(Commands.literal("light").executes(c -> light(c.getSource()))
@@ -288,6 +297,7 @@ public final class SwissCommands {
      * started from. Progress shows on the action bar.
      */
     public static void tick(MinecraftServer server) {
+        ch.bissbert.swissworld.compat.DistantHorizonsPause.set(!PENDING.isEmpty());
         if (PENDING.isEmpty()) return;
         ServerLevel swiss = server.getLevel(SwissRegistries.SWITZERLAND);
         int now = server.getTickCount();
@@ -425,6 +435,7 @@ public final class SwissCommands {
     /** Server stopping: drop pending entries (their tickets go with the level). */
     public static void clear() {
         PENDING.clear();
+        ch.bissbert.swissworld.compat.DistantHorizonsPause.set(false);
     }
 
     private static int back(ServerPlayer p) {

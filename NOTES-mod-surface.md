@@ -42,7 +42,8 @@ Milestone 1: WaterStage, OverlayStage, VegetationStage in `mod/src/main/java/ch/
   | 13 | grass |
 
 - Kerbs: a smooth stone slab on road classes 1–4 where bit3 is set.
-- Dams: bit4 fills the body with light grey concrete from the bed up to the deck.
+- Dams: bit4 fills the body with light grey concrete from the ground block (not above it: the shore's grass/sand rim showed at the foot) up to the deck. A stone-brick wall parapet runs along every crest column that has open air (overlay 0) beside it. The TLM footprint is the whole dam, so the crest is as wide as the polygon (Seeuferegg ~40 m); no sloped downstream face yet.
+- Car park polygons (OCLS 14) under a building are dropped in `ColumnGrid.sample` (`roofed`): they are the building's deck/hall, and paving them cut slab rings into the hillside under the Grimsel Hospiz garage and floated its roof. Mod-side only, no cell rebuild.
 - **Bridges (bit0):**
   - A stone brick beam under the deck.
   - Railings: a stone brick wall on a bridge column that has a neighbour with no overlay, but only where the deck goes on behind it (2 columns, or 1 on the east/south side) and alongside it. So decks 3+ wide get railings on both sides, 2-wide decks on the east/south side only, 1-wide decks and the stepped edges of diagonal decks none: in the real cells, narrow and diagonal footbridges were otherwise walled shut. The wall sides are set explicitly, so they look right without block updates. The bridge ends stay open.
@@ -170,3 +171,14 @@ Cells copied read-only from the shared store with their manifest entries (2632_1
 - No floating tree fragments inside any area (those at the dump edge have their trunk outside the cut).
 - Spruce forest from above: about a third of the columns are open to the sky; podzol, ferns and moss under the crowns.
 - After the first renders the birch crowns were too thin (bare trunks with tufts), so they got larger leaf clusters and more attractors; park leaves 1,677 → 2,245.
+
+## Underpass look-fix (branch look-underpass, playtest 15.00.54 Interlaken)
+- Rail-bed/rack-bed bridge columns get no stone-brick-wall railing (read as castle crenellations); piers are skipped
+  within `OverlayPlan.WAY_CLEARANCE` (3) of any non-bridge overlay column (a pier row stood across a road passing under).
+- Cuts deeper than `TransportPlan.RETAIN_CUT` (4) beside a way start with a `RETAIN_WALL` (3) high stone-brick wall at
+  the shoulder (`wallBase`), the 1:1 slope continues from its top: no long soil staircase.
+- `GroundTextureStage`: EARTHWORK columns never get DIRT_PATH from the PATH_EDGE palette (these were the yellow strips on
+  cut step tops); grass instead.
+- Not fixed: the SWD format cannot encode a road under a rail bridge (sidecar burns the rail bridge over the road).
+  Needs a contract change (e.g. road class under a bridge+rail flag); the exact screenshot spot was not pinned.
+- No sidecar or SWD change: no cell rebuild needed. Generated terrain changes only (block output of the mod).

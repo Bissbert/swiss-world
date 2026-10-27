@@ -33,6 +33,14 @@ public final class ZoneMap {
     private final byte[] snow = new byte[256], waterDist = new byte[256], waterKind = new byte[256], pathDist = new byte[256],
             railDist = new byte[256], downhill = new byte[256];
     private final boolean[] natural = new boolean[256], cliffAbove = new boolean[256];
+    // landform fields for the texture, on the smoothed terrain (see texture())
+    private final float[] smoothSlope = new float[256], convexity = new float[256], tpi = new float[256];
+    private final byte[] cliffDist = new byte[256], drop = new byte[256], gmat = new byte[256];
+    /** {@link #cliffDist} when no cliff stands above within {@link #CLIFF_PROBE}. */
+    public static final int NO_CLIFF = 127;
+    /** How far upslope (metres) the texture looks for a cliff, and how steep a 2 m step must be to count as one. */
+    static final int CLIFF_PROBE = 16;
+    private static final double CLIFF_RISE = 2 * Math.tan(Math.toRadians(52));
     private final long[] east = new long[16], north = new long[16];
 
     private ZoneMap(int x0, int z0) {
@@ -110,6 +118,42 @@ public final class ZoneMap {
         return railDist[idx(x - x0, z - z0)];
     }
 
+    /** Slope in degrees of the terrain smoothed over 3 x 3 m, measured across 6 m: the scale of a landform, not a step. */
+    public double smoothSlope(int x, int z) {
+        return smoothSlope[idx(x - x0, z - z0)];
+    }
+
+    /**
+     * Metres the smoothed terrain stands above the mean of a ring 6 m around (positive on crests, ribs and convex
+     * breaks of slope, negative in gullies and hollows; 0 on any plane, however steep).
+     */
+    public double convexity(int x, int z) {
+        return convexity[idx(x - x0, z - z0)];
+    }
+
+    /** Topographic position over ~50 m in metres (TOPO's class where the cell has it), positive on ridges. */
+    public double tpi(int x, int z) {
+        return tpi[idx(x - x0, z - z0)];
+    }
+
+    /**
+     * Metres upslope to the foot of a cliff (a 2 m step steeper than 52 degrees rising at least 3 m above the column),
+     * looking up to {@link #CLIFF_PROBE} m along the smoothed fall line; {@link #NO_CLIFF} if none.
+     */
+    public int cliffDist(int x, int z) {
+        return cliffDist[idx(x - x0, z - z0)];
+    }
+
+    /** Blocks the column's terrain top stands above its lowest 4-neighbour: the riser its side shows. */
+    public int drop(int x, int z) {
+        return drop[idx(x - x0, z - z0)];
+    }
+
+    /** Raw GMAT byte of the column (orthophoto class bits 0-3, tone bits 4-7), 0 unknown. */
+    public int gmat(int x, int z) {
+        return gmat[idx(x - x0, z - z0)] & 0xFF;
+    }
+
     public boolean cliffAbove(int x, int z) {
         return cliffAbove[idx(x - x0, z - z0)];
     }
@@ -148,7 +192,7 @@ public final class ZoneMap {
     private void build(Ground g) {
         int n = W * W;
         boolean[] present = new boolean[n], wet = new boolean[n], forest = new boolean[n], glacier = new boolean[n];
-        boolean[] path = new boolean[n], rail = new boolean[n];
+        boolean[] path = new boolean[n], rail = new boolean[n], noH = new boolean[n];
         int[] kind = new int[n];
         double[] h = new double[n];
         int wx0 = x0 - REACH, wz0 = z0 - REACH;
@@ -158,6 +202,7 @@ public final class ZoneMap {
                 present[k] = g.present(x, z);
                 double m = g.metres(x, z);
                 h[k] = Double.isNaN(m) ? 193 : m;
+                noH[k] = Double.isNaN(m);
                 if (!present[k]) continue;
                 int surf = g.surf(x, z);
                 wet[k] = g.wet(x, z);
@@ -179,6 +224,18 @@ public final class ZoneMap {
             }
         }
         double[] tpi = tpiLattice(g);
+        // the terrain smoothed over 3 x 3 m (all but the outer ring of the window): the texture's landform fields
+        double[] hs = new double[n];
+        for (int j = 1; j < W - 1; j++) {
+            for (int i = 1; i < W - 1; i++) {
+                double sum = 0;
+                for (int dj = -1; dj <= 1; dj++) {
+                    int r = w(i, j + dj);
+                    sum += h[r - 1] + h[r] + h[r + 1];
+                }
+                hs[w(i, j)] = sum / 9;
+            }
+        }
         boolean anySteep = false;
         for (int q = 0; q < n; q++) anySteep |= present[q] && slopeW[q] >= 45;
         // highest steep (45 degrees+) column within 6 columns (a 13 x 13 square), separable: rows, then columns
@@ -257,6 +314,7 @@ public final class ZoneMap {
                 pathDist[c] = (byte) Math.min(DIST_CAP, dist(pd2));
                 railDist[c] = (byte) Math.min(DIST_CAP, dist(rd2));
                 cliffAbove[c] = cliff;
+                texture(g, h, hs, noH, i, j, x, z, c);
 
                 int surf = g.surf(x, z);
                 // sidecar-zones layers where the cell has them (0 / -1 = unknown), else the fallbacks
@@ -318,12 +376,55 @@ public final class ZoneMap {
                 in.snow = eighths;
                 in.flow = topo >= 0 ? topo >>> 4 & 3 : -1;
                 in.habitat = g.habitat(x, z);
+                this.tpi[c] = (float) t;
                 Zone zone = GroundZones.zone(in);
                 if (lith == Lith.UNKNOWN) lith = Lith.ofCliff(zone);
                 snow[c] = (byte) eighths;
                 id[c] = ZoneId.pack(region, belt, zone, lith);
             }
         }
+    }
+
+    /**
+     * The texture's landform fields of one chunk column (window index i, j), all from the terrain within {@link #REACH}
+     * (plus the cliff probe, which reads the terrain by world position): smoothed slope across 6 m, convexity against a
+     * 6 m ring, distance below a cliff, riser height, and the orthophoto class.
+     */
+    private void texture(Ground g, double[] h, double[] hs, boolean[] noH, int i, int j, int x, int z, int c) {
+        int k = w(i, j);
+        double sx = (hs[w(i + 3, j)] - hs[w(i - 3, j)]) / 6, sz = (hs[w(i, j + 3)] - hs[w(i, j - 3)]) / 6;
+        double grad = Math.hypot(sx, sz);
+        smoothSlope[c] = (float) Math.toDegrees(Math.atan(grad));
+        double ring = (hs[w(i + 6, j)] + hs[w(i - 6, j)] + hs[w(i, j + 6)] + hs[w(i, j - 6)] + hs[w(i + 4, j + 4)]
+                + hs[w(i - 4, j + 4)] + hs[w(i + 4, j - 4)] + hs[w(i - 4, j - 4)]) / 8;
+        convexity[c] = (float) (hs[k] - ring);
+        int y = ColumnGrid.y(h[k]);
+        int low = Math.min(Math.min(ColumnGrid.y(h[w(i + 1, j)]), ColumnGrid.y(h[w(i - 1, j)])),
+                Math.min(ColumnGrid.y(h[w(i, j + 1)]), ColumnGrid.y(h[w(i, j - 1)])));
+        drop[c] = (byte) Math.max(0, Math.min(127, y - low));
+        gmat[c] = (byte) g.gmat(x, z);
+        // up the fall line in 2 m steps: the first step steeper than 52 degrees that rises 3 m above us is a cliff
+        int dist = NO_CLIFF;
+        if (grad > 0.05 && !noH[k]) {
+            double ux = sx / grad, uz = sz / grad, prev = h[k];
+            for (int d = 2; d <= CLIFF_PROBE; d += 2) {
+                double hp = height(g, h, noH, x + (int) Math.round(ux * d), z + (int) Math.round(uz * d));
+                if (Double.isNaN(hp)) break;
+                if (hp - prev >= CLIFF_RISE && hp - h[k] >= 3) {
+                    dist = d - 2;
+                    break;
+                }
+                prev = hp;
+            }
+        }
+        cliffDist[c] = (byte) dist;
+    }
+
+    /** Terrain metres at a world column: from the window where it reaches, else from the cells (NaN without data). */
+    private double height(Ground g, double[] h, boolean[] noH, int x, int z) {
+        int i = x - (x0 - REACH), j = z - (z0 - REACH);
+        if (i >= 0 && i < W && j >= 0 && j < W) return noH[w(i, j)] ? Double.NaN : h[w(i, j)];
+        return g.metres(x, z);
     }
 
     /**

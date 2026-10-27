@@ -36,9 +36,13 @@ public record Palette(Block wall, Block base, Block foundation, Block floor, Blo
                     Blocks.POLISHED_ANDESITE_STAIRS, Blocks.SMOOTH_STONE_SLAB, Blocks.GRAY_CONCRETE,
                     Blocks.GLASS_PANE, Blocks.BIRCH_DOOR, Blocks.WHITE_CONCRETE, Blocks.POLISHED_ANDESITE_STAIRS,
                     Blocks.BIRCH_STAIRS, Blocks.BIRCH_FENCE, Blocks.SMOOTH_STONE_SLAB, bed);
+            // the roof differs from the walls (a plank hut with plank roof reads as a plain box): stone slabs over dark
+            // walls, dark oak over spruce
             case BARN -> new Palette(v == 0 ? Blocks.DARK_OAK_PLANKS : Blocks.SPRUCE_PLANKS,
-                    Blocks.COBBLESTONE, Blocks.COBBLESTONE, Blocks.COARSE_DIRT, Blocks.SPRUCE_STAIRS,
-                    Blocks.SPRUCE_SLAB, Blocks.SPRUCE_PLANKS, Blocks.SPRUCE_FENCE, Blocks.SPRUCE_DOOR,
+                    Blocks.COBBLESTONE, Blocks.COBBLESTONE, Blocks.COARSE_DIRT,
+                    v == 0 ? Blocks.COBBLESTONE_STAIRS : Blocks.DARK_OAK_STAIRS,
+                    v == 0 ? Blocks.COBBLESTONE_SLAB : Blocks.DARK_OAK_SLAB,
+                    v == 0 ? Blocks.COBBLESTONE : Blocks.DARK_OAK_PLANKS, Blocks.SPRUCE_FENCE, Blocks.SPRUCE_DOOR,
                     Blocks.SPRUCE_PLANKS, Blocks.COBBLESTONE_STAIRS, Blocks.SPRUCE_STAIRS, Blocks.SPRUCE_FENCE,
                     Blocks.SPRUCE_SLAB, bed);
             case CHURCH -> new Palette(v == 0 ? Blocks.CALCITE : Blocks.WHITE_CONCRETE, Blocks.STONE_BRICKS,

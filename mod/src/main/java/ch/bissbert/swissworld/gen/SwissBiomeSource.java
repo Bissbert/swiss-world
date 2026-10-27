@@ -93,15 +93,27 @@ public final class SwissBiomeSource extends BiomeSource {
      * biome would freeze the sources there, and a frozen river source drains the water it feeds.
      */
     public BiomeResolver resolver(GenContext ctx) {
+        // Biomes are y-independent, so a chunk has 16 distinct answers (4x4 quarts) but the fill asks once per section
+        // and quart (254 x 64 calls). One resolver serves one chunk on one thread: a plain array memo, indexed by the
+        // quart's column in the chunk.
+        @SuppressWarnings("unchecked")
+        Holder<Biome>[] memo = new Holder[16];
         return (x, y, z, sampler) -> {
-            int bx = QuartPos.toBlock(x) + 2, bz = QuartPos.toBlock(z) + 2;
-            SwdCell cell = ctx.cellAt(bx, bz);
-            if (cell == null) return holder(SwissBiome.OCEAN);
-            ZoneMap zm = GroundTextureStage.zones(ctx);
-            int qx = QuartPos.toBlock(x) - zm.x0, qz = QuartPos.toBlock(z) - zm.z0;
-            if (qx >= 0 && qz >= 0 && qx < 16 && qz < 16 && snowfield(zm, qx, qz)) return holder(SwissBiome.SNOWFIELD);
-            return holder(SwissBiome.classify(cell, SwissCoords.dx(ctx.coords.east(bx)), SwissCoords.dz(ctx.coords.north(bz))));
+            int i = (z & 3) * 4 + (x & 3);
+            Holder<Biome> hit = memo[i];
+            if (hit == null) memo[i] = hit = resolve(ctx, x, z);
+            return hit;
         };
+    }
+
+    private Holder<Biome> resolve(GenContext ctx, int x, int z) {
+        int bx = QuartPos.toBlock(x) + 2, bz = QuartPos.toBlock(z) + 2;
+        SwdCell cell = ctx.cellAt(bx, bz);
+        if (cell == null) return holder(SwissBiome.OCEAN);
+        ZoneMap zm = GroundTextureStage.zones(ctx);
+        int qx = QuartPos.toBlock(x) - zm.x0, qz = QuartPos.toBlock(z) - zm.z0;
+        if (qx >= 0 && qz >= 0 && qx < 16 && qz < 16 && snowfield(zm, qx, qz)) return holder(SwissBiome.SNOWFIELD);
+        return holder(SwissBiome.classify(cell, SwissCoords.dx(ctx.coords.east(bx)), SwissCoords.dz(ctx.coords.north(bz))));
     }
 
     /** At least half the quart's columns snowy, none wet. Local quart corner (qx, qz). */
