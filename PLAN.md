@@ -521,6 +521,29 @@ All development runs against a **local dev server and client** with the same Neo
 - The cache stays under its cap with eviction working.
 - Then, **with your approval:** deploy the sidecar container and mod to the server and set the origin.
 
+### Parked for after the look is final (user, 2026-10-22): baked ground layer and full pre-generation
+
+User: "let's keep baking and pregen in mind, note it down but get the areas looking great first". Do these only
+once the ground look (mod-texture2 + GMAT) is accepted, otherwise every look tweak means rebuilding all cells.
+
+1. **Baked ground layer.** The sidecar decides the ground material class per 1 m column once (from GMAT, slope,
+   convexity/TPI, distance below cliffs, LITH) and stores it (~50 KB/cell) instead of the mod recomputing it per
+   chunk in every world. Preferred variant: bake only the material *class*; the mod still picks block and tone, so
+   visual tuning stays a mod update. Expected: roughly half of the ~140 ms CPU per site plan
+   (`.data-cache/briefs/gen-speed-report.md`, #4), smaller cells once inputs only the ground model uses are
+   dropped (GMAT alone is 125.7 KB/cell). Needs a `swd-format.md` change and a plan/format version key.
+2. **Full pre-generation of all of CH** (~43,000 cells) on the server, in the final (baked) format, so nothing is
+   built while players wait (cold cells are the biggest arrival cost) and Distant Horizons can show all of CH.
+   Estimates (`.data-cache/briefs/sidecar-speed-report.md`): ~32 GB of cells in today's format (over the §7 cell
+   budget of 12 GB, so revisit the budget or rely on the baked format being smaller), ~650 GB downloaded in total,
+   ~12–20 h on a 6-core server (4–6 `rebuild.py` workers at low priority,
+   leaving room for the live Minecraft server). Network speed not measured.
+   **User constraint:** at most 20 GB of raw downloads on disk at a time, old data removed once used. Needs: build
+   in spatial strips, delete raw tiles/sheets once every cell using them is built, hard raw-cache cap that blocks
+   downloads until space is freed (national datasets ~7 GB stay resident). Today only surface (DSM) raw is deleted
+   after use; ALTI, ortho and sheets are kept forever.
+   Installing/running anything on the server needs the user's explicit go-ahead.
+
 ### M5 (optional)
 
 Landmarks (`.nbt`), Macaw's block add-on, richer interiors, Copernicus buffer if not done in M4.
