@@ -32,7 +32,7 @@ MIN_Y = -2032
 HEIGHT = 4064
 DIM = "swissworld:switzerland"
 RAW = Path(os.environ.get("SWISSDATA_RAW",
-                          "<repo>/.data-cache/raw"))
+                          Path(__file__).resolve().parents[2] / ".data-cache" / "raw"))
 
 
 # ---------------------------------------------------------------- coordinates

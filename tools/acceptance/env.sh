@@ -10,7 +10,7 @@ ACC_REPO="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/../.." && pwd)"
 : "${ACC_LEVEL:=acc}"
 # Private store (a copy of the shared store-next; never the shared store itself)
 : "${ACC_STORE:?set ACC_STORE to a private copy of the store (cp -R <repo>/store-next <dir>)}"
-: "${SWISSDATA_RAW:=<repo>/.data-cache/raw}"
+: "${SWISSDATA_RAW:=$ACC_REPO/.data-cache/raw}"
 : "${ACC_SCRATCH:=$ACC_STORE/../scratch}"
 ACC_RUN="$ACC_REPO/mod/run"
 ACC_DIM="$ACC_RUN/$ACC_LEVEL/dimensions/swissworld/switzerland"
